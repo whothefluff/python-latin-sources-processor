@@ -45,12 +45,29 @@ def process_verse(xml_file, output_dir):
     work_contents_data = []
     work_content_subdivisions_data = []
     work_notes_data = []
+    authors_data = []
+    author_abbreviations_data = []
+    work_abbreviations_data = []
+    authors_and_works_data = []
 
     work_id = generate_uuid()
     title_element = root.find('.//tei:title[@xml:lang="lat"]', namespaces)
     work_name = title_element.text if title_element is not None else 'Unknown Title'
     works_data.append([work_id, work_name])
     print(f'Work: {work_id}, {work_name}')
+
+    author_element = root.find('.//tei:author', namespaces)
+    author_name = author_element.text if author_element is not None else 'Unknown Author'
+    author_id = generate_uuid()
+    authors_data.append([author_id, author_name, '', None])
+    print(f'Author: {author_id}, {author_name}')
+
+    # Adding standard abbreviation for the author
+    author_abbreviation = 'Phdr.'
+    author_abbreviations_data.append([author_id, 1, author_abbreviation])
+
+    # Linking author to work
+    authors_and_works_data.append([author_id, work_id])
 
     fragment_index = 1  # Global index counter for fragments
 
@@ -119,6 +136,10 @@ def process_verse(xml_file, output_dir):
                                                 columns=['workId', 'typ', 'seq', 'name', 'node', 'parent', 'fromIndex',
                                                          'toIndex'])
     work_notes_df = pd.DataFrame(work_notes_data, columns=['workId', 'id', 'fromIndex', 'toIndex', 'val'])
+    authors_df = pd.DataFrame(authors_data, columns=['id', 'name', 'about', 'image'])
+    author_abbreviations_df = pd.DataFrame(author_abbreviations_data, columns=['authorId', 'id', 'val'])
+    work_abbreviations_df = pd.DataFrame(work_abbreviations_data, columns=['workId', 'id', 'val'])
+    authors_and_works_df = pd.DataFrame(authors_and_works_data, columns=['authorId', 'workId'])
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -126,6 +147,10 @@ def process_verse(xml_file, output_dir):
     work_contents_df.to_csv(os.path.join(output_dir, 'work_contents.csv'), index=False)
     work_content_subdivisions_df.to_csv(os.path.join(output_dir, 'work_content_subdivisions.csv'), index=False)
     work_notes_df.to_csv(os.path.join(output_dir, 'work_notes.csv'), index=False)
+    authors_df.to_csv(os.path.join(output_dir, 'authors.csv'), index=False)
+    author_abbreviations_df.to_csv(os.path.join(output_dir, 'author_abbreviations.csv'), index=False)
+    work_abbreviations_df.to_csv(os.path.join(output_dir, 'work_abbreviations.csv'), index=False)
+    authors_and_works_df.to_csv(os.path.join(output_dir, 'authors_and_works.csv'), index=False)
 
 
 if __name__ == "__main__":
