@@ -4,6 +4,7 @@ import os
 import uuid
 import tkinter as tk
 from tkinter import filedialog
+import re
 
 
 def choose_file():
@@ -26,8 +27,10 @@ def is_numeric(s):
 
 
 def split_text_into_segments(text):
-    # Split text by words and punctuation
-    import re
+    if text is None:
+        return []
+    # Normalize spaces and split text by words and punctuation
+    text = text.strip()
     segments = re.findall(r"\w+|[^\w\s]", text, re.UNICODE)
     return segments
 
@@ -79,7 +82,8 @@ def process_verse(xml_file, output_dir):
             parent_node = book_node
 
             poem_lines = poem.findall('tei:l', namespaces)
-            to_index = fragment_index + sum(len(split_text_into_segments(line.text)) for line in poem_lines) - 1
+            to_index = fragment_index + sum(
+                len(split_text_into_segments(line.text)) for line in poem_lines if line.text) - 1
 
             work_content_subdivisions_data.append(
                 [work_id, typ, seq, poem_name, poem_node, parent_node, fragment_index, to_index])
@@ -89,12 +93,13 @@ def process_verse(xml_file, output_dir):
             for line in poem_lines:
                 verse_node = generate_uuid()
                 verse_seq = line.get('n')
+                line_text = line.text.strip() if line.text else ''
 
                 work_content_subdivisions_data.append(
-                    [work_id, 'verse', verse_seq, line.text, verse_node, poem_node, fragment_index,
-                     fragment_index + len(split_text_into_segments(line.text)) - 1])
+                    [work_id, 'verse', verse_seq, line_text, verse_node, poem_node, fragment_index,
+                     fragment_index + len(split_text_into_segments(line_text)) - 1])
 
-                for segment in split_text_into_segments(line.text):
+                for segment in split_text_into_segments(line_text):
                     work_contents_data.append([work_id, fragment_index, segment, 'sourceReference'])
                     print(f'Segment: {fragment_index}, {segment}')
                     fragment_index += 1
