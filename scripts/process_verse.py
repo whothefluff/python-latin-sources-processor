@@ -36,7 +36,6 @@ def split_text_into_segments(text):
 
 
 def process_verse(xml_file, output_dir):
-
     # Parse the XML file as a string
     with open(xml_file, 'r') as file:
         xml_string = file.read()
@@ -57,6 +56,7 @@ def process_verse(xml_file, output_dir):
     author_abbreviations_data = []
     work_abbreviations_data = []
     authors_and_works_data = []
+    work_content_notes_data = []
 
     work_id = generate_uuid()
     title_element = root.find('.//tei:title[@xml:lang="lat"]', namespaces)
@@ -113,12 +113,19 @@ def process_verse(xml_file, output_dir):
             work_content_subdivisions_data.append(
                 [work_id, typ, seq, poem_name, poem_node, parent_node, fragment_index, to_index])
             print(
-                f'Subdivision: {work_id}, {typ}, {seq}, {poem_name}, {poem_node}, {parent_node}, {fragment_index}, {to_index}')
+                f'Subdivision: {work_id, typ, seq, poem_name, poem_node, parent_node, fragment_index, to_index}')
 
             for line in poem_lines:
                 verse_node = generate_uuid()
-                verse_seq = line.get('n')# Replace the unique strings with <del> and </del> tags
-                line_text = line.text.replace('UNIQUE_STRING_START', '').replace('UNIQUE_STRING_END', '').strip() if line.text else ''
+                verse_seq = line.get('n')  # Replace the unique strings with <del> and </del> tags
+                line_text = line.text.replace('UNIQUE_STRING_START', '').replace('UNIQUE_STRING_END',
+                                                                                 '').strip() if line.text else ''
+
+                # Add to work_content_notes_data if <del> tag was found
+                if 'UNIQUE_STRING_START' in line.text and 'UNIQUE_STRING_END' in line.text:
+                    work_content_notes_data.append([work_id, verse_seq, fragment_index,
+                                                    fragment_index + len(split_text_into_segments(line_text)) - 1,
+                                                    'marked for deletion'])
 
                 work_content_subdivisions_data.append(
                     [work_id, 'verse', verse_seq, line_text, verse_node, poem_node, fragment_index,
@@ -148,6 +155,8 @@ def process_verse(xml_file, output_dir):
     author_abbreviations_df = pd.DataFrame(author_abbreviations_data, columns=['authorId', 'id', 'val'])
     work_abbreviations_df = pd.DataFrame(work_abbreviations_data, columns=['workId', 'id', 'val'])
     authors_and_works_df = pd.DataFrame(authors_and_works_data, columns=['authorId', 'workId'])
+    work_content_notes_df = pd.DataFrame(work_content_notes_data,
+                                         columns=['workId', 'id', 'fromIndex', 'toIndex', 'val'])
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -159,6 +168,7 @@ def process_verse(xml_file, output_dir):
     author_abbreviations_df.to_csv(os.path.join(output_dir, 'author_abbreviations.csv'), index=False)
     work_abbreviations_df.to_csv(os.path.join(output_dir, 'work_abbreviations.csv'), index=False)
     authors_and_works_df.to_csv(os.path.join(output_dir, 'authors_and_works.csv'), index=False)
+    work_content_notes_df.to_csv(os.path.join(output_dir, 'work_content_notes.csv'), index=False)
 
 
 if __name__ == "__main__":
