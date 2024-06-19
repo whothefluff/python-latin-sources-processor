@@ -17,28 +17,43 @@ def generate_uuid():
     return str(uuid.uuid4())
 
 
+def is_numeric(s):
+    try:
+        int(s)
+        return True
+    except ValueError:
+        return False
+
+
 def process_verse(xml_file, output_dir):
     tree = ET.parse(xml_file)
     root = tree.getroot()
 
-    namespaces = {'tei': 'http://www.tei-c.org/ns/1.0'}
+    namespaces = {'tei': 'http://www.tei-c.org/ns/1.0', 'xml': 'http://www.w3.org/XML/1998/namespace'}
 
     works_data = []
     work_contents_data = []
     work_content_subdivisions_data = []
     work_notes_data = []
 
+    work_id = generate_uuid()
+    title_element = root.find('.//tei:title[@xml:lang="lat"]', namespaces)
+    work_name = title_element.text if title_element is not None else 'Unknown Title'
+    works_data.append([work_id, work_name])
+    print(f'Work: {work_id}, {work_name}')
+
     fragment_index = 1  # Global index counter for fragments
 
     for work in root.findall('.//tei:div[@subtype="book"]', namespaces):
-        work_id = generate_uuid()
-        work_name = work.find('tei:head', namespaces).text if work.find('tei:head', namespaces) is not None else None
-        works_data.append([work_id, work_name])
-        print(f'Work: {work_id}, {work_name}')
-
         book_node = generate_uuid()
+        book_name = work.find('tei:head', namespaces).text if work.find('tei:head', namespaces) is not None else None
+        book_seq = work.get('n')
+        if not is_numeric(book_seq):
+            book_seq = 'book'
         work_content_subdivisions_data.append(
-            [work_id, 'book', work.get('n'), work_name, book_node, None, fragment_index, fragment_index])
+            [work_id, 'book', book_seq, book_name, book_node, None, fragment_index, fragment_index])
+
+        type_counters = {}
 
         for poem in work.findall('.//tei:div[@subtype="poem"]', namespaces):
             poem_id = poem.get('n')
@@ -46,16 +61,23 @@ def process_verse(xml_file, output_dir):
                                                                             namespaces) is not None else None
 
             poem_node = generate_uuid()
-            poem_seq = poem_id
+            typ = poem_id if not is_numeric(poem_id) else 'poem'
+
+            if typ not in type_counters:
+                type_counters[typ] = 1
+            else:
+                type_counters[typ] += 1
+
+            seq = type_counters[typ]
             parent_node = book_node
 
             poem_lines = poem.findall('tei:l', namespaces)
             to_index = fragment_index + len(poem_lines) - 1
 
             work_content_subdivisions_data.append(
-                [work_id, 'poem', poem_seq, poem_name, poem_node, parent_node, fragment_index, to_index])
+                [work_id, typ, seq, poem_name, poem_node, parent_node, fragment_index, to_index])
             print(
-                f'Subdivision: {work_id}, poem, {poem_seq}, {poem_name}, {poem_node}, {parent_node}, {fragment_index}, {to_index}')
+                f'Subdivision: {work_id}, {typ}, {seq}, {poem_name}, {poem_node}, {parent_node}, {fragment_index}, {to_index}')
 
             for line in poem_lines:
                 line_number = line.get('n')
