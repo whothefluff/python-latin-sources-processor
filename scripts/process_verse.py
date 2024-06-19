@@ -1,6 +1,7 @@
 import xml.etree.ElementTree as ET
 import pandas as pd
 import os
+import uuid
 import tkinter as tk
 from tkinter import filedialog
 
@@ -12,11 +13,14 @@ def choose_file():
     return file_path
 
 
+def generate_uuid():
+    return str(uuid.uuid4())
+
+
 def process_verse(xml_file, output_dir):
     tree = ET.parse(xml_file)
     root = tree.getroot()
 
-    # Namespaces (if required)
     namespaces = {'tei': 'http://www.tei-c.org/ns/1.0'}
 
     works_data = []
@@ -24,41 +28,50 @@ def process_verse(xml_file, output_dir):
     work_content_subdivisions_data = []
     work_notes_data = []
 
+    fragment_index = 1  # Global index counter for fragments
+
     for work in root.findall('.//tei:div[@subtype="book"]', namespaces):
-        work_id = work.get('n')
+        work_id = generate_uuid()
         work_name = work.find('tei:head', namespaces).text if work.find('tei:head', namespaces) is not None else None
         works_data.append([work_id, work_name])
         print(f'Work: {work_id}, {work_name}')
 
+        book_node = generate_uuid()
+        work_content_subdivisions_data.append(
+            [work_id, 'book', work.get('n'), work_name, book_node, None, fragment_index, fragment_index])
+
         for poem in work.findall('.//tei:div[@subtype="poem"]', namespaces):
-            poem_id = poem.get('n')  # unique ID for the poem
+            poem_id = poem.get('n')
             poem_name = poem.find('tei:head', namespaces).text if poem.find('tei:head',
                                                                             namespaces) is not None else None
 
-            for line in poem.findall('tei:l', namespaces):
+            poem_node = generate_uuid()
+            poem_seq = poem_id
+            parent_node = book_node
+
+            poem_lines = poem.findall('tei:l', namespaces)
+            to_index = fragment_index + len(poem_lines) - 1
+
+            work_content_subdivisions_data.append(
+                [work_id, 'poem', poem_seq, poem_name, poem_node, parent_node, fragment_index, to_index])
+            print(
+                f'Subdivision: {work_id}, poem, {poem_seq}, {poem_name}, {poem_node}, {parent_node}, {fragment_index}, {to_index}')
+
+            for line in poem_lines:
                 line_number = line.get('n')
                 line_text = line.text
-                work_contents_data.append([work_id, line_number, line_text, 'sourceReference'])
+                work_contents_data.append([work_id, fragment_index, line_text, 'sourceReference'])
                 print(f'Line: {line_number}, {line_text}')
-
-            typ = 'poem'  # Example type, adjust as needed
-            seq = poem.get('n')
-            name = poem.find('tei:head', namespaces).text if poem.find('tei:head', namespaces) is not None else None
-            node = poem.get('n')
-            parent = None  # Set parent as needed
-            from_index = 1  # Example index, adjust as needed
-            to_index = len(poem.findall('tei:l', namespaces))
-
-            work_content_subdivisions_data.append([work_id, typ, seq, name, node, parent, from_index, to_index])
-            print(f'Subdivision: {work_id}, {typ}, {seq}, {name}, {node}, {from_index}, {to_index}')
+                fragment_index += 1
 
         for note in work.findall('.//tei:note', namespaces):
             note_id = note.get('n')
-            from_index = 1
-            to_index = len(note.findall('.//tei:p', namespaces))
+            from_index = fragment_index
             note_text = ''.join(note.itertext())
+            to_index = fragment_index + len(note_text.split()) - 1
             work_notes_data.append([work_id, note_id, from_index, to_index, note_text])
             print(f'Note: {note_id}, {from_index}, {to_index}, {note_text}')
+            fragment_index = to_index + 1
 
     works_df = pd.DataFrame(works_data, columns=['id', 'name'])
     work_contents_df = pd.DataFrame(work_contents_data, columns=['workId', 'idx', 'word', 'sourceReference'])
