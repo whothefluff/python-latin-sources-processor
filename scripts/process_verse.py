@@ -36,8 +36,16 @@ def split_text_into_segments(text):
 
 
 def process_verse(xml_file, output_dir):
-    tree = ET.parse(xml_file)
-    root = tree.getroot()
+
+    # Parse the XML file as a string
+    with open(xml_file, 'r') as file:
+        xml_string = file.read()
+
+    # Replace <del> and </del> tags with a unique string
+    xml_string = xml_string.replace('<del>', 'UNIQUE_STRING_START').replace('</del>', 'UNIQUE_STRING_END')
+
+    # Parse the modified XML string
+    root = ET.fromstring(xml_string)
 
     namespaces = {'tei': 'http://www.tei-c.org/ns/1.0', 'xml': 'http://www.w3.org/XML/1998/namespace'}
 
@@ -109,8 +117,8 @@ def process_verse(xml_file, output_dir):
 
             for line in poem_lines:
                 verse_node = generate_uuid()
-                verse_seq = line.get('n')
-                line_text = line.text.strip() if line.text else ''
+                verse_seq = line.get('n')# Replace the unique strings with <del> and </del> tags
+                line_text = line.text.replace('UNIQUE_STRING_START', '').replace('UNIQUE_STRING_END', '').strip() if line.text else ''
 
                 work_content_subdivisions_data.append(
                     [work_id, 'verse', verse_seq, line_text, verse_node, poem_node, fragment_index,
