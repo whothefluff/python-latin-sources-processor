@@ -25,6 +25,13 @@ def is_numeric(s):
         return False
 
 
+def split_text_into_segments(text):
+    # Split text by words and punctuation
+    import re
+    segments = re.findall(r"\w+|[^\w\s]", text, re.UNICODE)
+    return segments
+
+
 def process_verse(xml_file, output_dir):
     tree = ET.parse(xml_file)
     root = tree.getroot()
@@ -72,7 +79,7 @@ def process_verse(xml_file, output_dir):
             parent_node = book_node
 
             poem_lines = poem.findall('tei:l', namespaces)
-            to_index = fragment_index + len(poem_lines) - 1
+            to_index = fragment_index + sum(len(split_text_into_segments(line.text)) for line in poem_lines) - 1
 
             work_content_subdivisions_data.append(
                 [work_id, typ, seq, poem_name, poem_node, parent_node, fragment_index, to_index])
@@ -80,11 +87,17 @@ def process_verse(xml_file, output_dir):
                 f'Subdivision: {work_id}, {typ}, {seq}, {poem_name}, {poem_node}, {parent_node}, {fragment_index}, {to_index}')
 
             for line in poem_lines:
-                line_number = line.get('n')
-                line_text = line.text
-                work_contents_data.append([work_id, fragment_index, line_text, 'sourceReference'])
-                print(f'Line: {line_number}, {line_text}')
-                fragment_index += 1
+                verse_node = generate_uuid()
+                verse_seq = line.get('n')
+
+                work_content_subdivisions_data.append(
+                    [work_id, 'verse', verse_seq, line.text, verse_node, poem_node, fragment_index,
+                     fragment_index + len(split_text_into_segments(line.text)) - 1])
+
+                for segment in split_text_into_segments(line.text):
+                    work_contents_data.append([work_id, fragment_index, segment, 'sourceReference'])
+                    print(f'Segment: {fragment_index}, {segment}')
+                    fragment_index += 1
 
         for note in work.findall('.//tei:note', namespaces):
             note_id = note.get('n')
