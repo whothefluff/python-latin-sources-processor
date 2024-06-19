@@ -31,17 +31,18 @@ def split_text_into_segments(text):
         return []
     # Normalize spaces and split text by words and punctuation
     text = text.strip()
-    segments = re.findall(r"\w+|[^\w\s]", text, re.UNICODE)
+    # Adjust regex to properly split text including em dash and other punctuation
+    segments = re.findall(r'\w+|[^\w\s]', text, re.UNICODE)
     return segments
 
 
 def process_verse(xml_file, output_dir):
     # Parse the XML file as a string
-    with open(xml_file, 'r') as file:
+    with open(xml_file, 'r', encoding='utf-8') as file:
         xml_string = file.read()
 
     # Replace <del> and </del> tags with a unique string
-    xml_string = xml_string.replace('<del>', 'UNIQUE_STRING_START').replace('</del>', 'UNIQUE_STRING_END')
+    xml_string = xml_string.replace('<del>', 'UNIQUE_STRING_FOR_DEL_START').replace('</del>', 'UNIQUE_STRING_FOR_DEL_END')
 
     # Parse the modified XML string
     root = ET.fromstring(xml_string)
@@ -118,11 +119,11 @@ def process_verse(xml_file, output_dir):
             for line in poem_lines:
                 verse_node = generate_uuid()
                 verse_seq = line.get('n')  # Replace the unique strings with <del> and </del> tags
-                line_text = line.text.replace('UNIQUE_STRING_START', '').replace('UNIQUE_STRING_END',
+                line_text = line.text.replace('UNIQUE_STRING_FOR_DEL_START', '').replace('UNIQUE_STRING_FOR_DEL_END',
                                                                                  '').strip() if line.text else ''
 
                 # Add to work_content_notes_data if <del> tag was found
-                if 'UNIQUE_STRING_START' in line.text and 'UNIQUE_STRING_END' in line.text:
+                if 'UNIQUE_STRING_FOR_DEL_START' in line.text and 'UNIQUE_STRING_FOR_DEL_END' in line.text:
                     work_content_notes_data.append([work_id, verse_seq, fragment_index,
                                                     fragment_index + len(split_text_into_segments(line_text)) - 1,
                                                     'marked for deletion'])
