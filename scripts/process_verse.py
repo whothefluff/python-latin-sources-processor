@@ -79,6 +79,7 @@ def process_verse(xml_file, output_dir):
     authors_and_works_data.append([author_id, work_id])
 
     fragment_index = 1  # Global index counter for fragments
+    note_index = 1  # Note index counter
 
     for work in root.findall('.//tei:div[@subtype="book"]', namespaces):
         book_node = generate_uuid()
@@ -124,13 +125,29 @@ def process_verse(xml_file, output_dir):
 
                 # Add to work_content_notes_data if <del> tag was found
                 if 'UNIQUE_STRING_FOR_DEL_START' in line.text and 'UNIQUE_STRING_FOR_DEL_END' in line.text:
-                    work_content_notes_data.append([work_id, verse_seq, fragment_index,
+                    work_content_notes_data.append([work_id, note_index, fragment_index,
                                                     fragment_index + len(split_text_into_segments(line_text)) - 1,
                                                     'marked for deletion'])
+                    note_index += 1
+
+                # Handle gap tag
+                gap_element = line.find('tei:gap', namespaces)
+                if gap_element is not None:
+                    reason = gap_element.get('reason', 'unknown')
+                    note_text = f'gap: {reason}'
+                    work_content_notes_data.append([work_id, note_index, fragment_index, fragment_index, note_text])
+                    work_contents_data.append([work_id, fragment_index, None, 'sourceReference'])
+                    print(f'Gap: {fragment_index}, {note_text}')
+                    note_index += 1
+                    fragment_index += 1
+
+                if line_text:
+                    to_index = fragment_index + len(split_text_into_segments(line_text)) - 1
+                else:
+                    to_index = fragment_index
 
                 work_content_subdivisions_data.append(
-                    [work_id, 'verse', verse_seq, line_text, verse_node, poem_node, fragment_index,
-                     fragment_index + len(split_text_into_segments(line_text)) - 1])
+                    [work_id, 'verse', verse_seq, line_text, verse_node, poem_node, fragment_index, to_index])
 
                 for segment in split_text_into_segments(line_text):
                     work_contents_data.append([work_id, fragment_index, segment, 'sourceReference'])
@@ -142,8 +159,9 @@ def process_verse(xml_file, output_dir):
             from_index = fragment_index
             note_text = ''.join(note.itertext())
             to_index = fragment_index + len(note_text.split()) - 1
-            work_notes_data.append([work_id, note_id, from_index, to_index, note_text])
+            work_notes_data.append([work_id, note_index, from_index, to_index, note_text])
             print(f'Note: {note_id}, {from_index}, {to_index}, {note_text}')
+            note_index += 1
             fragment_index = to_index + 1
 
         # Set the toIndex for the book after processing all its content
