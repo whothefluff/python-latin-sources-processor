@@ -86,8 +86,8 @@ def process_verse(xml_file, output_dir):
         book_seq = work.get('n')
         if not is_numeric(book_seq):
             book_seq = 'book'
-        work_content_subdivisions_data.append(
-            [work_id, 'book', book_seq, book_name, book_node, None, fragment_index, fragment_index])
+        # Track the fromIndex for the book
+        book_from_index = fragment_index
 
         type_counters = {}
 
@@ -145,6 +145,11 @@ def process_verse(xml_file, output_dir):
             work_notes_data.append([work_id, note_id, from_index, to_index, note_text])
             print(f'Note: {note_id}, {from_index}, {to_index}, {note_text}')
             fragment_index = to_index + 1
+
+        # Set the toIndex for the book after processing all its content
+        book_to_index = fragment_index - 1
+        work_content_subdivisions_data.append(
+            [work_id, 'book', book_seq, book_name, book_node, None, book_from_index, book_to_index])
 
     works_df = pd.DataFrame(works_data, columns=['id', 'name'])
     work_contents_df = pd.DataFrame(work_contents_data, columns=['workId', 'idx', 'word', 'sourceReference'])
