@@ -42,7 +42,8 @@ def process_verse(xml_file, output_dir):
         xml_string = file.read()
 
     # Replace <del> and </del> tags with a unique string
-    xml_string = xml_string.replace('<del>', 'UNIQUE_STRING_FOR_DEL_START').replace('</del>', 'UNIQUE_STRING_FOR_DEL_END')
+    xml_string = xml_string.replace('<del>', 'UNIQUE_STRING_FOR_DEL_START').replace('</del>',
+                                                                                    'UNIQUE_STRING_FOR_DEL_END')
 
     # Parse the modified XML string
     root = ET.fromstring(xml_string)
@@ -121,7 +122,7 @@ def process_verse(xml_file, output_dir):
                 verse_node = generate_uuid()
                 verse_seq = line.get('n')  # Replace the unique strings with <del> and </del> tags
                 line_text = line.text.replace('UNIQUE_STRING_FOR_DEL_START', '').replace('UNIQUE_STRING_FOR_DEL_END',
-                                                                                 '').strip() if line.text else ''
+                                                                                         '').strip() if line.text else ''
 
                 # Add to work_content_notes_data if <del> tag was found
                 if 'UNIQUE_STRING_FOR_DEL_START' in line.text and 'UNIQUE_STRING_FOR_DEL_END' in line.text:
@@ -195,8 +196,54 @@ def process_verse(xml_file, output_dir):
     work_content_notes_df.to_csv(os.path.join(output_dir, 'work_content_notes.csv'), index=False)
 
 
+def validate_csv_files(output_dir):
+    errors = []
+
+    # Load the relevant CSV files
+    work_contents_df = pd.read_csv(os.path.join(output_dir, 'work_contents.csv'))
+    work_content_subdivisions_df = pd.read_csv(os.path.join(output_dir, 'work_content_subdivisions.csv'))
+
+    # Check for unique, consecutive idx values in work_contents
+    if not work_contents_df['idx'].is_unique:
+        errors.append('idx values in work_contents.csv are not unique.')
+
+    if not (work_contents_df['idx'].sort_values().reset_index(drop=True) == pd.Series(
+            range(1, len(work_contents_df) + 1))).all():
+        errors.append('idx values in work_contents.csv are not consecutive starting from 1.')
+
+    # Check if child nodes' indices fall within the parent node's range
+    for _, parent_row in work_content_subdivisions_df.iterrows():
+        parent_node = parent_row['node']
+        parent_from = parent_row['fromIndex']
+        parent_to = parent_row['toIndex']
+
+        child_rows = work_content_subdivisions_df[work_content_subdivisions_df['parent'] == parent_node]
+        for _, child_row in child_rows.iterrows():
+            child_from = child_row['fromIndex']
+            child_to = child_row['toIndex']
+            if not (parent_from <= child_from <= parent_to and parent_from <= child_to <= parent_to):
+                errors.append(
+                    f'Child node {child_row["node"]} indices [{child_from}, {child_to}] are out of range of parent node {parent_node} indices [{parent_from}, {parent_to}].')
+
+    # Validate toIndex is the same or greater than fromIndex for each node
+    for _, row in work_content_subdivisions_df.iterrows():
+        node = row['node']
+        from_index = row['fromIndex']
+        to_index = row['toIndex']
+        if to_index < from_index:
+            errors.append(f'Node {node} has toIndex {to_index} which is less than fromIndex {from_index}.')
+
+    if errors:
+        print("Validation errors found:")
+        for error in errors:
+            print(error)
+    else:
+        print("All validations passed successfully.")
+
+
 if __name__ == "__main__":
     xml_file = choose_file()
     output_dir = '../output'
     process_verse(xml_file, output_dir)
+    validate_csv_files(output_dir)  # Call the validation function here
     print(f"Data has been successfully exported to CSV files in {output_dir}.")
