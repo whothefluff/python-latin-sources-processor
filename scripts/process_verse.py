@@ -212,6 +212,8 @@ def validate_csv_files(output_dir):
 
     check_to_index_always_gt_from_index_in_notes(errors, work_content_notes_df)
 
+    check_consecutive_integers_by_typ_in_sub(errors, work_content_subdivisions_df)
+
     if errors:
         print("Validation errors found:")
         for error in errors:
@@ -266,6 +268,17 @@ def check_unique_consecutive_id_in_notes(errors, work_content_notes_df):
     if not (work_content_notes_df['id'].sort_values().reset_index(drop=True) == pd.Series(
             range(1, len(work_content_notes_df) + 1))).all():
         errors.append('id values in work_content_notes.csv are not consecutive starting from 1.')
+
+
+def check_consecutive_integers_by_typ_in_sub(errors, work_content_subdivisions_df):
+    work_content_subdivisions_df['seq'] = pd.to_numeric(work_content_subdivisions_df['seq'], errors='coerce')
+    grouped = work_content_subdivisions_df.groupby(['parent', 'typ'])
+    for (parent, typ), group in grouped:
+        sorted_group = group.sort_values(by='seq').reset_index(drop=True)
+        expected_seq = pd.Series(range(1, len(group) + 1))
+        if not (sorted_group['seq'].reset_index(drop=True) == expected_seq).all():
+            errors.append(
+                f'Nodes under parent {parent} with type {typ} do not have consecutive integers starting from 1.')
 
 
 if __name__ == "__main__":
