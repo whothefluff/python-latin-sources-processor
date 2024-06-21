@@ -86,9 +86,6 @@ def process_verse(xml_file, output_dir):
     for work in root.findall('.//tei:div[@subtype="book"]', namespaces):
         book_node = generate_uuid()
         book_name = work.find('tei:head', namespaces).text if work.find('tei:head', namespaces) is not None else None
-        book_seq = work.get('n')
-        if not is_numeric(book_seq):
-            book_seq = 'book'
         # Track the fromIndex for the book
         book_from_index = fragment_index
 
@@ -162,6 +159,10 @@ def process_verse(xml_file, output_dir):
             print(f'Note: {note_id}, {from_index}, {to_index}, {note_text}')
             note_index += 1
             fragment_index = to_index + 1
+
+        book_seq = work.get('n')
+        if not is_numeric(book_seq):
+            book_seq = len([x for x in work_content_subdivisions_data if x[1] == 'book']) + 1
 
         # Set the toIndex for the book after processing all its content
         book_to_index = fragment_index - 1
