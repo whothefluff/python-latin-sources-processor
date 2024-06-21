@@ -28,7 +28,7 @@ def is_numeric(s):
 
 def split_text_into_segments(text):
     if text is None:
-        return []
+        return [None]
     # Normalize spaces and split text by words and punctuation
     text = text.strip()
     # Adjust regex to properly split text including em dash and other punctuation
@@ -44,6 +44,7 @@ def process_verse(xml_file, output_dir):
     # Replace <del> and </del> tags with a unique string
     xml_string = xml_string.replace('<del>', 'UNIQUE_STRING_FOR_DEL_START').replace('</del>',
                                                                                     'UNIQUE_STRING_FOR_DEL_END')
+    xml_string = xml_string.replace('<gap reason="lost"/>', 'UNIQUE_STRING_FOR_GAP_LOST')
 
     # Parse the modified XML string
     root = ET.fromstring(xml_string)
@@ -123,6 +124,7 @@ def process_verse(xml_file, output_dir):
                 verse_seq = line.get('n')  # Replace the unique strings with <del> and </del> tags
                 line_text = line.text.replace('UNIQUE_STRING_FOR_DEL_START', '').replace('UNIQUE_STRING_FOR_DEL_END',
                                                                                          '').strip() if line.text else ''
+                line_text = line_text.replace('UNIQUE_STRING_FOR_GAP_LOST', '').strip() if line.text else ''
 
                 # Add to work_content_notes_data if <del> tag was found
                 if 'UNIQUE_STRING_FOR_DEL_START' in line.text and 'UNIQUE_STRING_FOR_DEL_END' in line.text:
@@ -131,16 +133,12 @@ def process_verse(xml_file, output_dir):
                                                     'marked for deletion'])
                     note_index += 1
 
-                # Handle gap tag
-                gap_element = line.find('tei:gap', namespaces)
-                if gap_element is not None:
-                    reason = gap_element.get('reason', 'unknown')
-                    note_text = f'gap: {reason}'
-                    work_content_notes_data.append([work_id, note_index, fragment_index, fragment_index, note_text])
-                    work_contents_data.append([work_id, fragment_index, None, 'sourceReference'])
-                    print(f'Gap: {fragment_index}, {note_text}')
+                # Add to work_content_notes_data if <gap> tag was found
+                if 'UNIQUE_STRING_FOR_GAP_LOST' in line.text:
+                    work_content_notes_data.append([work_id, note_index, fragment_index,
+                                                    fragment_index + len(split_text_into_segments(line_text)),
+                                                    'gap: lost'])
                     note_index += 1
-                    fragment_index += 1
 
                 if line_text:
                     to_index = fragment_index + len(split_text_into_segments(line_text)) - 1
@@ -202,16 +200,44 @@ def validate_csv_files(output_dir):
     # Load the relevant CSV files
     work_contents_df = pd.read_csv(os.path.join(output_dir, 'work_contents.csv'))
     work_content_subdivisions_df = pd.read_csv(os.path.join(output_dir, 'work_content_subdivisions.csv'))
+    work_content_notes_df = pd.read_csv(os.path.join(output_dir, 'work_content_notes.csv'))
 
-    # Check for unique, consecutive idx values in work_contents
-    if not work_contents_df['idx'].is_unique:
-        errors.append('idx values in work_contents.csv are not unique.')
+    check_unique_consecutive_idx_in_contents(errors, work_contents_df)
 
-    if not (work_contents_df['idx'].sort_values().reset_index(drop=True) == pd.Series(
-            range(1, len(work_contents_df) + 1))).all():
-        errors.append('idx values in work_contents.csv are not consecutive starting from 1.')
+    check_unique_consecutive_id_in_notes(errors, work_content_notes_df)
 
-    # Check if child nodes' indices fall within the parent node's range
+    check_children_within_parent_range(errors, work_content_subdivisions_df)
+
+    check_to_index_always_gt_from_index_in_sub(errors, work_content_subdivisions_df)
+
+    check_to_index_always_gt_from_index_in_notes(errors, work_content_notes_df)
+
+    if errors:
+        print("Validation errors found:")
+        for error in errors:
+            print(error)
+    else:
+        print("All validations passed successfully.")
+
+
+def check_to_index_always_gt_from_index_in_sub(errors, work_content_subdivisions_df):
+    for _, row in work_content_subdivisions_df.iterrows():
+        node = row['node']
+        from_index = row['fromIndex']
+        to_index = row['toIndex']
+        if to_index < from_index:
+            errors.append(f'Node {node} has toIndex {to_index} which is less than fromIndex {from_index}.')
+
+
+def check_to_index_always_gt_from_index_in_notes(errors, work_content_notes_df):
+    for _, row in work_content_notes_df.iterrows():
+        from_index = row['fromIndex']
+        to_index = row['toIndex']
+        if to_index < from_index:
+            errors.append(f'Note {row["id"]} has toIndex {to_index} which is less than fromIndex {from_index}.')
+
+
+def check_children_within_parent_range(errors, work_content_subdivisions_df):
     for _, parent_row in work_content_subdivisions_df.iterrows():
         parent_node = parent_row['node']
         parent_from = parent_row['fromIndex']
@@ -225,20 +251,21 @@ def validate_csv_files(output_dir):
                 errors.append(
                     f'Child node {child_row["node"]} indices [{child_from}, {child_to}] are out of range of parent node {parent_node} indices [{parent_from}, {parent_to}].')
 
-    # Validate toIndex is the same or greater than fromIndex for each node
-    for _, row in work_content_subdivisions_df.iterrows():
-        node = row['node']
-        from_index = row['fromIndex']
-        to_index = row['toIndex']
-        if to_index < from_index:
-            errors.append(f'Node {node} has toIndex {to_index} which is less than fromIndex {from_index}.')
 
-    if errors:
-        print("Validation errors found:")
-        for error in errors:
-            print(error)
-    else:
-        print("All validations passed successfully.")
+def check_unique_consecutive_idx_in_contents(errors, work_contents_df):
+    if not work_contents_df['idx'].is_unique:
+        errors.append('idx values in work_contents.csv are not unique.')
+    if not (work_contents_df['idx'].sort_values().reset_index(drop=True) == pd.Series(
+            range(1, len(work_contents_df) + 1))).all():
+        errors.append('idx values in work_contents.csv are not consecutive starting from 1.')
+
+
+def check_unique_consecutive_id_in_notes(errors, work_content_notes_df):
+    if not work_content_notes_df['id'].is_unique:
+        errors.append('id values in work_content_notes.csv are not unique.')
+    if not (work_content_notes_df['id'].sort_values().reset_index(drop=True) == pd.Series(
+            range(1, len(work_content_notes_df) + 1))).all():
+        errors.append('id values in work_content_notes.csv are not consecutive starting from 1.')
 
 
 if __name__ == "__main__":
