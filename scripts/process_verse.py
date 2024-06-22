@@ -97,7 +97,10 @@ def process_verse(xml_file, output_dir):
                                                                             namespaces) is not None else None
 
             poem_node = generate_uuid()
-            typ = poem_id if not is_numeric(poem_id) else 'poem'
+            typ = {
+                "epilogus": "EPIL",
+                "prologus": "PROL"
+            }.get(poem_id, 'POEM' if str(poem_id).isdigit() else poem_id)
 
             if typ not in type_counters:
                 type_counters[typ] = 1
@@ -107,7 +110,7 @@ def process_verse(xml_file, output_dir):
             seq = type_counters[typ]
             parent_node = book_node
 
-            poem_lines = poem.findall('tei:l', namespaces)
+            poem_lines = list(poem)
             to_index = fragment_index + sum(
                 len(split_text_into_segments(line.text)) for line in poem_lines if line.text) - 1
 
@@ -117,8 +120,20 @@ def process_verse(xml_file, output_dir):
                 f'Subdivision: {work_id, typ, seq, poem_name, poem_node, parent_node, fragment_index, to_index}')
 
             for line in poem_lines:
-                verse_node = generate_uuid()
-                verse_seq = line.get('n')  # Replace the unique strings with <del> and </del> tags
+                poem_line_node = generate_uuid()
+                line_tag = line.tag.split('}')[-1]
+                if line_tag == 'l':
+                    typ = 'VERS'
+                    poem_line_seq = line.get('n')
+                elif line_tag == 'p':
+                    typ = 'PARA'
+                    poem_line_seq = 1
+                elif line_tag == 'head':
+                    typ = 'TITL'
+                    poem_line_seq = 1
+                else:
+                    raise ValueError(f'Unknown tag {line_tag} found in poem.')
+                # Replace the unique strings with <del> and </del> tags
                 line_text = line.text.replace('UNIQUE_STRING_FOR_DEL_START', '').replace('UNIQUE_STRING_FOR_DEL_END',
                                                                                          '').strip() if line.text else ''
                 line_text = line_text.replace('UNIQUE_STRING_FOR_GAP_LOST', '').strip() if line.text else ''
@@ -143,7 +158,7 @@ def process_verse(xml_file, output_dir):
                     to_index = fragment_index
 
                 work_content_subdivisions_data.append(
-                    [work_id, 'verse', verse_seq, line_text, verse_node, poem_node, fragment_index, to_index])
+                    [work_id, typ, poem_line_seq, line_text, poem_line_node, poem_node, fragment_index, to_index])
 
                 for segment in split_text_into_segments(line_text):
                     work_contents_data.append([work_id, fragment_index, segment, 'sourceReference'])
@@ -162,12 +177,12 @@ def process_verse(xml_file, output_dir):
 
         book_seq = work.get('n')
         if not is_numeric(book_seq):
-            book_seq = len([x for x in work_content_subdivisions_data if x[1] == 'book']) + 1
+            book_seq = len([x for x in work_content_subdivisions_data if x[1] == 'BOOK']) + 1
 
         # Set the toIndex for the book after processing all its content
         book_to_index = fragment_index - 1
         work_content_subdivisions_data.append(
-            [work_id, 'book', book_seq, book_name, book_node, None, book_from_index, book_to_index])
+            [work_id, 'BOOK', book_seq, book_name, book_node, None, book_from_index, book_to_index])
 
     works_df = pd.DataFrame(works_data, columns=['id', 'name'])
     work_contents_df = pd.DataFrame(work_contents_data, columns=['workId', 'idx', 'word', 'sourceReference'])
