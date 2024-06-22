@@ -129,7 +129,7 @@ def process_verse(xml_file, output_dir):
                     typ = 'PARA'
                     poem_line_seq = 1
                 elif line_tag == 'head':
-                    typ = 'TITL'
+                    typ = 'TITL' #ignore titles?
                     poem_line_seq = 1
                 else:
                     raise ValueError(f'Unknown tag {line_tag} found in poem.')
@@ -238,6 +238,8 @@ def validate_csv_files(xml_file, output_dir):
     validate_gap_tags(errors, xml_file, work_content_subdivisions_df.to_dict('records'), work_contents_df.to_dict('records'),
                       work_content_notes_df.to_dict('records'))
 
+    validate_p_tags(errors, xml_file, work_content_subdivisions_df.to_dict('records'))
+
     if errors:
         print("Validation errors found:")
         for error in errors:
@@ -334,6 +336,16 @@ def find_all_gap_tags(element, namespace, gap_tags=None):
     return gap_tags
 
 
+def find_all_p_tags(element, namespace, p_tags=None):
+    if p_tags is None:
+        p_tags = []
+    if element.tag == f'{namespace}p' and not element.text.strip().startswith('This pointer pattern'):
+        p_tags.append(element)
+    for child in element:
+        find_all_p_tags(child, namespace, p_tags)
+    return p_tags
+
+
 def validate_gap_tags(errors, xml_file, subdivisions, contents, notes):
     with open(xml_file, 'r', encoding='utf-8') as file:
         xml_string = file.read()
@@ -382,6 +394,38 @@ def validate_gap_tags(errors, xml_file, subdivisions, contents, notes):
             errors.append(f"Expected exactly one note entry for gap tag at idx {idx}, found {len(matching_notes)}")
         elif not matching_notes[0]['val'].startswith("gap"):
             errors.append(f"Note entry for gap tag at idx {idx} does not start with 'gap'")
+
+
+def validate_p_tags(errors, xml_file, subdivisions):
+    with open(xml_file, 'r', encoding='utf-8') as file:
+        xml_string = file.read()
+    # Parse the XML string
+    root = ET.fromstring(xml_string)
+
+    # Find all <p> tags in the original XML using a recursive function
+    namespace = "{http://www.tei-c.org/ns/1.0}"
+    p_tags = find_all_p_tags(root, namespace)
+
+    # Count the number of elements in p_tags
+    num_p_tags = len(p_tags)
+
+    # Create a list to store the paragraphs
+    paragraphs = []
+
+    # Iterate over the contents list for as many times as there are elements in p_tags
+    for i in range(num_p_tags):
+        # For each iteration, find the corresponding entry in the subdivisions list
+        for subdivision in subdivisions:
+            # If a corresponding entry is found, add entry to the list
+            if subdivision['typ'] == 'PARA'\
+                    and subdivision['name'] == p_tags[i].text:
+                paragraphs.append(subdivision)
+                break
+
+    # Check if the number of p tags is equal to the number of paragraph subdivisions
+    if num_p_tags != len(paragraphs):
+        errors.append("Mismatch between the number of <p> tags and the number of paragraph subdivisions.")
+
 
 if __name__ == "__main__":
     xml_file = choose_file()
