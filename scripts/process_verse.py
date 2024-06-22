@@ -230,6 +230,10 @@ def validate_csv_files(output_dir):
 
     check_consecutive_integers_by_typ_in_sub(errors, work_content_subdivisions_df)
 
+    check_contents_not_empty_when_notes_not_empty(errors, work_contents_df, work_content_notes_df)
+
+    check_subdivisions_not_empty_when_contents_not_empty(errors, work_content_subdivisions_df, work_contents_df)
+
     if errors:
         print("Validation errors found:")
         for error in errors:
@@ -295,6 +299,25 @@ def check_consecutive_integers_by_typ_in_sub(errors, work_content_subdivisions_d
         if not (sorted_group['seq'].reset_index(drop=True) == expected_seq).all():
             errors.append(
                 f'Nodes under parent {parent} with type {typ} do not have consecutive integers starting from 1.')
+
+
+def check_subdivisions_not_empty_when_contents_not_empty(errors, work_content_subdivisions_df, work_contents_df):
+    for _, row in work_content_subdivisions_df.iterrows():
+        from_index = row['fromIndex']
+        to_index = row['toIndex']
+        if not work_contents_df[(work_contents_df['idx'] >= from_index) & (work_contents_df['idx'] <= to_index)].empty and not row['name']:
+            errors.append(f'Subdivision at node {row["node"]} is empty but it contains content.')
+
+
+def check_contents_not_empty_when_notes_not_empty(errors, work_contents_df, work_content_notes_df):
+    notes_ranges = []
+    for _, row in work_content_notes_df.iterrows():
+        notes_ranges.append(range(row['fromIndex'], row['toIndex'] + 1))
+    notes_ranges = set().union(*notes_ranges)
+
+    for _, row in work_contents_df.iterrows():
+        if row['idx'] in notes_ranges and not row['word']:
+            errors.append(f'Content at index {row["idx"]} is empty but it is part of a note.')
 
 
 if __name__ == "__main__":
