@@ -145,12 +145,13 @@ def process_verse(xml_file, output_dir):
                                                     'marked for deletion'])
                     note_index += 1
 
-                # Add to work_content_notes_data if <gap> tag was found
+                # Check for gaps and handle them
                 if 'UNIQUE_STRING_FOR_GAP_LOST' in line.text:
                     work_content_notes_data.append([work_id, note_index, fragment_index,
                                                     fragment_index + len(split_text_into_segments(line_text)),
                                                     'gap: lost'])
                     note_index += 1
+                    line_text = None
 
                 if line_text:
                     to_index = fragment_index + len(split_text_into_segments(line_text)) - 1
@@ -210,7 +211,7 @@ def process_verse(xml_file, output_dir):
     work_content_notes_df.to_csv(os.path.join(output_dir, 'work_content_notes.csv'), index=False)
 
 
-def validate_csv_files(output_dir):
+def validate_csv_files(xml_file, output_dir):
     errors = []
 
     # Load the relevant CSV files
@@ -233,6 +234,9 @@ def validate_csv_files(output_dir):
     check_contents_not_empty_when_notes_not_empty(errors, work_contents_df, work_content_notes_df)
 
     check_subdivisions_not_empty_when_contents_not_empty(errors, work_content_subdivisions_df, work_contents_df)
+
+    validate_gap_tags(errors, xml_file, work_content_subdivisions_df.to_dict('records'), work_contents_df.to_dict('records'),
+                      work_content_notes_df.to_dict('records'))
 
     if errors:
         print("Validation errors found:")
@@ -320,9 +324,68 @@ def check_contents_not_empty_when_notes_not_empty(errors, work_contents_df, work
             errors.append(f'Content at index {row["idx"]} is empty but it is part of a note.')
 
 
+def find_all_gap_tags(element, namespace, gap_tags=None):
+    if gap_tags is None:
+        gap_tags = []
+    if element.tag == f'{namespace}gap':
+        gap_tags.append(element)
+    for child in element:
+        find_all_gap_tags(child, namespace, gap_tags)
+    return gap_tags
+
+
+def validate_gap_tags(errors, xml_file, subdivisions, contents, notes):
+    with open(xml_file, 'r', encoding='utf-8') as file:
+        xml_string = file.read()
+    # Parse the XML string
+    root = ET.fromstring(xml_string)
+
+    # Find all <gap> tags in the original XML using a recursive function
+    namespace = "{http://www.tei-c.org/ns/1.0}"
+    gap_tags = find_all_gap_tags(root, namespace)
+
+    # Count the number of elements in gap_tags
+    num_gap_tags = len(gap_tags)
+
+    # Create a list to store the idx values
+    gap_indices = []
+
+    # Iterate over the contents list for as many times as there are elements in gap_tags
+    for i in range(num_gap_tags):
+        # For each iteration, find the corresponding entry in the contents list
+        for content in contents:
+            # If a corresponding entry is found, add the idx value to the list
+            if pd.isnull(content['word']):
+                gap_indices.append(content['idx'])
+                break
+
+    # Check if the number of gap tags is equal to the number of empty content entries
+    if num_gap_tags != len(gap_indices):
+        errors.append("Mismatch between the number of <gap> tags and the number of empty content entries.")
+
+    # Check for corresponding subdivision entries
+    for idx in gap_indices:
+        matching_subdivisions = [sub for sub in subdivisions if sub['typ'] == 'VERS' and
+                                 pd.isnull(sub['name']) and
+                                 sub['fromIndex'] == idx and
+                                 sub['toIndex'] == idx]
+        if len(matching_subdivisions) != 1:
+            errors.append(
+                f"Expected exactly one subdivision entry for gap tag at idx {idx}, found {len(matching_subdivisions)}")
+
+    # Check for corresponding note entries
+    for idx in gap_indices:
+        matching_notes = [note for note in notes if note['fromIndex'] == idx and
+                          note['toIndex'] == idx and
+                          note['val'].startswith("gap")]
+        if len(matching_notes) != 1:
+            errors.append(f"Expected exactly one note entry for gap tag at idx {idx}, found {len(matching_notes)}")
+        elif not matching_notes[0]['val'].startswith("gap"):
+            errors.append(f"Note entry for gap tag at idx {idx} does not start with 'gap'")
+
 if __name__ == "__main__":
     xml_file = choose_file()
     output_dir = '../output'
     process_verse(xml_file, output_dir)
-    validate_csv_files(output_dir)  # Call the validation function here
     print(f"Data has been successfully exported to CSV files in {output_dir}.")
+    validate_csv_files(xml_file, output_dir)  # Call the validation function here
