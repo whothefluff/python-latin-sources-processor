@@ -49,18 +49,16 @@ def process_verse(xml_string, output_dir):
 
     # Parse the modified XML string
     root = ET.fromstring(xml_string)
-
     namespaces = {'tei': tei_namespace, 'xml': 'http://www.w3.org/XML/1998/namespace'}
 
     works_data = []
     work_contents_data = []
     work_content_subdivisions_data = []
-    work_notes_data = []
     authors_data = []
     author_abbreviations_data = []
     work_abbreviations_data = []
     authors_and_works_data = []
-    work_content_notes_data = []
+    work_content_supplementary_data = []
 
     work_id = generate_uuid()
     title_element = root.find('.//tei:title[@xml:lang="lat"]', namespaces)
@@ -84,7 +82,7 @@ def process_verse(xml_string, output_dir):
     authors_and_works_data.append([author_id, work_id])
 
     fragment_index = 1  # Global index counter for fragments
-    note_index = 1  # Note index counter
+    supplementary_index = {"NOTE": 1, "GAP": 1, "ABBR": 1}  # Note index counter
 
     for work in root.findall('.//tei:div[@subtype="book"]', namespaces):
         book_node = generate_uuid()
@@ -117,13 +115,9 @@ def process_verse(xml_string, output_dir):
             poem_id = poem.get('n')
             poem_name = poem.find('tei:head', namespaces).text if poem.find('tei:head',
                                                                             namespaces) is not None else None
-
             poem_node = generate_uuid()
             # noinspection SpellCheckingInspection
-            typ = {
-                "epilogus": "EPIL",
-                "prologus": "PROL"
-            }.get(poem_id, 'POEM' if str(poem_id).isdigit() else poem_id)
+            typ = {"epilogus": "EPIL", "prologus": "PROL"}.get(poem_id, 'POEM' if str(poem_id).isdigit() else poem_id)
 
             if typ not in type_counters:
                 type_counters[typ] = 1
@@ -139,8 +133,7 @@ def process_verse(xml_string, output_dir):
 
             work_content_subdivisions_data.append(
                 [work_id, typ, seq, poem_name, poem_node, parent_node, fragment_index, to_index])
-            print(
-                f'Subdivision: {work_id, typ, seq, poem_name, poem_node, parent_node, fragment_index, to_index}')
+            print(f'Subdivision: {work_id, typ, seq, poem_name, poem_node, parent_node, fragment_index, to_index}')
 
             for line in poem_lines:
                 poem_line_node = generate_uuid()
@@ -162,19 +155,19 @@ def process_verse(xml_string, output_dir):
                              .replace('UNIQUE_STRING_FOR_DEL_END', '').strip()) if line.text else ''
                 line_text = line_text.replace('UNIQUE_STRING_FOR_GAP_LOST', '').strip() if line.text else ''
 
-                # Add to work_content_notes_data if <del> tag was found
+                # Add to work_content_supplementary_data if <del> tag was found
                 if 'UNIQUE_STRING_FOR_DEL_START' in line.text and 'UNIQUE_STRING_FOR_DEL_END' in line.text:
-                    work_content_notes_data.append([work_id, note_index, fragment_index,
-                                                    fragment_index + len(split_text_into_segments(line_text)) - 1,
-                                                    'marked for deletion'])
-                    note_index += 1
+                    work_content_supplementary_data.append(
+                        [work_id, "NOTE", supplementary_index["NOTE"], fragment_index,
+                         fragment_index + len(split_text_into_segments(line_text)) - 1,
+                         'marked for deletion'])
+                    supplementary_index["NOTE"] += 1
 
-                # Check for gaps and handle them
                 if 'UNIQUE_STRING_FOR_GAP_LOST' in line.text:
-                    work_content_notes_data.append([work_id, note_index, fragment_index,
-                                                    fragment_index + len(split_text_into_segments(line_text)),
-                                                    'gap: lost'])
-                    note_index += 1
+                    work_content_supplementary_data.append([work_id, "GAP", supplementary_index["GAP"], fragment_index,
+                                                            fragment_index + len(split_text_into_segments(line_text)),
+                                                            'gap: lost'])
+                    supplementary_index["GAP"] += 1
                     line_text = None
 
                 if line_text:
@@ -183,7 +176,8 @@ def process_verse(xml_string, output_dir):
                     to_index = fragment_index
 
                 work_content_subdivisions_data.append(
-                    [work_id, typ, poem_line_seq, line_text, poem_line_node, poem_node, fragment_index, to_index])
+                    [work_id, typ, poem_line_seq, line_text, poem_line_node, poem_node,
+                     fragment_index, to_index])
 
                 for segment in split_text_into_segments(line_text):
                     work_contents_data.append([work_id, fragment_index, segment, 'sourceReference'])
@@ -195,9 +189,10 @@ def process_verse(xml_string, output_dir):
             from_index = fragment_index
             note_text = ''.join(note.itertext())
             to_index = fragment_index + len(note_text.split()) - 1
-            work_notes_data.append([work_id, note_index, from_index, to_index, note_text])
+            work_content_supplementary_data.append(
+                [work_id, "NOTE", supplementary_index["NOTE"], from_index, to_index, note_text])
             print(f'Note: {note_id}, {from_index}, {to_index}, {note_text}')
-            note_index += 1
+            supplementary_index["NOTE"] += 1
             fragment_index = to_index + 1
 
         book_seq = work.get('n')
@@ -212,27 +207,25 @@ def process_verse(xml_string, output_dir):
     works_df = pd.DataFrame(works_data, columns=['id', 'name'])
     work_contents_df = pd.DataFrame(work_contents_data, columns=['workId', 'idx', 'word', 'sourceReference'])
     work_content_subdivisions_df = pd.DataFrame(work_content_subdivisions_data,
-                                                columns=['workId', 'typ', 'seq', 'name', 'node', 'parent', 'fromIndex',
+                                                columns=['workId', 'typ', 'cnt', 'name', 'node', 'parent', 'fromIndex',
                                                          'toIndex'])
-    work_notes_df = pd.DataFrame(work_notes_data, columns=['workId', 'id', 'fromIndex', 'toIndex', 'val'])
     authors_df = pd.DataFrame(authors_data, columns=['id', 'name', 'about', 'image'])
     author_abbreviations_df = pd.DataFrame(author_abbreviations_data, columns=['authorId', 'id', 'val'])
     work_abbreviations_df = pd.DataFrame(work_abbreviations_data, columns=['workId', 'id', 'val'])
     authors_and_works_df = pd.DataFrame(authors_and_works_data, columns=['authorId', 'workId'])
-    work_content_notes_df = pd.DataFrame(work_content_notes_data,
-                                         columns=['workId', 'id', 'fromIndex', 'toIndex', 'val'])
+    work_content_supplementary_df = pd.DataFrame(work_content_supplementary_data,
+                                                 columns=['workId', 'typ', 'cnt', 'fromIndex', 'toIndex', 'val'])
 
     os.makedirs(output_dir, exist_ok=True)
 
     works_df.to_csv(os.path.join(output_dir, 'works.csv'), index=False)
     work_contents_df.to_csv(os.path.join(output_dir, 'work_contents.csv'), index=False)
     work_content_subdivisions_df.to_csv(os.path.join(output_dir, 'work_content_subdivisions.csv'), index=False)
-    work_notes_df.to_csv(os.path.join(output_dir, 'work_notes.csv'), index=False)
     authors_df.to_csv(os.path.join(output_dir, 'authors.csv'), index=False)
     author_abbreviations_df.to_csv(os.path.join(output_dir, 'author_abbreviations.csv'), index=False)
     work_abbreviations_df.to_csv(os.path.join(output_dir, 'work_abbreviations.csv'), index=False)
     authors_and_works_df.to_csv(os.path.join(output_dir, 'authors_and_works.csv'), index=False)
-    work_content_notes_df.to_csv(os.path.join(output_dir, 'work_content_notes.csv'), index=False)
+    work_content_supplementary_df.to_csv(os.path.join(output_dir, 'work_content_supplementary.csv'), index=False)
 
 
 def get_author_data(author_id, author_name):
@@ -254,28 +247,19 @@ def validate_csv_files(xml_string, output_dir):
     # Load the relevant CSV files
     work_contents_df = pd.read_csv(os.path.join(output_dir, 'work_contents.csv'))
     work_content_subdivisions_df = pd.read_csv(os.path.join(output_dir, 'work_content_subdivisions.csv'))
-    work_content_notes_df = pd.read_csv(os.path.join(output_dir, 'work_content_notes.csv'))
+    work_content_supplementary_df = pd.read_csv(os.path.join(output_dir, 'work_content_supplementary.csv'))
 
     check_unique_consecutive_idx_in_contents(errors, work_contents_df)
-
-    check_unique_consecutive_id_in_notes(errors, work_content_notes_df)
-
     check_children_within_parent_range(errors, work_content_subdivisions_df)
-
     check_to_index_always_gt_from_index_in_sub(errors, work_content_subdivisions_df)
-
-    check_to_index_always_gt_from_index_in_notes(errors, work_content_notes_df)
-
+    check_to_index_always_gt_from_index_in_supp(errors, work_content_supplementary_df)
     check_consecutive_integers_by_typ_in_sub(errors, work_content_subdivisions_df)
-
-    check_contents_not_empty_when_notes_not_empty(errors, work_contents_df, work_content_notes_df)
-
+    check_consecutive_integers_by_typ_in_supp(errors, work_content_supplementary_df)
+    check_contents_not_empty_when_supp_not_empty(errors, work_contents_df, work_content_supplementary_df)
     check_subdivisions_not_empty_when_contents_not_empty(errors, work_content_subdivisions_df, work_contents_df)
-
     validate_gap_tags(errors, xml_string, work_content_subdivisions_df.to_dict('records'),
                       work_contents_df.to_dict('records'),
-                      work_content_notes_df.to_dict('records'))
-
+                      work_content_supplementary_df.to_dict('records'))
     validate_p_tags(errors, xml_string, work_content_subdivisions_df.to_dict('records'))
 
     if errors:
@@ -295,12 +279,13 @@ def check_to_index_always_gt_from_index_in_sub(errors, work_content_subdivisions
             errors.append(f'Node {node} has toIndex {to_index} which is less than fromIndex {from_index}.')
 
 
-def check_to_index_always_gt_from_index_in_notes(errors, work_content_notes_df):
-    for _, row in work_content_notes_df.iterrows():
+def check_to_index_always_gt_from_index_in_supp(errors, work_content_supplementary_df):
+    for _, row in work_content_supplementary_df.iterrows():
         from_index = row['fromIndex']
         to_index = row['toIndex']
         if to_index < from_index:
-            errors.append(f'Note {row["id"]} has toIndex {to_index} which is less than fromIndex {from_index}.')
+            errors.append(f'Supplementary entry {row["typ"]} {row["cnt"]} has toIndex {to_index} '
+                          f'which is less than fromIndex {from_index}.')
 
 
 def check_children_within_parent_range(errors, work_content_subdivisions_df):
@@ -314,9 +299,8 @@ def check_children_within_parent_range(errors, work_content_subdivisions_df):
             child_from = child_row['fromIndex']
             child_to = child_row['toIndex']
             if not (parent_from <= child_from <= parent_to and parent_from <= child_to <= parent_to):
-                errors.append(
-                    f'Child node {child_row["node"]} indices [{child_from}, {child_to}] are out of range '
-                    f'of parent node {parent_node} indices [{parent_from}, {parent_to}].')
+                errors.append(f'Child node {child_row["node"]} indices [{child_from}, {child_to}] are out of range '
+                              f'of parent node {parent_node} indices [{parent_from}, {parent_to}].')
 
 
 def check_unique_consecutive_idx_in_contents(errors, work_contents_df):
@@ -327,23 +311,26 @@ def check_unique_consecutive_idx_in_contents(errors, work_contents_df):
         errors.append('idx values in work_contents.csv are not consecutive starting from 1.')
 
 
-def check_unique_consecutive_id_in_notes(errors, work_content_notes_df):
-    if not work_content_notes_df['id'].is_unique:
-        errors.append('id values in work_content_notes.csv are not unique.')
-    if not pd.Series((work_content_notes_df['id'].sort_values().reset_index(drop=True) == pd.Series(
-            range(1, len(work_content_notes_df) + 1)))).all():
-        errors.append('id values in work_content_notes.csv are not consecutive starting from 1.')
-
-
 def check_consecutive_integers_by_typ_in_sub(errors, work_content_subdivisions_df):
-    work_content_subdivisions_df['seq'] = pd.to_numeric(work_content_subdivisions_df['seq'], errors='coerce')
+    work_content_subdivisions_df['cnt'] = pd.to_numeric(work_content_subdivisions_df['cnt'], errors='coerce')
     grouped = work_content_subdivisions_df.groupby(['parent', 'typ'])
     for (parent, typ), group in grouped:
-        sorted_group = group.sort_values(by='seq').reset_index(drop=True)
+        sorted_group = group.sort_values(by='cnt').reset_index(drop=True)
         expected_seq = pd.Series(range(1, len(group) + 1))
-        if not pd.Series((sorted_group['seq'].reset_index(drop=True) == expected_seq)).all():
+        if not pd.Series((sorted_group['cnt'].reset_index(drop=True) == expected_seq)).all():
             errors.append(
                 f'Nodes under parent {parent} with type {typ} do not have consecutive integers starting from 1.')
+
+
+def check_consecutive_integers_by_typ_in_supp(errors, work_content_supplementary_df):
+    grouped = work_content_supplementary_df.groupby(['workId', 'typ'])
+    for (work_id, typ), group in grouped:
+        sorted_group = group.sort_values(by='cnt').reset_index(drop=True)
+        expected_cnt = pd.Series(range(1, len(group) + 1))
+        if not pd.Series((sorted_group['cnt'].reset_index(drop=True) == expected_cnt)).all():
+            errors.append(
+                f'Supplementary entries for workId {work_id} with type {typ} do '
+                f'not have consecutive integers starting from 1.')
 
 
 def check_subdivisions_not_empty_when_contents_not_empty(errors, work_content_subdivisions_df, work_contents_df):
@@ -355,15 +342,15 @@ def check_subdivisions_not_empty_when_contents_not_empty(errors, work_content_su
             errors.append(f'Subdivision at node {row["node"]} is empty but it contains content.')
 
 
-def check_contents_not_empty_when_notes_not_empty(errors, work_contents_df, work_content_notes_df):
-    notes_ranges = []
-    for _, row in work_content_notes_df.iterrows():
-        notes_ranges.append(range(row['fromIndex'], row['toIndex'] + 1))
-    notes_ranges = set().union(*notes_ranges)
+def check_contents_not_empty_when_supp_not_empty(errors, work_contents_df, work_content_supplementary_df):
+    supp_ranges = []
+    for _, row in work_content_supplementary_df.iterrows():
+        supp_ranges.append(range(row['fromIndex'], row['toIndex'] + 1))
+    supp_ranges = set().union(*supp_ranges)
 
     for _, row in work_contents_df.iterrows():
-        if row['idx'] in notes_ranges and not row['word']:
-            errors.append(f'Content at index {row["idx"]} is empty but it is part of a note.')
+        if row['idx'] in supp_ranges and not row['word']:
+            errors.append(f'Content at index {row["idx"]} is empty but it is part of a supplementary entry.')
 
 
 def find_all_gap_tags(element, namespace, gap_tags=None):
@@ -386,7 +373,7 @@ def find_all_p_tags(element, namespace, p_tags=None):
     return p_tags
 
 
-def validate_gap_tags(errors, xml_string, subdivisions, contents, notes):
+def validate_gap_tags(errors, xml_string, subdivisions, contents, supp_entries):
     # Parse the XML string
     root = ET.fromstring(xml_string)
 
@@ -425,13 +412,15 @@ def validate_gap_tags(errors, xml_string, subdivisions, contents, notes):
 
     # Check for corresponding note entries
     for idx in gap_indices:
-        matching_notes = [note for note in notes if note['fromIndex'] == idx and
-                          note['toIndex'] == idx and
-                          note['val'].startswith("gap")]
-        if len(matching_notes) != 1:
-            errors.append(f"Expected exactly one note entry for gap tag at idx {idx}, found {len(matching_notes)}")
-        elif not matching_notes[0]['val'].startswith("gap"):
-            errors.append(f"Note entry for gap tag at idx {idx} does not start with 'gap'")
+        matching_supp_entries = [entry for entry in supp_entries if entry['fromIndex'] == idx and
+                                 entry['toIndex'] == idx and
+                                 entry['val'].startswith("gap")]
+        if len(matching_supp_entries) != 1:
+            errors.append(
+                f"Expected exactly one supplementary entry for gap tag at idx {idx}, "
+                f"found {len(matching_supp_entries)}")
+        elif not matching_supp_entries[0]['val'].startswith("gap"):
+            errors.append(f"Supplementary entry for gap tag at idx {idx} does not start with 'gap'")
 
 
 def validate_p_tags(errors, xml_string, subdivisions):
