@@ -3,15 +3,19 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 import os
 import uuid
-import tkinter as tk
-from tkinter import filedialog
+# import tkinter as tk
+# from tkinter import filedialog
 import re
 
 
 def choose_file():
-    root = tk.Tk()
-    root.withdraw()  # Hide the main window
-    file_path = filedialog.askopenfilename(filetypes=[("XML files", "*.xml")])
+    # root = tk.Tk()
+    # root.withdraw()  # Hide the main window
+    # file_path = filedialog.askopenfilename(filetypes=[("XML files", "*.xml")])
+    file_name = "phi0975.phi001.perseus-lat2_modified.xml"
+    script_dir = os.path.dirname(__file__)
+    script_parent_dir = os.path.dirname(script_dir)
+    file_path = os.path.join(script_parent_dir, "data", "phaedrus", file_name)
     return file_path
 
 
@@ -67,7 +71,8 @@ def process_verse(xml_string, output_dir):
     author_element = root.find('.//tei:author', namespaces)
     author_name = author_element.text if author_element is not None else 'Unknown Author'
     author_id = generate_uuid()
-    authors_data.append([author_id, author_name, '', None])
+    author_data = get_author_data(author_id, author_name)
+    authors_data.append(author_data)
     print(f'Author: {author_id}, {author_name}')
 
     # Adding standard abbreviation for the author
@@ -228,6 +233,19 @@ def process_verse(xml_string, output_dir):
     work_abbreviations_df.to_csv(os.path.join(output_dir, 'work_abbreviations.csv'), index=False)
     authors_and_works_df.to_csv(os.path.join(output_dir, 'authors_and_works.csv'), index=False)
     work_content_notes_df.to_csv(os.path.join(output_dir, 'work_content_notes.csv'), index=False)
+
+
+def get_author_data(author_id, author_name):
+    script_dir = os.path.dirname(__file__)
+    script_parent_dir = os.path.dirname(script_dir)
+    about_file = os.path.join(script_parent_dir, "data", "phaedrus", 'about.txt')
+    with open(about_file, 'r', encoding='utf-8') as about:
+        about_text = about.read()
+    image_file = os.path.join(script_parent_dir, "data", "phaedrus", 'expanded.webp')
+    with open(image_file, 'rb') as expanded:
+        image_data = expanded.read()
+    author_data = [author_id, author_name, about_text, image_data]
+    return author_data
 
 
 def validate_csv_files(xml_string, output_dir):
@@ -449,7 +467,7 @@ if __name__ == "__main__":
     # noinspection HttpUrlsUsage
     tei_namespace = 'http://www.tei-c.org/ns/1.0'
     xml_file = choose_file()
-    output_dir_outer = '../output'
+    output_dir_outer = '../output/phaedrus/'
     with open(xml_file, 'r', encoding='utf-8') as file:
         xml_string_outer = file.read()  # Parse the XML file as a string
     process_verse(xml_string_outer, output_dir_outer)
