@@ -166,7 +166,7 @@ def process_verse(xml_string, output_dir):
                 if 'UNIQUE_STRING_FOR_GAP_LOST' in line.text:
                     work_content_supplementary_data.append([work_id, "GAP", supplementary_index["GAP"], fragment_index,
                                                             fragment_index + len(split_text_into_segments(line_text)),
-                                                            'gap: lost'])
+                                                            'lost'])
                     supplementary_index["GAP"] += 1
                     line_text = None
 
