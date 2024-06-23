@@ -86,8 +86,26 @@ def process_verse(xml_file, output_dir):
     for work in root.findall('.//tei:div[@subtype="book"]', namespaces):
         book_node = generate_uuid()
         book_name = work.find('tei:head', namespaces).text if work.find('tei:head', namespaces) is not None else None
+        book_head_text = ''.join(work.find('tei:head', namespaces).itertext()) if work.find('tei:head',
+                                                                                            namespaces) is not None else None
+
         # Track the fromIndex for the book
         book_from_index = fragment_index
+
+        # Add book head text to work_contents_data
+        if book_head_text:
+            book_head_segments = split_text_into_segments(book_head_text)
+            book_head_node = generate_uuid()
+            to_index = fragment_index + len(book_head_segments) - 1
+
+            work_content_subdivisions_data.append(
+                [work_id, 'TITL', 1, book_head_text, book_head_node, book_node, fragment_index, to_index])
+            print(f'Book Head Subdivision: {work_id, "TITL", 1, book_head_text, book_head_node, book_node, fragment_index, to_index}')
+
+            for segment in book_head_segments:
+                work_contents_data.append([work_id, fragment_index, segment, 'sourceReference'])
+                print(f'Segment: {fragment_index}, {segment}')
+                fragment_index += 1
 
         type_counters = {}
 
@@ -129,7 +147,7 @@ def process_verse(xml_file, output_dir):
                     typ = 'PARA'
                     poem_line_seq = 1
                 elif line_tag == 'head':
-                    typ = 'TITL' #ignore titles?
+                    typ = 'TITL'
                     poem_line_seq = 1
                 else:
                     raise ValueError(f'Unknown tag {line_tag} found in poem.')
