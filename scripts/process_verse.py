@@ -1,3 +1,4 @@
+# noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
 import pandas as pd
 import os
@@ -36,11 +37,7 @@ def split_text_into_segments(text):
     return segments
 
 
-def process_verse(xml_file, output_dir):
-    # Parse the XML file as a string
-    with open(xml_file, 'r', encoding='utf-8') as file:
-        xml_string = file.read()
-
+def process_verse(xml_string, output_dir):
     # Replace <del> and </del> tags with a unique string
     xml_string = xml_string.replace('<del>', 'UNIQUE_STRING_FOR_DEL_START').replace('</del>',
                                                                                     'UNIQUE_STRING_FOR_DEL_END')
@@ -49,7 +46,7 @@ def process_verse(xml_file, output_dir):
     # Parse the modified XML string
     root = ET.fromstring(xml_string)
 
-    namespaces = {'tei': 'http://www.tei-c.org/ns/1.0', 'xml': 'http://www.w3.org/XML/1998/namespace'}
+    namespaces = {'tei': tei_namespace, 'xml': 'http://www.w3.org/XML/1998/namespace'}
 
     works_data = []
     work_contents_data = []
@@ -74,6 +71,7 @@ def process_verse(xml_file, output_dir):
     print(f'Author: {author_id}, {author_name}')
 
     # Adding standard abbreviation for the author
+    # noinspection SpellCheckingInspection
     author_abbreviation = 'Phdr.'
     author_abbreviations_data.append([author_id, 1, author_abbreviation])
 
@@ -86,8 +84,8 @@ def process_verse(xml_file, output_dir):
     for work in root.findall('.//tei:div[@subtype="book"]', namespaces):
         book_node = generate_uuid()
         book_name = work.find('tei:head', namespaces).text if work.find('tei:head', namespaces) is not None else None
-        book_head_text = ''.join(work.find('tei:head', namespaces).itertext()) if work.find('tei:head',
-                                                                                            namespaces) is not None else None
+        book_head_text = ''.join(work.find('tei:head', namespaces).itertext()) \
+            if work.find('tei:head', namespaces) is not None else None
 
         # Track the fromIndex for the book
         book_from_index = fragment_index
@@ -98,9 +96,10 @@ def process_verse(xml_file, output_dir):
             book_head_node = generate_uuid()
             to_index = fragment_index + len(book_head_segments) - 1
 
-            work_content_subdivisions_data.append(
-                [work_id, 'TITL', 1, book_head_text, book_head_node, book_node, fragment_index, to_index])
-            print(f'Book Head Subdivision: {work_id, "TITL", 1, book_head_text, book_head_node, book_node, fragment_index, to_index}')
+            # noinspection SpellCheckingInspection
+            book_head_sub = [work_id, 'TITL', 1, book_head_text, book_head_node, book_node, fragment_index, to_index]
+            work_content_subdivisions_data.append(book_head_sub)
+            print(f'Book Head Subdivision: {book_head_sub}')
 
             for segment in book_head_segments:
                 work_contents_data.append([work_id, fragment_index, segment, 'sourceReference'])
@@ -115,6 +114,7 @@ def process_verse(xml_file, output_dir):
                                                                             namespaces) is not None else None
 
             poem_node = generate_uuid()
+            # noinspection SpellCheckingInspection
             typ = {
                 "epilogus": "EPIL",
                 "prologus": "PROL"
@@ -147,13 +147,14 @@ def process_verse(xml_file, output_dir):
                     typ = 'PARA'
                     poem_line_seq = 1
                 elif line_tag == 'head':
+                    # noinspection SpellCheckingInspection
                     typ = 'TITL'
                     poem_line_seq = 1
                 else:
                     raise ValueError(f'Unknown tag {line_tag} found in poem.')
                 # Replace the unique strings with <del> and </del> tags
-                line_text = line.text.replace('UNIQUE_STRING_FOR_DEL_START', '').replace('UNIQUE_STRING_FOR_DEL_END',
-                                                                                         '').strip() if line.text else ''
+                line_text = (line.text.replace('UNIQUE_STRING_FOR_DEL_START', '')
+                             .replace('UNIQUE_STRING_FOR_DEL_END', '').strip()) if line.text else ''
                 line_text = line_text.replace('UNIQUE_STRING_FOR_GAP_LOST', '').strip() if line.text else ''
 
                 # Add to work_content_notes_data if <del> tag was found
@@ -229,7 +230,7 @@ def process_verse(xml_file, output_dir):
     work_content_notes_df.to_csv(os.path.join(output_dir, 'work_content_notes.csv'), index=False)
 
 
-def validate_csv_files(xml_file, output_dir):
+def validate_csv_files(xml_string, output_dir):
     errors = []
 
     # Load the relevant CSV files
@@ -253,10 +254,11 @@ def validate_csv_files(xml_file, output_dir):
 
     check_subdivisions_not_empty_when_contents_not_empty(errors, work_content_subdivisions_df, work_contents_df)
 
-    validate_gap_tags(errors, xml_file, work_content_subdivisions_df.to_dict('records'), work_contents_df.to_dict('records'),
+    validate_gap_tags(errors, xml_string, work_content_subdivisions_df.to_dict('records'),
+                      work_contents_df.to_dict('records'),
                       work_content_notes_df.to_dict('records'))
 
-    validate_p_tags(errors, xml_file, work_content_subdivisions_df.to_dict('records'))
+    validate_p_tags(errors, xml_string, work_content_subdivisions_df.to_dict('records'))
 
     if errors:
         print("Validation errors found:")
@@ -295,22 +297,23 @@ def check_children_within_parent_range(errors, work_content_subdivisions_df):
             child_to = child_row['toIndex']
             if not (parent_from <= child_from <= parent_to and parent_from <= child_to <= parent_to):
                 errors.append(
-                    f'Child node {child_row["node"]} indices [{child_from}, {child_to}] are out of range of parent node {parent_node} indices [{parent_from}, {parent_to}].')
+                    f'Child node {child_row["node"]} indices [{child_from}, {child_to}] are out of range '
+                    f'of parent node {parent_node} indices [{parent_from}, {parent_to}].')
 
 
 def check_unique_consecutive_idx_in_contents(errors, work_contents_df):
     if not work_contents_df['idx'].is_unique:
         errors.append('idx values in work_contents.csv are not unique.')
-    if not (work_contents_df['idx'].sort_values().reset_index(drop=True) == pd.Series(
-            range(1, len(work_contents_df) + 1))).all():
+    if not pd.Series((work_contents_df['idx'].sort_values().reset_index(drop=True)
+                      == pd.Series(range(1, len(work_contents_df) + 1)))).all():
         errors.append('idx values in work_contents.csv are not consecutive starting from 1.')
 
 
 def check_unique_consecutive_id_in_notes(errors, work_content_notes_df):
     if not work_content_notes_df['id'].is_unique:
         errors.append('id values in work_content_notes.csv are not unique.')
-    if not (work_content_notes_df['id'].sort_values().reset_index(drop=True) == pd.Series(
-            range(1, len(work_content_notes_df) + 1))).all():
+    if not pd.Series((work_content_notes_df['id'].sort_values().reset_index(drop=True) == pd.Series(
+            range(1, len(work_content_notes_df) + 1)))).all():
         errors.append('id values in work_content_notes.csv are not consecutive starting from 1.')
 
 
@@ -320,7 +323,7 @@ def check_consecutive_integers_by_typ_in_sub(errors, work_content_subdivisions_d
     for (parent, typ), group in grouped:
         sorted_group = group.sort_values(by='seq').reset_index(drop=True)
         expected_seq = pd.Series(range(1, len(group) + 1))
-        if not (sorted_group['seq'].reset_index(drop=True) == expected_seq).all():
+        if not pd.Series((sorted_group['seq'].reset_index(drop=True) == expected_seq)).all():
             errors.append(
                 f'Nodes under parent {parent} with type {typ} do not have consecutive integers starting from 1.')
 
@@ -329,7 +332,8 @@ def check_subdivisions_not_empty_when_contents_not_empty(errors, work_content_su
     for _, row in work_content_subdivisions_df.iterrows():
         from_index = row['fromIndex']
         to_index = row['toIndex']
-        if not work_contents_df[(work_contents_df['idx'] >= from_index) & (work_contents_df['idx'] <= to_index)].empty and not row['name']:
+        if (not work_contents_df[(work_contents_df['idx'] >= from_index) & (work_contents_df['idx'] <= to_index)].empty
+                and not row['name']):
             errors.append(f'Subdivision at node {row["node"]} is empty but it contains content.')
 
 
@@ -364,14 +368,12 @@ def find_all_p_tags(element, namespace, p_tags=None):
     return p_tags
 
 
-def validate_gap_tags(errors, xml_file, subdivisions, contents, notes):
-    with open(xml_file, 'r', encoding='utf-8') as file:
-        xml_string = file.read()
+def validate_gap_tags(errors, xml_string, subdivisions, contents, notes):
     # Parse the XML string
     root = ET.fromstring(xml_string)
 
     # Find all <gap> tags in the original XML using a recursive function
-    namespace = "{http://www.tei-c.org/ns/1.0}"
+    namespace = "{" + tei_namespace + "}"
     gap_tags = find_all_gap_tags(root, namespace)
 
     # Count the number of elements in gap_tags
@@ -414,14 +416,12 @@ def validate_gap_tags(errors, xml_file, subdivisions, contents, notes):
             errors.append(f"Note entry for gap tag at idx {idx} does not start with 'gap'")
 
 
-def validate_p_tags(errors, xml_file, subdivisions):
-    with open(xml_file, 'r', encoding='utf-8') as file:
-        xml_string = file.read()
+def validate_p_tags(errors, xml_string, subdivisions):
     # Parse the XML string
     root = ET.fromstring(xml_string)
 
     # Find all <p> tags in the original XML using a recursive function
-    namespace = "{http://www.tei-c.org/ns/1.0}"
+    namespace = "{" + tei_namespace + "}"
     p_tags = find_all_p_tags(root, namespace)
 
     # Count the number of elements in p_tags
@@ -435,7 +435,7 @@ def validate_p_tags(errors, xml_file, subdivisions):
         # For each iteration, find the corresponding entry in the subdivisions list
         for subdivision in subdivisions:
             # If a corresponding entry is found, add entry to the list
-            if subdivision['typ'] == 'PARA'\
+            if subdivision['typ'] == 'PARA' \
                     and subdivision['name'] == p_tags[i].text:
                 paragraphs.append(subdivision)
                 break
@@ -446,8 +446,12 @@ def validate_p_tags(errors, xml_file, subdivisions):
 
 
 if __name__ == "__main__":
+    # noinspection HttpUrlsUsage
+    tei_namespace = 'http://www.tei-c.org/ns/1.0'
     xml_file = choose_file()
-    output_dir = '../output'
-    process_verse(xml_file, output_dir)
-    print(f"Data has been successfully exported to CSV files in {output_dir}.")
-    validate_csv_files(xml_file, output_dir)  # Call the validation function here
+    output_dir_outer = '../output'
+    with open(xml_file, 'r', encoding='utf-8') as file:
+        xml_string_outer = file.read()  # Parse the XML file as a string
+    process_verse(xml_string_outer, output_dir_outer)
+    print(f"Data has been successfully exported to CSV files in {output_dir_outer}.")
+    validate_csv_files(xml_string_outer, output_dir_outer)  # Call the validation function here
