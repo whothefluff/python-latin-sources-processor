@@ -6,6 +6,7 @@ import uuid
 # import tkinter as tk
 # from tkinter import filedialog
 import re
+import base64
 
 
 def choose_file():
@@ -237,6 +238,7 @@ def get_author_data(author_id, author_name):
     image_file = os.path.join(script_parent_dir, "data", "phaedrus", 'expanded.webp')
     with open(image_file, 'rb') as expanded:
         image_data = expanded.read()
+        image_data = base64.b64encode(image_data).decode()  # Convert binary data to base64 string
     author_data = [author_id, author_name, about_text, image_data]
     return author_data
 
@@ -414,13 +416,11 @@ def validate_gap_tags(errors, xml_string, subdivisions, contents, supp_entries):
     for idx in gap_indices:
         matching_supp_entries = [entry for entry in supp_entries if entry['fromIndex'] == idx and
                                  entry['toIndex'] == idx and
-                                 entry['val'].startswith("gap")]
+                                 entry['typ'] == 'GAP']
         if len(matching_supp_entries) != 1:
             errors.append(
                 f"Expected exactly one supplementary entry for gap tag at idx {idx}, "
                 f"found {len(matching_supp_entries)}")
-        elif not matching_supp_entries[0]['val'].startswith("gap"):
-            errors.append(f"Supplementary entry for gap tag at idx {idx} does not start with 'gap'")
 
 
 def validate_p_tags(errors, xml_string, subdivisions):
