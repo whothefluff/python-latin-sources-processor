@@ -97,11 +97,10 @@ def process_verse(xml_string, output_dir):
         # Add book head text to work_contents_data
         if book_head_text:
             book_head_segments = split_text_into_segments(book_head_text)
-            book_head_node = generate_uuid()
             to_index = fragment_index + len(book_head_segments) - 1
 
             # noinspection SpellCheckingInspection
-            book_head_sub = [work_id, 'TITL', 1, book_head_text, book_head_node, book_node, fragment_index, to_index]
+            book_head_sub = [work_id, generate_uuid(), 'TITL', 1, book_head_text, book_node, fragment_index, to_index]
             work_content_subdivisions_data.append(book_head_sub)
             print(f'Book Head Subdivision: {book_head_sub}')
 
@@ -132,9 +131,9 @@ def process_verse(xml_string, output_dir):
             to_index = fragment_index + sum(
                 len(split_text_into_segments(line.text)) for line in poem_lines if line.text) - 1
 
-            work_content_subdivisions_data.append(
-                [work_id, typ, seq, poem_name, poem_node, parent_node, fragment_index, to_index])
-            print(f'Subdivision: {work_id, typ, seq, poem_name, poem_node, parent_node, fragment_index, to_index}')
+            poem_sub = [work_id, poem_node, typ, seq, poem_name, parent_node, fragment_index, to_index]
+            work_content_subdivisions_data.append(poem_sub)
+            print(f'Subdivision: {poem_sub}')
 
             for line in poem_lines:
                 poem_line_node = generate_uuid()
@@ -177,7 +176,7 @@ def process_verse(xml_string, output_dir):
                     to_index = fragment_index
 
                 work_content_subdivisions_data.append(
-                    [work_id, typ, poem_line_seq, line_text, poem_line_node, poem_node,
+                    [work_id, poem_line_node, typ, poem_line_seq, line_text, poem_node,
                      fragment_index, to_index])
 
                 for segment in split_text_into_segments(line_text):
@@ -203,12 +202,12 @@ def process_verse(xml_string, output_dir):
         # Set the toIndex for the book after processing all its content
         book_to_index = fragment_index - 1
         work_content_subdivisions_data.append(
-            [work_id, 'BOOK', book_seq, book_name, book_node, None, book_from_index, book_to_index])
+            [work_id, book_node, 'BOOK', book_seq, book_name, None, book_from_index, book_to_index])
 
     works_df = pd.DataFrame(works_data, columns=['id', 'name'])
     work_contents_df = pd.DataFrame(work_contents_data, columns=['workId', 'idx', 'word', 'sourceReference'])
     work_content_subdivisions_df = pd.DataFrame(work_content_subdivisions_data,
-                                                columns=['workId', 'typ', 'cnt', 'name', 'node', 'parent', 'fromIndex',
+                                                columns=['workId', 'node', 'typ', 'cnt', 'name', 'parent', 'fromIndex',
                                                          'toIndex'])
     authors_df = pd.DataFrame(authors_data, columns=['id', 'name', 'about', 'image'])
     author_abbreviations_df = pd.DataFrame(author_abbreviations_data, columns=['authorId', 'id', 'val'])
