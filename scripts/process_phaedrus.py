@@ -64,7 +64,8 @@ def process_verse(xml_string, output_dir):
     work_id = generate_uuid()
     title_element = root.find('.//tei:title[@xml:lang="lat"]', namespaces)
     work_name = title_element.text if title_element is not None else 'Unknown Title'
-    works_data.append([work_id, work_name])
+    work_data = get_work_data(work_id, work_name)
+    works_data.append(work_data)
     print(f'Work: {work_id}, {work_name}')
 
     author_element = root.find('.//tei:author', namespaces)
@@ -204,7 +205,7 @@ def process_verse(xml_string, output_dir):
         work_content_subdivisions_data.append(
             [work_id, book_node, 'BOOK', book_seq, book_name, None, book_from_index, book_to_index])
 
-    works_df = pd.DataFrame(works_data, columns=['id', 'name'])
+    works_df = pd.DataFrame(works_data, columns=['id', 'name', 'about'])
     work_contents_df = pd.DataFrame(work_contents_data, columns=['workId', 'idx', 'word', 'sourceReference'])
     work_content_subdivisions_df = pd.DataFrame(work_content_subdivisions_data,
                                                 columns=['workId', 'node', 'typ', 'cnt', 'name', 'parent', 'fromIndex',
@@ -226,6 +227,16 @@ def process_verse(xml_string, output_dir):
     work_abbreviations_df.to_csv(os.path.join(output_dir, 'work_abbreviations.csv'), index=False)
     authors_and_works_df.to_csv(os.path.join(output_dir, 'authors_and_works.csv'), index=False)
     work_content_supplementary_df.to_csv(os.path.join(output_dir, 'work_content_supplementary.csv'), index=False)
+
+
+def get_work_data(work_id, work_name):
+    script_dir = os.path.dirname(__file__)
+    script_parent_dir = os.path.dirname(script_dir)
+    about_file = os.path.join(script_parent_dir, "data", "phaedrus", 'about_phi0975_phi001.txt')
+    with open(about_file, 'r', encoding='utf-8') as about:
+        about_text = about.read()
+    work_data = [work_id, work_name, about_text]
+    return work_data
 
 
 def get_author_data(author_id, author_name):
