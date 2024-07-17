@@ -78,13 +78,13 @@ def process_verse(xml_string, output_dir):
     # Adding standard abbreviation for the author
     # noinspection SpellCheckingInspection
     author_abbreviation = 'Phdr.'
-    author_abbreviations_data.append([author_id, 1, author_abbreviation])
+    author_abbreviations_data.append([author_id, 0, author_abbreviation])
 
     # Linking author to work
     authors_and_works_data.append([author_id, work_id])
 
-    fragment_index = 1  # Global index counter for fragments
-    supplementary_index = {"NOTE": 1, "GAP": 1, "ABBR": 1}  # Note index counter
+    fragment_index = 0  # Global index counter for fragments
+    supplementary_index = {"NOTE": 0, "GAP": 0, "ABBR": 0}  # Note index counter
 
     for work in root.findall('.//tei:div[@subtype="book"]', namespaces):
         book_node = generate_uuid()
@@ -101,7 +101,7 @@ def process_verse(xml_string, output_dir):
             to_index = fragment_index + len(book_head_segments) - 1
 
             # noinspection SpellCheckingInspection
-            book_head_sub = [work_id, generate_uuid(), 'TITL', 1, book_head_text, book_node, fragment_index, to_index]
+            book_head_sub = [work_id, generate_uuid(), 'TITL', 0, book_head_text, book_node, fragment_index, to_index]
             work_content_subdivisions_data.append(book_head_sub)
             print(f'Book Head Subdivision: {book_head_sub}')
 
@@ -121,7 +121,7 @@ def process_verse(xml_string, output_dir):
             typ = {"epilogus": "EPIL", "prologus": "PROL"}.get(poem_id, 'POEM' if str(poem_id).isdigit() else poem_id)
 
             if typ not in type_counters:
-                type_counters[typ] = 1
+                type_counters[typ] = 0
             else:
                 type_counters[typ] += 1
 
@@ -141,14 +141,14 @@ def process_verse(xml_string, output_dir):
                 line_tag = line.tag.split('}')[-1]
                 if line_tag == 'l':
                     typ = 'VERS'
-                    poem_line_seq = line.get('n')
+                    poem_line_seq = int(line.get('n')) - 1
                 elif line_tag == 'p':
                     typ = 'PARA'
-                    poem_line_seq = 1
+                    poem_line_seq = 0
                 elif line_tag == 'head':
                     # noinspection SpellCheckingInspection
                     typ = 'TITL'
-                    poem_line_seq = 1
+                    poem_line_seq = 0
                 else:
                     raise ValueError(f'Unknown tag {line_tag} found in poem.')
                 # Replace the unique strings with <del> and </del> tags
@@ -196,9 +196,11 @@ def process_verse(xml_string, output_dir):
             supplementary_index["NOTE"] += 1
             fragment_index = to_index + 1
 
-        book_seq = work.get('n')
-        if not is_numeric(book_seq):
-            book_seq = len([x for x in work_content_subdivisions_data if x[1] == 'BOOK']) + 1
+        book_seq = int(work.get('n')) - 1 if is_numeric(work.get('n')) else None
+        if book_seq is None:
+            # Find the maximum book_seq in the current work_content_subdivisions_data
+            existing_book_seqs = [x[3] for x in work_content_subdivisions_data if x[2] == 'BOOK']
+            book_seq = max(existing_book_seqs) + 1 if existing_book_seqs else 0
 
         # Set the toIndex for the book after processing all its content
         book_to_index = fragment_index - 1
@@ -260,13 +262,15 @@ def validate_csv_files(xml_string, output_dir):
     work_contents_df = pd.read_csv(os.path.join(output_dir, 'work_contents.csv'))
     work_content_subdivisions_df = pd.read_csv(os.path.join(output_dir, 'work_content_subdivisions.csv'))
     work_content_supplementary_df = pd.read_csv(os.path.join(output_dir, 'work_content_supplementary.csv'))
+    author_abbreviations_df = pd.read_csv(os.path.join(output_dir, 'author_abbreviations.csv'))
 
-    check_unique_consecutive_idx_in_contents(errors, work_contents_df)
+    check_seq_unique_ints_from_0(errors, author_abbreviations_df, 'author abbreviations', 'id', ['authorId'])
+    check_seq_unique_ints_from_0(errors, work_content_subdivisions_df, 'subs', 'cnt', ['workId', 'parent', 'typ'])
+    check_seq_unique_ints_from_0(errors, work_contents_df, 'contents', 'idx', ['workId'])
+    check_seq_unique_ints_from_0(errors, work_content_supplementary_df, 'supplementary', 'cnt', ['workId', 'typ'])
     check_children_within_parent_range(errors, work_content_subdivisions_df)
     check_to_index_always_gt_from_index_in_sub(errors, work_content_subdivisions_df)
     check_to_index_always_gt_from_index_in_supp(errors, work_content_supplementary_df)
-    check_consecutive_integers_by_typ_in_sub(errors, work_content_subdivisions_df)
-    check_consecutive_integers_by_typ_in_supp(errors, work_content_supplementary_df)
     check_contents_not_empty_when_supp_not_empty(errors, work_contents_df, work_content_supplementary_df)
     check_subdivisions_not_empty_when_contents_not_empty(errors, work_content_subdivisions_df, work_contents_df)
     validate_gap_tags(errors, xml_string, work_content_subdivisions_df.to_dict('records'),
@@ -280,6 +284,34 @@ def validate_csv_files(xml_string, output_dir):
             print(error)
     else:
         print("All validations passed successfully.")
+
+
+def check_seq_unique_ints_from_0(errors, df, f_name, column_name, group_columns=None):
+    def check_sequence_and_uniqueness(series):
+        expected_values = pd.Series(range(0, len(series)))
+        is_sequential = series.equals(expected_values)
+        is_unique = series.nunique() == len(series)
+        return is_sequential and is_unique
+
+    if group_columns:
+        grouped = df.groupby(group_columns, dropna=False)
+        for name, group in grouped:
+            sorted_values = group[column_name].sort_values().reset_index(drop=True)
+            if not check_sequence_and_uniqueness(sorted_values):
+                group_name = ', '.join([f"{col}={val}" for col, val in zip(group_columns, name)])
+                if sorted_values.nunique() != len(sorted_values):
+                    errors.append(f"For {f_name}, column '{column_name}' in group ({group_name}) contains duplicate "
+                                  f"values.")
+                else:
+                    errors.append(f"For {f_name}, column '{column_name}' in group ({group_name}) does not contain "
+                                  f"sequential integers starting from 0.")
+    else:
+        sorted_values = df[column_name].sort_values().reset_index(drop=True)
+        if not check_sequence_and_uniqueness(sorted_values):
+            if sorted_values.nunique() != len(sorted_values):
+                errors.append(f"Column '{column_name}' contains duplicate values.")
+            else:
+                errors.append(f"Column '{column_name}' does not contain sequential integers starting from 0.")
 
 
 def check_to_index_always_gt_from_index_in_sub(errors, work_content_subdivisions_df):
@@ -313,14 +345,6 @@ def check_children_within_parent_range(errors, work_content_subdivisions_df):
             if not (parent_from <= child_from <= parent_to and parent_from <= child_to <= parent_to):
                 errors.append(f'Child node {child_row["node"]} indices [{child_from}, {child_to}] are out of range '
                               f'of parent node {parent_node} indices [{parent_from}, {parent_to}].')
-
-
-def check_unique_consecutive_idx_in_contents(errors, work_contents_df):
-    if not work_contents_df['idx'].is_unique:
-        errors.append('idx values in work_contents.csv are not unique.')
-    if not pd.Series((work_contents_df['idx'].sort_values().reset_index(drop=True)
-                      == pd.Series(range(1, len(work_contents_df) + 1)))).all():
-        errors.append('idx values in work_contents.csv are not consecutive starting from 1.')
 
 
 def check_consecutive_integers_by_typ_in_sub(errors, work_content_subdivisions_df):
