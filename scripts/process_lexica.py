@@ -1,11 +1,9 @@
-# noinspection PyPep8Naming
-import xml.etree.ElementTree as ET
 import csv
 import uuid
 import os
-from collections import defaultdict
 import unicodedata
 import re
+from lxml import etree
 
 from scripts.process_lexica_aux.abbreviations import abbreviations
 from scripts.process_lexica_aux.fake_itypes import fake_itypes
@@ -26,6 +24,19 @@ part_of_speech_by_lemmas = {
     "segnitia": "noun",
     "volo1": "verb",
 }
+
+
+def clean_content(content):
+    """
+    Clean up content by removing spaces after punctuation and normalizing whitespace.
+    """
+    # Remove spaces after punctuation
+    content = re.sub(r'\s+([.,;:!?])', r'\1', content)
+
+    # Normalize whitespace
+    content = ' '.join(content.split())
+
+    return content
 
 
 # noinspection SpellCheckingInspection
@@ -131,9 +142,9 @@ def part_of_speech_from_itype(lemma, itype):
 
 
 def part_of_speech_from_hi_tag(entry):
-    hi_tag = entry.find('.//hi[@rend="ital"]')
-    if hi_tag is not None and hi_tag.text in pos_tags:
-        return pos_tags[hi_tag.text]
+    hi_tag = entry.xpath('.//hi[@rend="ital"]')
+    if hi_tag and hi_tag[0].text in pos_tags:
+        return pos_tags[hi_tag[0].text]
     return ""
 
 
@@ -141,6 +152,7 @@ def file():
     file_name = "lat.ls.perseus-eng2.xml"
     script_dir = os.path.dirname(__file__)
     script_parent_dir = os.path.dirname(script_dir)
+    # noinspection SpellCheckingInspection
     file_path = os.path.join(script_parent_dir, "data", "lexica", file_name)
     return file_path
 
@@ -165,6 +177,7 @@ def clean_text(text):
     return text
 
 
+# noinspection SpellCheckingInspection
 def substitute_abbreviations(text):
     """
     Substitute abbreviations in the text, avoiding substitutions within <bibl> tags
@@ -205,23 +218,18 @@ def write_csv_row(writer, row):
 
 
 def inflection_of(entry):
-    """
-    Extract inflection information from the entry.
-    """
     inflection = ''
     itype = entry.find('.//itype')
     if itype is not None:
         inflection = itype.text
-    # Only add gender information if the part of speech is not an adjective
     pos = entry.find('.//pos')
     if pos is not None:
-        pos_text = pos_tags[pos.text] if pos.text in pos_tags else pos.text
+        pos_text = pos_tags.get(pos.text, pos.text)
         if (not pos_text.startswith('adjective') and not pos_text.startswith('participle')
                 and not pos_text.startswith('verb')):
             gen = entry.find('.//gen')
             if gen is not None:
                 inflection += f'{", " if inflection else ""}{gen.text}'
-
     return inflection
 
 
@@ -229,52 +237,116 @@ def part_of_speech_of(entry, lemma):
     part_of_speech = ''
     mood = entry.find('.//mood')
     if mood is not None:
-        part_of_speech = pos_tags[mood.text] if mood.text in pos_tags else mood.text
+        part_of_speech = pos_tags.get(mood.text, mood.text)
     pos = entry.find('.//pos')
     if pos is not None:
-        pos_from_pos = pos_tags[pos.text] if pos.text in pos_tags else pos.text
+        pos_from_pos = pos_tags.get(pos.text, pos.text)
         if part_of_speech != 'participle' \
                 or (part_of_speech == 'participle' and pos_from_pos.startswith('adjective')):
             part_of_speech += f'{", " if part_of_speech else ""}{pos_from_pos}'
-    # If both mood and pos are empty, determine part of speech using fallback logic
     if not part_of_speech:
-        # noinspection SpellCheckingInspection
         itype = entry.find('.//itype')
-        # noinspection SpellCheckingInspection
         if itype is not None:
             part_of_speech = part_of_speech_from_itype(lemma, itype.text)
-    # If still empty, check for error-prone <hi rend="ital"> tags (sometimes they refer to other words)
     if not part_of_speech:
         part_of_speech = part_of_speech_from_hi_tag(entry)
     return part_of_speech
 
 
+def text_before_sense(parent, current, current_index):
+    """
+    Extract text directly under entryFree (excluding previous content within nested tags)
+    that appears before the current sense tag and not part of any previous sense tag.
+    Nested tags following the initial free text are included in their order of occurrence.
+    """
+
+    def clean(text):
+        # remove leading punctuation signs
+        while text and text[0] in ' .,':
+            text = text.lstrip(' .,')
+            # Normalize whitespace: replace any sequence of whitespace characters (including newlines) with a single space
+        text = re.sub(r'\s+', ' ', text)
+        # Remove spaces before certain punctuation marks
+        text = re.sub(r'\s+([,.;:!?])', r'\1', text)
+        # Ensure single space after punctuation marks (except for opening parentheses and quotes)
+        text = re.sub(r'([,.;:!?])\s*', r'\1 ', text)
+        # Remove extra spaces around parentheses and quotes
+        text = re.sub(r'\s*([()])\s*', r'\1', text)
+        text = re.sub(r'\s*(["\'])\s*', r'\1', text)
+        # Remove trailing line breaks
+        text = text.rstrip('\n\r')
+        return text
+
+
+    def extract_for_first_sense(p):
+        r = ""
+        # noinspection SpellCheckingInspection
+        inflection_tags = ('orth', 'pos', 'itype', 'mood', 'gen')
+        start_capture = False
+        for element in p.getchildren():
+            if element.tag == 'entryFree':
+                continue
+            if element.tag == 'sense':
+                break
+            if not start_capture and element.getnext().tag not in inflection_tags:
+                start_capture = True
+                if element.tail is not None:
+                    r += element.tail
+                continue
+            if start_capture:
+                r += ''.join(element.itertext())
+                if element.tail is not None:
+                    r += element.tail
+        return r
+
+
+    def extract_for_other_senses(p, c):
+        r = ""
+        # noinspection SpellCheckingInspection
+        inflection_tags = ('orth', 'pos', 'itype', 'mood', 'gen')
+        is_in_rage = False
+        start_capture = False
+        for element in p.getchildren():
+            if element.getnext() == c:
+                is_in_rage = True
+            if is_in_rage and not (element.getnext() == c):
+                break
+            if is_in_rage and not start_capture and element.getnext().tag not in inflection_tags:
+                start_capture = True
+                if element.tail is not None:
+                    r += element.tail
+                continue
+            if start_capture:
+                r += ''.join(element.itertext())
+                if element.tail is not None:
+                    r += element.tail
+        return r if r.strip() else ''
+
+
+    extracted = extract_for_first_sense(parent) if current_index == 1 else extract_for_other_senses(parent, current)
+    return clean(extracted)
+
+
 def parse_xml_and_write_csv(input_file, output_dir):
-    # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
 
-    # Define output CSV files
     dictionaries_file = os.path.join(output_dir, 'dictionaries.csv')
     entries_file = os.path.join(output_dir, 'dictionary_entries.csv')
     senses_file = os.path.join(output_dir, 'dict_entry_senses.csv')
     quotes_file = os.path.join(output_dir, 'dic_entry_sense_quotes.csv')
 
-    # Create a unique ID for the dictionary
     dictionary_id = str(uuid.uuid4())
 
-    # Write to Dictionaries CSV
     with open(dictionaries_file, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         write_csv_row(writer, ['ID', 'name', 'language', 'publisher', 'publicationDate'])
         write_csv_row(writer, [dictionary_id, 'Lewis & Short', 'EN', 'Perseus Digital Library', ''])
 
-    # Read and clean XML data
     with open(input_file, 'r', encoding='utf-8') as f:
         xml_string = f.read()
     cleaned_xml_string = clean_data(xml_string)
 
-    # Parse cleaned XML
-    root = ET.fromstring(cleaned_xml_string)
+    root = etree.fromstring(cleaned_xml_string.encode('utf-8'))
 
     with open(entries_file, 'w', newline='', encoding='utf-8') as entries_csv, \
             open(senses_file, 'w', newline='', encoding='utf-8') as senses_csv, \
@@ -284,86 +356,74 @@ def parse_xml_and_write_csv(input_file, output_dir):
         senses_writer = csv.writer(senses_csv)
         quotes_writer = csv.writer(quotes_csv)
 
-        # Write headers
         write_csv_row(entries_writer, ['dictionary', 'lemma', 'partOfSpeech', 'inflection'])
         write_csv_row(senses_writer, ['dictionary', 'lemma', 'level', 'prettyLevel', 'content'])
         write_csv_row(quotes_writer, ['dictionary', 'lemma', 'level', 'seq', 'content', 'translation'])
 
-        for entry in root.findall('.//entryFree'):
-
+        for entry in root.xpath('.//entryFree'):
             lemma = entry.get('key', '')
 
-            # Check for <pos>adverb</pos> directly inside entryFree
-            same_level_pos = entry.find('./pos')
-            any_pos = entry.find('.//pos')
+            same_level_pos = entry.xpath('./pos')
+            any_pos = entry.xpath('.//pos')
             # noinspection SpellCheckingInspection
             if lemma == 'volo1':
                 part_of_speech = 'verb'
                 inflection = 'irregular'
-            elif same_level_pos is not None and same_level_pos.text in pos_tags and pos_tags[
-                    same_level_pos.text] == 'adverb':
+            elif (same_level_pos and same_level_pos[0].text in pos_tags and
+                  pos_tags[same_level_pos[0].text] == 'adverb'):
                 part_of_speech = 'adverb'
                 inflection = 'indeclinable'
-            elif any_pos is not None and any_pos.text in pos_tags and pos_tags[any_pos.text].startswith('verb'):
+            elif any_pos and any_pos[0].text in pos_tags and pos_tags[any_pos[0].text].startswith('verb'):
                 part_of_speech = 'verb'
                 inflection = inflection_of(entry)
             else:
                 part_of_speech = part_of_speech_of(entry, lemma)
                 inflection = inflection_of(entry)
 
-            # Write to DictionaryEntries CSV
             write_csv_row(entries_writer, [dictionary_id, lemma, part_of_speech, inflection])
 
-            # Process senses
-            senses = entry.findall('.//sense')
-            level_map = defaultdict(lambda: defaultdict(int))
+            senses = entry.xpath('.//sense')
+            level_stack = []
+            current_level = 0
 
-            # First pass: map levels and n values
-            for sense in senses:
+            for i, sense in enumerate(senses, 1):
                 level = int(sense.get('level', '1'))
-                n = sense.get('n', '')
-                if n:
-                    level_map[level][n] += 1
 
-            # Second pass: create level notations and write to CSV
-            for sense in senses:
-                level = int(sense.get('level', '1'))
-                n = sense.get('n', '')
+                if level > current_level:
+                    level_stack.append(1)
+                elif level < current_level:
+                    level_stack = level_stack[:level]
+                    level_stack[-1] += 1
+                else:
+                    level_stack[-1] += 1
 
-                # Generate level notation
-                levels = []
-                for i in range(1, level + 1):
-                    if i in level_map:
-                        if n and i == level:
-                            levels.append(sorted(level_map[i].keys()).index(n) + 1)
-                        else:
-                            levels.append(len(level_map[i]))
-                    else:
-                        levels.append(1)
+                current_level = level
 
-                level_notation = create_level_notation(levels)
-                pretty_level = '.'.join(str(level) for level in levels)
+                level_notation = '.'.join(f"{l1:03d}" for l1 in level_stack)
+                pretty_level = '.'.join(str(l2) for l2 in level_stack)
 
-                # Get sense content and substitute abbreviations
-                content = ' '.join(sense.itertext()).strip()
+                prefix_text = text_before_sense(entry, sense, i)
+
+                content = ' '.join(sense.xpath('.//text()'))
+                if prefix_text:
+                    content = prefix_text + " " + content
                 content = substitute_abbreviations(content)
+                content = clean_content(content)
 
-                # Write to DictEntrySenses CSV
                 write_csv_row(senses_writer, [dictionary_id, lemma, level_notation, pretty_level, content])
 
-                # Process quotes
-                for seq, quote in enumerate(sense.findall('.//quote'), 1):
-                    quote_content = ' '.join(quote.itertext()).strip()
-                    quote_content = substitute_abbreviations(quote_content)
-                    translation = quote.find('trans')
-                    trans_content = ' '.join(translation.itertext()).strip() if translation is not None else ''
-                    trans_content = substitute_abbreviations(trans_content)
+                for seq, quote in enumerate(sense.xpath('.//quote'), 1):
+                    quote_content = ' '.join(quote.xpath('.//text()'))
+                    quote_content = clean_content(quote_content)
+                    translation = quote.xpath('.//trans')
+                    trans_content = ' '.join(translation[0].xpath('.//text()')) if translation else ''
+                    trans_content = clean_content(trans_content)
 
-                    # Write to DicEntrySenseQuotes CSV
                     write_csv_row(quotes_writer,
                                   [dictionary_id, lemma, level_notation, seq, quote_content, trans_content])
 
 
 if __name__ == "__main__":
+    # noinspection SpellCheckingInspection
     parse_xml_and_write_csv(file(), '../output/lexica/')
     print("XML parsing and CSV writing completed successfully.")
