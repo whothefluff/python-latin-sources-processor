@@ -253,6 +253,11 @@ def text_before_sense(parent, current, current_index):
     Nested tags following the initial free text are included in their order of occurrence.
     """
 
+    def next_tag_is_first_not_excluded(prefix_started, element):
+        # noinspection SpellCheckingInspection
+        inflection_tags = ('orth', 'pos', 'itype', 'mood', 'gen')
+        return not prefix_started and element.getnext().tag not in inflection_tags
+
     def clean(text):
         # remove leading punctuation signs
         while text and text[0] in ' .,':
@@ -268,17 +273,15 @@ def text_before_sense(parent, current, current_index):
         return text
 
 
-    def extract_for_first_sense(p):
+    def extract_for_first_sense(p, c):
         r = ""
-        # noinspection SpellCheckingInspection
-        inflection_tags = ('orth', 'pos', 'itype', 'mood', 'gen')
         start_capture = False
         for element in p.getchildren():
             if element.tag == 'entryFree':
                 continue
             if element.tag == 'sense':
                 break
-            if not start_capture and element.getnext().tag not in inflection_tags:
+            if next_tag_is_first_not_excluded(start_capture, element):
                 start_capture = True
                 if element.tail is not None:
                     r += element.tail
@@ -287,13 +290,17 @@ def text_before_sense(parent, current, current_index):
                 r += ''.join(element.itertext())
                 if element.tail is not None:
                     r += element.tail
+        if re.match( r'^[^(]*\)', r):
+            text_content = ''.join(p.itertext())
+            op_par_index = text_content.find('(')
+            sense_index = text_content.find(''.join(c.itertext()))
+            if op_par_index != -1:
+                r = text_content[op_par_index:sense_index]
         return r
 
 
     def extract_for_other_senses(p, c):
         r = ""
-        # noinspection SpellCheckingInspection
-        inflection_tags = ('orth', 'pos', 'itype', 'mood', 'gen')
         is_in_rage = False
         start_capture = False
         for element in p.getchildren():
@@ -301,7 +308,7 @@ def text_before_sense(parent, current, current_index):
                 is_in_rage = True
             if is_in_rage and not (element.getnext() == c):
                 break
-            if is_in_rage and not start_capture and element.getnext().tag not in inflection_tags:
+            if is_in_rage and next_tag_is_first_not_excluded(start_capture, element):
                 start_capture = True
                 if element.tail is not None:
                     r += element.tail
@@ -312,8 +319,7 @@ def text_before_sense(parent, current, current_index):
                     r += element.tail
         return r if r.strip() else ''
 
-
-    extracted = extract_for_first_sense(parent) if current_index == 1 else extract_for_other_senses(parent, current)
+    extracted = extract_for_first_sense(parent, current) if current_index == 1 else extract_for_other_senses(parent, current)
     return clean(extracted)
 
 
@@ -441,11 +447,13 @@ def parse_xml_and_write_csv(input_file, output_dir):
                     while entry.getprevious() is not None:
                         del entry.getparent()[0]
                 except Exception as e:
-                    logging.error(f"Error processing entry {lemma}: {str(e)}")
-                    continue
+                    raise e
+                    #logging.error(f"Error processing entry {lemma}: {str(e)}")
+                    #continue
 
         except Exception as e:
-            logging.error(f"Error parsing XML: {str(e)}")
+            raise e
+            #logging.error(f"Error parsing XML: {str(e)}")
 
     logging.info("XML parsing and CSV writing completed successfully.")
 
