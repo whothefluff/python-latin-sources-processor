@@ -1,11 +1,10 @@
 import csv
 import uuid
 import os
-import unicodedata
 import re
 from lxml import etree
 import logging
-
+import io
 from scripts.process_lexica_aux.abbreviations import abbreviations
 from scripts.process_lexica_aux.fake_itypes import fake_itypes
 from scripts.process_lexica_aux.broken_itypes import broken_itypes
@@ -71,9 +70,12 @@ def clean_data(xml_string):
     """
     Apply all data cleaning functions to the XML string.
     """
+    logging.info("Deleting fake itypes...")
     xml_string = clean_itypes(xml_string)
-
-    # Add more cleaning functions here as needed
+    logging.info("Substituting etym...")
+    xml_string = substitute_etym(xml_string)
+    logging.info("Substituting vide...")
+    xml_string = substitute_vide(xml_string)
 
     return xml_string
 
@@ -158,26 +160,6 @@ def file():
     return file_path
 
 
-def create_level_notation(levels):
-    """
-    Create a hierarchical level notation based on the given levels.
-    """
-    return '.'.join(f"{level:03d}" for level in levels)
-
-
-def clean_text(text):
-    """
-    Clean and normalize text, removing control characters and normalizing whitespace.
-    """
-    # Remove control characters
-    text = ''.join(ch for ch in text if unicodedata.category(ch)[0] != 'C')
-
-    # Normalize whitespace
-    text = ' '.join(text.split())
-
-    return text
-
-
 # noinspection SpellCheckingInspection
 def substitute_abbreviations(text):
     """
@@ -199,6 +181,16 @@ def substitute_abbreviations(text):
                               lambda m: abbreviations[m.group(0)], parts[i])
 
     return ''.join(parts)
+
+
+def substitute_etym(text):
+    text = re.sub(r'<etym>(.*?)</etym>', r'from \1', text)
+    return text
+
+
+def substitute_vide(text):
+    text = re.sub(r'<lbl>v.</lbl>', 'see', text)
+    return text
 
 
 def escape_csv_field(field):
@@ -326,7 +318,8 @@ def text_before_sense(parent, current, current_index):
 
 
 def concatenate_prefix(prefix, content):
-    def needs_space(last_char, first_char):
+
+    def needs_space():
         if (re.match(r".*[a-zA-Z0-9]$", prefix) and re.match(r"^[.,!?)}\]\"']", content)) or \
                 (re.match(r".*[.,!?)}\]\"']$", prefix) and re.match(r"^[a-zA-Z0-9]", content)):
             return not (prefix.endswith(" ") or content.startswith(" "))
@@ -334,7 +327,7 @@ def concatenate_prefix(prefix, content):
 
     if not prefix:
         return content
-    if content and needs_space(prefix, content):
+    if content and needs_space():
             return prefix + ' ' + content
     return prefix + content
 
@@ -347,6 +340,16 @@ def parse_xml_and_write_csv(input_file, output_dir):
     entries_file = os.path.join(output_dir, 'dictionary_entries.csv')
     senses_file = os.path.join(output_dir, 'dict_entry_senses.csv')
     quotes_file = os.path.join(output_dir, 'dic_entry_sense_quotes.csv')
+
+    # Read the entire XML file
+    with open(input_file, 'r', encoding='utf-8') as f:
+        logging.info("Reading XML file...")
+        xml_content = f.read()
+    logging.info("Cleaning XML data...")
+    xml_content = clean_data(xml_content)
+    logging.info("Creating BytesIO object...")
+    xml_bytes = xml_content.encode('utf-8')
+    xml_file = io.BytesIO(xml_bytes)
 
     dictionary_id = str(uuid.uuid4())
 
@@ -368,7 +371,7 @@ def parse_xml_and_write_csv(input_file, output_dir):
         write_csv_row(quotes_writer, ['dictionary', 'lemma', 'level', 'seq', 'content', 'translation'])
 
         try:
-            context = etree.iterparse(input_file, events=('end',), tag='entryFree')
+            context = etree.iterparse(xml_file, events=('end',), tag='entryFree')
             for event, entry in context:
                 try:
                     lemma = entry.get('key', '')
@@ -376,6 +379,7 @@ def parse_xml_and_write_csv(input_file, output_dir):
 
                     same_level_pos = entry.xpath('./pos')
                     any_pos = entry.xpath('.//pos')
+                    # noinspection SpellCheckingInspection
                     if lemma == 'volo1':
                         part_of_speech = 'verb'
                         inflection = 'irregular'
