@@ -119,20 +119,15 @@ def clean_data(xml_string):
 
 # noinspection SpellCheckingInspection
 def part_of_speech_from_itype(lemma, itype):
-    if lemma in PART_OF_SPEECH_BY_LEMMAS:
-        return PART_OF_SPEECH_BY_LEMMAS[lemma]
 
-    lemma_base = re.sub(r"\d+$", "", lemma)
-
-    # Helper functions for common checks
     def ends_with(suffix):
+        lemma_base = re.sub( r"\d+$", "", lemma )
         return lemma_base.endswith(suffix)
 
     def itype_starts_with(prefix):
         return itype.startswith(prefix)
 
-    # Rules for determining part of speech
-    rules = [
+    pos_from_itypes = [
         (lambda: (itype_starts_with("āre") or itype_starts_with("āvī"))
                  and ends_with("o"), "verb"),
         (lambda: (itype_starts_with("ārī") or itype_starts_with("ātus"))
@@ -177,10 +172,11 @@ def part_of_speech_from_itype(lemma, itype):
         (lambda: itype_starts_with("us") and ends_with("ior"), "adjective"),
     ]
 
-    for condition, pos in rules:
+    if lemma in PART_OF_SPEECH_BY_LEMMAS:
+        return PART_OF_SPEECH_BY_LEMMAS[lemma]
+    for condition, pos in pos_from_itypes:
         if condition():
             return pos
-
     return ""
 
 
