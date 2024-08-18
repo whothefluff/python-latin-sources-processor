@@ -2,18 +2,19 @@ import csv
 import uuid
 import os
 import re
-from lxml import etree
 import logging
 import io
+from lxml import etree
 from scripts.process_lexica_aux.abbreviations import abbreviations
+from scripts.process_lexica_aux.cites import cites
 from scripts.process_lexica_aux.fake_itypes import fake_itypes
 from scripts.process_lexica_aux.broken_itypes import broken_itypes
 from scripts.process_lexica_aux.pos_tags import pos_tags
 
-SUBSTITUTE_ABBREVIATIONS = False
+SUBSTITUTE_ABBREVIATIONS = True
 
 # noinspection SpellCheckingInspection
-part_of_speech_by_lemmas = {
+PART_OF_SPEECH_BY_LEMMAS = {
     "Itys": "noun",
     "iste": "demonstrative pronoun",
     "duo": "numeral",
@@ -25,6 +26,36 @@ part_of_speech_by_lemmas = {
     "volo1": "verb",
 }
 
+ABBR_LEAD_CHARS = r'—([,.?!;:'
+
+# Create filtered copies of cites and abbreviations
+filtered_cites = {k: v for k, v in cites.items() if k not in abbreviations}
+filtered_abbreviations = {k: v for k, v in abbreviations.items() if k not in cites}
+
+# Sort both cites and abbreviations using the same sorting logic
+def sort_key(item):
+    key, _ = item
+    spaces = key.count(' ')
+    return -spaces, -len(key)
+sorted_cites = sorted(filtered_cites.items(), key=sort_key)
+sorted_abbreviations = sorted(filtered_abbreviations.items(), key=sort_key)
+
+# Aggregate cites substitutions
+cite_patterns = []
+cite_replacements = {}
+for cite, replacement in sorted_cites:
+    cite_patterns.append(re.escape(cite))
+    cite_replacements[cite] = replacement
+combined_cite_pattern = '|'.join(cite_patterns)
+
+# Aggregate abbreviations substitutions
+abbr_patterns = []
+abbr_replacements = {}
+for abbr, replacement in sorted_abbreviations:
+    full_abbr_pat = r'(^|\s|[' + ABBR_LEAD_CHARS + r'])' + re.escape(abbr)
+    abbr_patterns.append(full_abbr_pat)
+    abbr_replacements[abbr] = replacement
+combined_abbr_pattern = '|'.join(abbr_patterns)
 
 def clean_content(content):
     """
@@ -82,8 +113,8 @@ def clean_data(xml_string):
 
 # noinspection SpellCheckingInspection
 def part_of_speech_from_itype(lemma, itype):
-    if lemma in part_of_speech_by_lemmas:
-        return part_of_speech_by_lemmas[lemma]
+    if lemma in PART_OF_SPEECH_BY_LEMMAS:
+        return PART_OF_SPEECH_BY_LEMMAS[lemma]
 
     lemma_base = re.sub(r'\d+$', '', lemma)
 
@@ -163,24 +194,28 @@ def file():
 # noinspection SpellCheckingInspection
 def substitute_abbreviations(text):
     """
-    Substitute abbreviations in the text, avoiding substitutions within <bibl> tags
-    and giving precedence to longer abbreviations.
+    Perform advanced substitution on the text using cites and abbreviations dictionaries.
+    Aggregates substitutions separately for cites and abbreviations.
     """
-    if not SUBSTITUTE_ABBREVIATIONS:
+
+    def cite_replace(match):
+        m_content = match.group(0)
+        return cite_replacements.get(m_content, m_content)
+
+    def abbr_replace(match):
+        m_content = match.group(0)
+        first_char = m_content[0]
+        if first_char in ABBR_LEAD_CHARS + ' ':
+            return first_char + abbr_replacements.get(m_content[1:], m_content)
+        else:
+            return abbr_replacements.get(m_content, m_content)
+
+    if SUBSTITUTE_ABBREVIATIONS:
+        no_cites = re.sub(combined_cite_pattern, cite_replace, text)
+        no_cites_nor_abbrs = re.sub(combined_abbr_pattern, abbr_replace, no_cites)
+        return no_cites_nor_abbrs
+    else:
         return text
-    # Sort abbreviations by length (longest first) to ensure longer matches take precedence
-    sorted_abbrevs = sorted(abbreviations.keys(), key=len, reverse=True)
-
-    # Split the text by <bibl> tags
-    parts = re.split(r'(<bibl>.*?</bibl>)', text, flags=re.DOTALL)
-
-    for i in range(0, len(parts), 2):
-        # Only process parts outside <bibl> tags
-        for abbr in sorted_abbrevs:
-            parts[i] = re.sub(r'\b' + re.escape(abbr) + r'\b',
-                              lambda m: abbreviations[m.group(0)], parts[i])
-
-    return ''.join(parts)
 
 
 def substitute_etym(text):
@@ -262,7 +297,7 @@ def text_before_sense(parent, current, current_index):
         # remove leading punctuation signs
         while text and text[0] in ' .,':
             text = text.lstrip(' .,')
-            # Normalize whitespace: replace any sequence of whitespace characters (including newlines) with a single space
+        # Normalize whitespace: replace any sequence of whitespace characters (including newlines) with a single space
         text = re.sub(r'\s+', ' ', text)
         # Remove spaces before certain punctuation marks
         text = re.sub(r'\s+([,.;:!?])', r'\1', text)
@@ -423,7 +458,7 @@ def parse_xml_and_write_csv(input_file, output_dir):
                         pretty_level = '.'.join(str(l2) for l2 in level_stack)
 
                         prefix_text = text_before_sense(entry, sense, i)
-                        content = ' '.join(sense.xpath('.//text()'))
+                        content = ''.join(sense.itertext())
                         if prefix_text:
                             content = concatenate_prefix(prefix_text, content)
 
