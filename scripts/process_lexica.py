@@ -389,7 +389,7 @@ def parse_xml_and_write_csv(input_file, output_dir):
     dictionaries_file = os.path.join(output_dir, "dictionaries.csv")
     entries_file = os.path.join(output_dir, "dictionary_entries.csv")
     senses_file = os.path.join(output_dir, "dict_entry_senses.csv")
-    quotes_file = os.path.join(output_dir, "dic_entry_sense_quotes.csv")
+    #quotes_file = os.path.join(output_dir, "dic_entry_sense_quotes.csv")
 
     # Read the entire XML file
     with open(input_file, "r", encoding="utf-8") as f:
@@ -409,16 +409,14 @@ def parse_xml_and_write_csv(input_file, output_dir):
         write_csv_row( writer, [dictionary_id, "Lewis & Short", "EN", "Perseus Digital Library", ""], )
 
     with (open(entries_file, "w", newline="", encoding="utf-8") as entries_csv,
-          open(senses_file, "w", newline="", encoding="utf-8") as senses_csv,
-          open(quotes_file, "w", newline="", encoding="utf-8") as quotes_csv):
+          open(senses_file, "w", newline="", encoding="utf-8") as senses_csv,):
 
         entries_writer = csv.writer(entries_csv)
         senses_writer = csv.writer(senses_csv)
-        quotes_writer = csv.writer(quotes_csv)
 
         write_csv_row( entries_writer, ["dictionary", "lemma", "partOfSpeech", "inflection"] )
         write_csv_row( senses_writer, ["dictionary", "lemma", "level", "prettyLevel", "content"] )
-        write_csv_row( quotes_writer, ["dictionary", "lemma", "level", "seq", "content", "translation"], )
+        #write_csv_row( quotes_writer, ["dictionary", "lemma", "level", "seq", "content", "translation"], )
 
         try:
             context = etree.iterparse(xml_file, events=("end",), tag="entryFree")
@@ -478,17 +476,6 @@ def parse_xml_and_write_csv(input_file, output_dir):
                         content = clean_content(content)
 
                         write_csv_row( senses_writer, [ dictionary_id, lemma, level_notation, pretty_level, content, ], )
-
-                        for seq, quote in enumerate(sense.xpath(".//quote"), 1):
-                            quote_content = " ".join(quote.xpath(".//text()"))
-                            quote_content = clean_content(quote_content)
-                            translation = quote.xpath(".//trans")
-                            trans_content = ( " ".join(translation[0].xpath(".//text()"))
-                                                if translation
-                                                else "" )
-                            trans_content = clean_content(trans_content)
-
-                            write_csv_row( quotes_writer, [ dictionary_id, lemma, level_notation, seq, quote_content, trans_content, ], )
 
                     # Clear the element to free memory
                     entry.clear()
