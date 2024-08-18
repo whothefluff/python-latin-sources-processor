@@ -3,24 +3,24 @@ cites = {
 
     "Aem. Mac.": "Aemilius Macer",
 
-    "Afran.": "Lucius Afranius",
+    #"Afran.": "Lucius Afranius",
 
-    "Aggen.": "Aggenus Urbicus",
+    #"Aggen.": "Aggenus Urbicus",
 
-    "Agrim.": "The ancient writers on surveying; esp. Frontinus, Balbus, Hyginus, Siculus Flaccus, and Aggenus Urbicus",
+    #"Agrim.": "The ancient writers on surveying; esp. Frontinus, Balbus, Hyginus, Siculus Flaccus, and Aggenus Urbicus",
     "Agrimens.": "The ancient writers on surveying; esp. Frontinus, Balbus, Hyginus, Siculus Flaccus, and Aggenus Urbicus",
 
-    "Albin.": "C. Pedo Albinovanus",
+    #"Albin.": "C. Pedo Albinovanus",
 
-    "Alcim.": "Alcimus Avitus",
+    #"Alcim.": "Alcimus Avitus",
 
-    "Aldh.": "Aldhelmus",
+    #"Aldh.": "Aldhelmus",
     "Aldh. Ep.": "Epistula (ad Acircium, de metris, etc.)",
     "Aldh. Laud. Virg.": "De Laudibus Virginitatis",
 
-    "Alfen.": "P. Alfenus Varus",
+    #"Alfen.": "P. Alfenus Varus",
 
-    "Ambros.": "Ambrosius",
+    #"Ambros.": "Ambrosius",
     "Ambros. De Cain et Abel.": "Ambrosius' De Cain et Abel",
     "Ambros. De Fide": "Ambrosius' De Fide (De Fide Libri V ad Gratianum Augustum)",
     "Ambros. De Isaac et Anima.": "Ambrosius' De Isaac et Anima",
@@ -33,11 +33,11 @@ cites = {
 
     #"Amm.": "Ammianus Marcellinus",
 
-    "Ampel.": "L. Ampelius",
+    #"Ampel.": "L. Ampelius",
 
     "Anthol. Lat.": "Anthologia Latina",
 
-    "Apic.": "Apicius Caelius",
+    #"Apic.": "Apicius Caelius",
 
     #"App.": "Lucius Appuleius (Apu.)",
     "App. Apol.": "Lucius Appuleius' Apologia (or De Magiā)",
@@ -53,16 +53,16 @@ cites = {
 
     #"Arn.": "Arnobius Afer",
 
-    "Ascon.": "Q. Asconius Pedianus",
+    #"Ascon.": "Q. Asconius Pedianus",
 
-    "Asin.": "C. Asinius Pollio",
+    #"Asin.": "C. Asinius Pollio",
 
     "At. Cap.": "Ateius Capito",
 
     #"Att.": "L. Attius",
     #"Acc.": "L. Accius",
 
-    "Atta.": "T. Quinctius Atta",
+    #"Atta.": "T. Quinctius Atta",
 
     "Auct. Aetn.": "Auctor Aetnae (perhaps Lucilius Junior)",
 
@@ -93,7 +93,7 @@ cites = {
     "Aug. Serm.": "Aurelius Augustinus' Sermones",
     "Aug. Trin.": "Aurelius Augustinus' De Trinitate",
 
-    "August.": "Caesar Octavianus Augustus",
+    #"August.": "Caesar Octavianus Augustus",
 
     "Aur. Vict.": "Sextus Aurelius Victor",
     "Aur. Vict. Caes.": "Sextus Aurelius Victor's De Caesaribus",
@@ -117,21 +117,21 @@ cites = {
     "Aus. Sap.": "D. Magnus Ausonius' Sapientes",
     "Aus. Urb.": "D. Magnus Ausonius' Ordo Nobilium Urbium",
 
-    "Avien.": "R. Festus Avienus",
+    #"Avien.": "R. Festus Avienus",
     "Avien. Descr. Orb.": "R. Festus Avienus' Descriptio Orbis Terrae (or Περιήγησις)",
     "Avien. Or. Mar.": "R. Festus Avienus' Ora Maritima",
     "Avien. Perieg.": "R. Festus Avienus' Descriptio Orbis Terrae (or Περιήγησις)",
 
-    "Boëth.": "Anicius Manl. Torq. Severinus Boetius",
+    #"Boëth.": "Anicius Manl. Torq. Severinus Boetius",
     "Boëth. Anal.": "Boetius' Analytica",
     "Boëth. Consol.": "Boetius' De Consolatione",
     "Boëth. Mus.": "Boetius' De Musicā",
     "Boëth. Porphyr.": "Boetius' Dialogi in Porphyrium",
     "Boëth. Top.": "Boetius' De Differentiis Topicis",
 
-    "Brut.": "M. Junius Brutus",
+    #"Brut.": "M. Junius Brutus",
 
-    "Caecil.": "Statius Caecilius,",
+    "#Caecil.": "Statius Caecilius,",
 
     "Cael. Aur.": "Caelius Aurelianus",
     "Cael. Aur. Acut.": "Caelius Aurelianus' Acutae Passiones",
@@ -141,12 +141,12 @@ cites = {
     "Caes. B. C.": "Caesar's Bellum Civile",
     "Caes. B. G.": "Caesar's Bellum Gallicum",
 
-    "Callistr.": "Callistratus",
+    #"Callistr.": "Callistratus",
 
-    "Calp.": "Calpurnius Siculus",
+    #"Calp.": "Calpurnius Siculus",
     "Calp. Ecl.": "Calpurnius Siculus' Eclogae",
 
-    "Capitol.": "Julius Capitolinus",
+    #"Capitol.": "Julius Capitolinus",
     "Capitol. Balb.": "Julius Capitolinus' Vita Balbini",
     "Capitol. Gord.": "Julius Capitolinus' Vita Gordiani",
     "Capitol. Max.": "Julius Capitolinus' Vita Maximi",
@@ -154,7 +154,7 @@ cites = {
 
     "Cass. Hem.": "L. Cassius Hemina",
 
-    "Cassiod.": "Magnus Aurelius Cassiodorus",
+    #"Cassiod.": "Magnus Aurelius Cassiodorus",
     "Cassiod. Chron.": "Cassiodorus' Magnus Aurelius Cassiodorus' Chronicon",
     "Cassiod. Complex.": "Cassiodorus' Complexiones in Epistulas Apostolicas",
     "Cassiod. De Anim.": "Cassiodorus' De Animā",
@@ -167,13 +167,13 @@ cites = {
     "Cato R. R.": "Cato's De Re Rusticā",
 
     #"Cat.": "C. Valerius Catullus",
-    "Catull.": "C. Valerius Catullus",
+    #"Catull.": "C. Valerius Catullus",
 
-    "Cels.": "Aurel. Cornelius Celsus",
+    #"Cels.": "Aurel. Cornelius Celsus",
 
-    "Censor.": "Censorinus",
+    #"Censor.": "Censorinus",
 
-    "Charis.": "Flav. Sosipater Charisius",
+    #"Charis.": "Flav. Sosipater Charisius",
 
     #"Cic.": "M. Tullius Cicero",
     #"C.": "M. Tullius Cicero",
@@ -253,11 +253,11 @@ cites = {
     "Cic. Vatin.": "Cicero's Oratio in Vatinium",
     "Cic. Verr.": "Cicero's Actio in Verrem",
 
-    "Cinc.": "L. Cincius Alimentus",
+    #"Cinc.": "L. Cincius Alimentus",
 
-    "Cinn.": "C. Helvius Cinna",
+    #"Cinn.": "C. Helvius Cinna",
 
-    "Claud.": "Claudius Claudianus",
+    #"Claud.": "Claudius Claudianus",
     "Claud. B. Get.": "Claudian's De Bello Getico",
     "Claud. Bell. Get.": "Claudian's De Bello Getico",
     "Claud. B. Gild.": "Claudian's De Bello Gildonico",
@@ -278,9 +278,9 @@ cites = {
     "Claud. Mam.": "Claudianus Ecdicius Mamertus",
     "Claud. Mam. Stat. An.": "Claudianus Mamertus' De Statu Animae",
 
-    "Cloat.": "Cloatius Verus",
+    #"Cloat.": "Cloatius Verus",
 
-    "Cod.": "Codex",
+    #"Cod.": "Codex",
     "Cod. Greg.": "Codex Gregorianus",
     "Cod. Hermog.": "Codex Hermogenianus",
     "Cod. Just.": "Codex Justinianeus",
@@ -289,13 +289,13 @@ cites = {
 
     #"Col.": "L. Junius Moderatus Columella,",
 
-    "Commod.": "Commodianus",
+    #"Commod.": "Commodianus",
     "Commod. Apol.": "Commodianus' Carmen Apologeticum",
     "Commod. Instr.": "Commodianus' Instructiones",
 
-    "Consent.": "P. Consentius",
+    #"Consent.": "P. Consentius",
 
-    "Coripp.": "Fl. Cresconius Corippus",
+    #"Coripp.": "Fl. Cresconius Corippus",
     "Coripp. Johan.": "Corippus' Johannis, sive de Bellis Libycis",
     "Coripp. Laud. Just.": "Corippus' De Laudibus Justini Augusti",
 
@@ -303,33 +303,33 @@ cites = {
 
     "Corn. Sev.": "Cornelius Severus",
 
-    "Cornif.": "Cornificus",
+    #"Cornif.": "Cornificus",
 
-    "Curt.": "Q. Curtius Rufus,",
+    #"Curt.": "Q. Curtius Rufus,",
 
-    "Cypr.": "Thascius Caecilius Cyprianus",
+    #"Cypr.": "Thascius Caecilius Cyprianus",
 
     "Dict. Cret.": "Interpres Dictys Cretensis",
 
-    "Dig.": "Digesta (i. e. Libri Pandectarum)",
+    #"Dig.": "Digesta (i. e. Libri Pandectarum)",
 
-    "Diom.": "Diomedes",
+    #"Diom.": "Diomedes",
 
     #"Dion. Cato": "The name inscribed on a collection of distichs de moribus, etc., probably of the third or fourth century",
 
-    "Donat.": "Aelius Donatus",
+    #"Donat.": "Aelius Donatus",
     #"Don.": "Aelius Donatus",
 
-    "Dracont.": "Dracontius",
+    #"Dracont.": "Dracontius",
     "Dracont. Hexaëm.": "Dracontius' Hexaëmeron Creationis Mundi",
 
-    "Eccl.": "Scriptores Ecclesiastici",
+    #"Eccl.": "Scriptores Ecclesiastici",
 
     #"Enn.": "Q. Ennius",
     "Enn. Ann.": "Ennius' Annales",
     "Enn. Trag.": "Ennius' Tragoediae",
 
-    "Ennod.": "Ennodius",
+    #"Ennod.": "Ennodius",
     "Ennod. Ep.": "Ennodius' Epistulae",
     "Ennod. Epithal.": "Ennodius' Epithalamium",
     "Ennod. Pan.": "Ennodius' Panegyricus",
@@ -339,32 +339,32 @@ cites = {
     "Eum. Grat. Act.": "Eumenius' Gratiarum Actio Constantino",
     "Eum. Pan. Const.": "Eumenius' Panegyricus Constantino Augusto dictus",
 
-    "Eutr.": "Flavius Eutropius",
+    #"Eutr.": "Flavius Eutropius",
 
     "Fab. Pict.": "Fabius Pictor",
 
-    "Falisc.": "Gratius Faliscus",
+    #"Falisc.": "Gratius Faliscus",
 
-    "Favorin.": "Favorinus",
+    #"Favorin.": "Favorinus",
 
     "Fenest.": "L. Fenestella",
 
-    "Fest.": "Sext. Pompeius Festus",
+    #"Fest.": "Sext. Pompeius Festus",
 
     "Firm. Mat.": "Julius Firmicus Maternus",
     "Firm.": "Julius Firmicus Maternus",
 
-    "Flor.": "L. Annaeus Florus",
+    #"Flor.": "L. Annaeus Florus",
 
-    "Fortun. ": "Venantius Fortunatus",
+    #"Fortun.": "Venantius Fortunatus",
 
-    "Frontin.": "S. Julius Frontinus",
+    #"Frontin.": "S. Julius Frontinus",
     "Front. Aquaed.": "Frontinus' De Aquaeductibus Urbis Romae",
     "Frontin. Aquaed.": "Frontinus' De Aquaeductibus Urbis Romae",
     "Front. Strat.": "Frontinus' Strategematica",
     "Frontin. Strat.": "Frontinus' Strategematica",
 
-    "Fronto": "M. Cornelius Fronto",
+    #"Fronto": "M. Cornelius Fronto",
     "Fronto ad Marc.": "Fronto's Epistulae ad M. Aurelium",
     "Front. ad Marc.": "Fronto's Epistulae ad M. Aurelium",
     "Fronto ad Ver.": "Fronto's Epistulae ad Verum Imperatorem",
@@ -374,7 +374,7 @@ cites = {
     "Fronto De Eloq.": "Fronto's De Eloquentiā",
     "Front. De Eloq.": "Fronto's De Eloquentiā",
 
-    "Fulg.": "Fabius Planciades Fulgentius",
+    #"Fulg.": "Fabius Planciades Fulgentius",
     "Fulg. De Aetat.": "Fabius Planciades Fulgentius' De Aetatibus Mundi",
     "Fulg. Expos.": "Fabius Planciades Fulgentius' Expositio Sermonum Antiquorum",
     "Fulg. Myth.": "Fabius Planciades Fulgentius' Mythologiae",
@@ -383,22 +383,22 @@ cites = {
     #"Gai.": "Gaius",
     "Gai. Inst.": "Gaius' Institutiones Juris Civilis",
 
-    "Gell.": "Aulus Gellius",
+    #"Gell.": "Aulus Gellius",
 
-    "German.": "Caesar Germanicus,",
+    #"German.": "Caesar Germanicus,",
 
-    "Gloss.": "Glossarium",
+    #"Gloss.": "Glossarium",
     "Gloss. Cyril.": "Glossarium Cyrilli",
     "Gloss. Isid.": "Glossarium Isidori",
     "Gloss. Philox.": "Glossarium Philoxeni",
 
-    "Grat.": "Gratius Faliscus",
+    #"Grat.": "Gratius Faliscus",
     "Grat. Cyn.": "Gratius Faliscus' Cynegetica",
     "Grat. Cyneg.": "Gratius Faliscus' Cynegetica",
 
     #"Her.": "Auctor ad Herennium (v. Cornificius)",
 
-    "Hier.": "Hieronymus",
+    #"Hier.": "Hieronymus",
     "Hier. Cant. Cantic.": "Hieronymus' Homiliae in Cantica Canticorum",
     "Hier. Cont. Pelag.": "Hieronymus' Dialogi Contra Pelagianos",
     "Hier. Ep.": "Hieronymus' Epistulae",
@@ -424,7 +424,7 @@ cites = {
     "Hyg. Lim. ": "Hyginus Gromaticus' De Limitibus Constituendis",
     "Hyg. De Lim.": "Hyginus Gromaticus' De Limitibus Constituendis",
 
-    "Inscr.": "Inscriptiones",
+    #"Inscr.": "Inscriptiones",
     "Inscr. Don.": "Inscriptiones Donii",
     "Inscr. Fabr.": "Inscriptiones Fabretti",
     "Inscr. Graev.": "Inscriptiones Graevii",
@@ -437,19 +437,19 @@ cites = {
     "Inscr. Orell.": "Inscriptiones Orelli",
     "Inscr. Rein.": "Inscriptiones Reinesii",
 
-    "Inst.": "Institutiones",
+    #"Inst.": "Institutiones",
 
-    "Isid.": "Isidorus Hispalensis",
+    #"Isid.": "Isidorus Hispalensis",
     "Isid. Orig.": "Isidore of Seville's Origenes",
 
-    "Javol.": "Javolenus Priscus",
+    #"Javol.": "Javolenus Priscus",
 
-    "Jornand.": "Jornandes (or Jordanis)",
+    #"Jornand.": "Jornandes (or Jordanis)",
 
-    "Jul. Val.": "Julius Valerius",
+    #"Jul. Val.": "Julius Valerius",
     "Jul. Val. Res Gest. Alex.": "Julius Valerius' Res Gestae Alexandri Macedonis",
 
-    "Julian.": "Salvius Julianus,",
+    #"Julian.": "Salvius Julianus,",
 
     #"Just.": "Justinus, historian",
 
@@ -458,19 +458,19 @@ cites = {
 
     #"Juv.": "D. Junius Juvenalis",
 
-    "Juvenc.": "C. Vettius Aquilinus Juvencus",
+    #"Juvenc.": "C. Vettius Aquilinus Juvencus",
 
-    "Laber.": "C. Decius Laberius",
+    #"Laber.": "C. Decius Laberius",
 
-    "Lact.": "L. Caelius Lactantius Firmianus",
+    #"Lact.": "L. Caelius Lactantius Firmianus",
     "Lact. De Irā D.": "Lactantius' De Irā Dei",
     "Lact. Epit.": "Lactantius' Epitome Divinarum Institutionum",
     "Lact. Inst.": "Lactantius' Institutiones Divinae",
     "Lact. Mort. Pers.": "Lactantius' De Mortibus Persecutorum",
 
-    "Laev.": "Laevius",
+    #"Laev.": "Laevius",
 
-    "Lampr.": "Aelius Lampridius",
+    #"Lampr.": "Aelius Lampridius",
     "Lampr. Alex. Sev.": "Aelius Lampridius' Alexandri Severi Vita",
     "Lampr. Com.": "Aelius Lampridius' ommodi Vita",
     "Lampr. Elag.": "Aelius Lampridius' Elagabali Vita",
@@ -483,29 +483,29 @@ cites = {
 
     #"Luc.": "M. Annaeus Lucanus,",
 
-    "Lucil.": "C. Ennius Lucilius",
+    #"Lucil.": "C. Ennius Lucilius",
 
     "Lucil. Aetn.": "Aetna (v. Auctor Aetnae)",
 
-    "Lucr.": "T. Lucretius Carus",
+    #"Lucr.": "T. Lucretius Carus",
 
-    "Macr.": "Aurelius Theodosius Macrobius",
+    #"Macr.": "Aurelius Theodosius Macrobius",
     "Macr. S.": "Macrobius' Saturnalia",
     "Macr. Sat.": "Macrobius' Saturnalia",
     "Macr. Somn. Scip.": "Macrobius' Somnium Scipionis",
 
-    "Mamert.": "Claud. Mamertinus",
+    #"Mamert.": "Claud. Mamertinus",
 
-    "Manil.": "M. Manilius",
+    #"Manil.": "M. Manilius",
     "Manil. Astron.": "Marcus Manilius' Astronomica",
 
     "Marc. Emp.": "Marcellus Empiricus",
 
-    "Mart.": "M. Valerius Martialis",
+    #"Mart.": "M. Valerius Martialis",
 
     "Mart. Cap.": "Martianus Minneus Felix Capella",
 
-    "Maxim.": "Maximianus",
+    #"Maxim.": "Maximianus",
 
     #"Mel.": "Pomponius Mela",
     #"Mela": "Pomponius Mela",
@@ -513,16 +513,16 @@ cites = {
     "Min. Fel.": "Minucius Felix",
     "Min. Fel. Oct.": "Minucius Felix' Octavius",
 
-    "Modest.": "Herennius Modestinus",
+    #"Modest.": "Herennius Modestinus",
 
     "Monum. Ancyr.": "Monumentum Ancyranum (an inscription placed on the wall of the pronaos at Ancyra by Augustus Caesar)",
 
-    "Naev.": "C. Naevius,",
+    #"Naev.": "C. Naevius,",
 
-    "Nazar.": "Nazarius",
+    #"Nazar.": "Nazarius",
     "Nazar. Pan. Const.": "Nazarius' Panegyricus Constantini",
 
-    "Nemes.": "M. Aur. Olympius Nemesianus",
+    #"Nemes.": "M. Aur. Olympius Nemesianus",
     "Nemes. Cyn.": "Nemesianus' Cynegetica",
     "Nemes. Ecl.": "Nemesianus' Eclogae",
 
@@ -554,7 +554,7 @@ cites = {
     "Nep. Timol.": "Cornelius Nepos' Timoleon",
     "Nep. Timoth.": "Cornelius Nepos' Timotheus",
 
-    "Nigid.": "P. Nigidius Figulus",
+    #"Nigid.": "P. Nigidius Figulus",
 
     #"Non.": "Nonius Marcellus",
 
@@ -563,17 +563,17 @@ cites = {
     #"Nov.": "Novius",
 
     #"Nov.": "Novatianus",
-    "Novat.": "Novatianus",
+    #"Novat.": "Novatianus",
 
-    "Obseq.": "Julius Obsequens",
+    #"Obseq.": "Julius Obsequens",
 
-    "Optat.": "Publilius Optatianus Porphyrius",
+    #"Optat.": "Publilius Optatianus Porphyrius",
 
-    "Orell.": "Inscriptiones Orelli",
+    #"Orell.": "Inscriptiones Orelli",
 
-    "Oros.": "Paulus Orosius",
+    #"Oros.": "Paulus Orosius",
 
-    "Ov.": "P. Ovidius Naso",
+    #"Ov.": "P. Ovidius Naso",
     "Ov. A. A.": "Ovid's Ars Amatoria",
     "Ov. Am.": "Ovid's Amores",
     "Ov. Cons.": "Ovid's Consolatio",
@@ -594,13 +594,13 @@ cites = {
     "Ov. Tr.": "Ovid's Tristia",
     "Ov. Trist.": "Ovid's Tristia",
 
-    "Pacuv.": "M. Pacuvius",
+    #"Pacuv.": "M. Pacuvius",
     #"Pac.": "M. Pacuvius",
 
-    "Pacat.": "Latinus Pacatus Drepanius",
+    #"Pacat.": "Latinus Pacatus Drepanius",
     "Pacat. Pan.": "Latinius Pacatus Drepanius' Panegyricus",
 
-    "Pall.": "Palladius Rutilius Taurus",
+    #"Pall.": "Palladius Rutilius Taurus",
     "Pall. Apr.": "Palladius' Aprilis Mensis (or Liber V)",
     "Pall. Aug.": "Palladius' Augustus Mensis (or Liber IX)",
     "Pall. Dec.": "Palladius' December Mensis (or Liber XIII)",
@@ -614,9 +614,9 @@ cites = {
     "Pall. Oct.": "Palladius' October Mensis (or Liber XI)",
     "Pall. Sept.": "Palladius' September Mensis (or Liber X)",
 
-    "Papin.": "Aemilius Papinins",
+    #"Papin.": "Aemilius Papinins",
 
-    "Paul.": "Julius Paulus",
+    #"Paul.": "Julius Paulus",
 
     "Paul. Nol.": "Julius Paulus' Pontius Paulinus Nolanus",
     "Paul. Nol. Carm.": "Paulinus of Nola's Carmina",
@@ -624,19 +624,19 @@ cites = {
 
     "Paul. Petr.": "Paulinus Petricordiensis",
 
-    "Pers.": "A. Persius Flaccus",
+    #"Pers.": "A. Persius Flaccus",
 
-    "Petr.": "Petronius Arbiter",
+    #"Petr.": "Petronius Arbiter",
     "Petr. S.": "Petronius' Satirae",
     "Petr. Sat.": "Petronius' Satirae",
 
-    "Phaedr.": "T. Phaedrus",
+    #"Phaedr.": "T. Phaedrus",
 
-    "Pict.": "Fabius Pictor",
+    #"Pict.": "Fabius Pictor",
 
-    "Placid.": "Luctatius (or Lactantius) Placidus",
+    #"Placid.": "Luctatius (or Lactantius) Placidus",
 
-    "Plaut.": "T. Maccius Plautus",
+    #"Plaut.": "T. Maccius Plautus",
     "Plaut. Am.": "Plautus' Amphitruo",
     "Plaut. Amph.": "Plautus' Amphitruo",
     "Plaut. As. ": "Plautus' Asinaria",
@@ -670,19 +670,19 @@ cites = {
 
     "Plin. Val.": "Plinius Valerianus",
 
-    "Pomp.": "L. Pomponius",
+    #"Pomp.": "L. Pomponius",
 
-    "Pompon.": "Sextus Pomponius",
+    #"Pompon.": "Sextus Pomponius",
 
     "Porc. Latro": "M. Porcius Latro",
 
-    "Priap.": "Priapea (a collection of satiric and erotic poems and fragments appended to L. Müller's Catullus)",
+    #"Priap.": "Priapea (a collection of satiric and erotic poems and fragments appended to L. Müller's Catullus)",
 
-    "Prisc.": "Priscianus",
+    #"Prisc.": "Priscianus",
 
-    "Prop.": "Sex. Aurelius Propertius",
+    #"Prop.": "Sex. Aurelius Propertius",
 
-    "Prud.": "Aurel. Prudentius Clemens",
+    #"Prud.": "Aurel. Prudentius Clemens",
     "Prud. Cath.": "Prudentius' Cathemerina",
     "Prud. c. Symm.": "Prudentius' contra Symmachum",
     "Prud. Psych.": "Prudentius' Psychomachia",
@@ -693,7 +693,7 @@ cites = {
     "Q. Cic.": "Quintus Tullius Cicero",
     "Q. Cic. Pet. Cons.": "Quintus Tullius Cicero's De Petitione Consulatus",
 
-    "Quint.": "M. F. Quintilianus",
+    #"Quint.": "M. F. Quintilianus",
     "Quint. Decl.": "Quintilian's Declamationes",
     "Quint. Inst.": "Quintilian's Institutiones Oratoriae",
 
@@ -702,14 +702,14 @@ cites = {
 
     #"Ruf.": "Sextus Rufus",
 
-    "Rufin.": "Tyrannius Rufinus",
+    #"Rufin.": "Tyrannius Rufinus",
 
     "Rutil. Lup.": "P. Rutilius Lupus",
 
-    "Rutil.": "Claudius Rutilius Namatianus",
+    #"Rutil.": "Claudius Rutilius Namatianus",
     "Rutil. Nam.": "Claudius Rutilius Namatianus",
 
-    "Sall.": "C. Sallustius Crispus",
+    #"Sall.": "C. Sallustius Crispus",
     "Sall. C.": "Sallust's Catilina",
     "Sall. Cat.": "Sallust's Catilina",
     "Sall. Fragm.": "Sallust's Fragmenta",
@@ -718,17 +718,17 @@ cites = {
     "Sall. J.": "Sallust's Jugurtha",
     "Sall. Jug.": "Sallust's Jugurtha",
 
-    "Salv.": "Salvianus",
+    #"Salv.": "Salvianus",
     "Salv. Avar.": "Salvianus' Adversum Avaritiam",
     "Salv. Ep.": "Salvianus' Epistulae",
     "Salv. Gub. Dei": "Salvianus' De Gubernatione Dei",
 
     "Scaev.": "Q. Mutius Scaevola",
 
-    "Scrib.": "Scribonius Largus",
+    #"Scrib.": "Scribonius Largus",
     "Scrib. Comp.": "Largus' Compositiones Medicamentorum",
 
-    "Sedul.": "Caelius Sedulius",
+    #"Sedul.": "Caelius Sedulius",
 
     #"Sen.": "M. Annaeus Seneca, rhetorician",
     "Sen. Contr.": "Seneca the Elder's Controversiae",
@@ -766,7 +766,7 @@ cites = {
 
     "Ser. Samm.": "Q. Serenus Sammonicus",
 
-    "Serv.": "Servius Honoratus",
+    #"Serv.": "Servius Honoratus",
 
     #"Sev.": "Cornelius Severus",
 
@@ -774,14 +774,14 @@ cites = {
 
     #"Sil.": "C. Silius Italicus",
 
-    "Sisenn.": "L. Cornelius Sisenna",
+    #"Sisenn.": "L. Cornelius Sisenna",
 
-    "Solin.": "C. Julius Solinus",
+    #"Solin.": "C. Julius Solinus",
     #"Sol.": "C. Julius Solinus",
 
-    "Spart.": "Aelius Spartianus",
+    #"Spart.": "Aelius Spartianus",
 
-    "Stat.": "P. Papinius Statius",
+    #"Stat.": "P. Papinius Statius",
     "Stat. Ach.": "Statius' Achilleis",
     "Stat. Achil.": "Statius' Achilleis",
     "Stat. Silv.": "Statius' Silvae",
@@ -789,7 +789,7 @@ cites = {
     "Stat. Theb.": "Statius' Thebaid",
     "Stat. Th.": "Statius' Thebaid",
 
-    "Suet.": "C. Suetonius Tranquillus",
+    #"Suet.": "C. Suetonius Tranquillus",
     "Suet. Aug.": "Suetonius' Augustus",
     "Suet. Caes.": "Suetonius' Caesar",
     "Suet. Calig.": "Suetonius' Caligula",
@@ -803,9 +803,9 @@ cites = {
     "Suet. Vesp.": "Suetonius' Vespasianus",
     "Suet. Vit.": "Suetonius' Vitellius",
 
-    "Sulp.": "Sulpicius Severus",
+    #"Sulp.": "Sulpicius Severus",
 
-    "Symm.": "Q. Aurelius Symmachus",
+    #"Symm.": "Q. Aurelius Symmachus",
 
     #"Tac.": "C. Cornelius Tacitus",
     "Tac. Agr.": "Tacitus' Agricola",
@@ -832,9 +832,7 @@ cites = {
     "T. Hec.": "Terence' Hecyra",
     "Ter. Phorm.": "Terence' Phormio",
     "T. Phorm.": "Terence' Phormio",
-
     "Ter. Maur.": "Terentianus Maurus",
-
     "Tert.": "Quintus Septimius Florens Tertullianus",
     "Tert. ad Uxor.": "Tertullian's ad Uxorem",
     "Tert. Apol.": "Tertullian's Apologeticus",
@@ -857,12 +855,12 @@ cites = {
 
     #"Tiro": "Tiro (freedman of Cicero)",
 
-    "Titin.": "Titinnius",
-    "Titinn.": "Titinnius",
+    #"Titin.": "Titinnius",
+    #"Titinn.": "Titinnius",
 
     "Treb. Pol.": "Trebellius Pollio",
 
-    "Turp.": "Sex. Turpilius",
+    #"Turp.": "Sex. Turpilius",
 
     #"Ulp.": "Domitius Ulpianus",
 
@@ -876,7 +874,7 @@ cites = {
 
     "Val. Prob.": "M. Valerius Probus",
 
-    "Varr.": "M. Terentius Varro",
+    #"Varr.": "M. Terentius Varro",
     "Varr. L. L.": "Marcus Terentius Varro's De Linguā Latinā",
     "Varr. R. R.": "Marcus Terentius Varro's De Re Rusticā",
 
@@ -885,13 +883,13 @@ cites = {
     "Veg. Vet.": "Vegetius' De Arte Veterinariā sive De Mulomedicinā",
     "Veg. Art. Vet.": "Vegetius' De Arte Veterinariā sive De Mulomedicinā",
 
-    "Vell.": "P. Velleius Paterculus",
+    #"Vell.": "P. Velleius Paterculus",
 
     "Ven. Fort.": "Venantius Fortunatus",
 
     "Ver. Flac.": "Verrius Flaccus",
 
-    "Verg.": "P. Vergilius Maro",
+    #"Verg.": "P. Vergilius Maro",
     "Verg. A.": "Virgil's Aeneis",
     "Verg. Aen.": "Virgil's Aeneis",
     "Verg. Cat.": "Virgil's Catalepta",
@@ -907,13 +905,13 @@ cites = {
 
     "Vib. Seq.": "Vibius Sequester",
 
-    "Vitr.": "Vitruvius Pollio",
+    #"Vitr.": "Vitruvius Pollio",
 
     #"Vop.": "Flavius Vopiscus",
 
     "Vulc. Gall.": "Vulcatius Gallicanus",
 
-    "Vulg.": "Biblia Vulgatae Editionis",
+    #"Vulg.": "Biblia Vulgatae Editionis",
     "Vulg. Abd.": "Vulgate's Abdias",
     "Vulg. Act.": "Vulgate's Actus Apostolorum",
     "Vulg. Agg.": "Vulgate's Aggaeus",
