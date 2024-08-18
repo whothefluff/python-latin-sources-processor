@@ -131,7 +131,7 @@ cites = {
 
     #"Brut.": "M. Junius Brutus",
 
-    "#Caecil.": "Statius Caecilius,",
+    "#Caecil.": "Statius Caecilius",
 
     "Cael. Aur.": "Caelius Aurelianus",
     "Cael. Aur. Acut.": "Caelius Aurelianus' Acutae Passiones",
@@ -287,7 +287,7 @@ cites = {
     "Cod. Cod.": "Codex Justinianeus",
     "Cod. Theod.": "Codex Theodosianus",
 
-    #"Col.": "L. Junius Moderatus Columella,",
+    #"Col.": "L. Junius Moderatus Columella",
 
     #"Commod.": "Commodianus",
     "Commod. Apol.": "Commodianus' Carmen Apologeticum",
@@ -305,7 +305,7 @@ cites = {
 
     #"Cornif.": "Cornificus",
 
-    #"Curt.": "Q. Curtius Rufus,",
+    #"Curt.": "Q. Curtius Rufus",
 
     #"Cypr.": "Thascius Caecilius Cyprianus",
 
@@ -385,7 +385,7 @@ cites = {
 
     #"Gell.": "Aulus Gellius",
 
-    #"German.": "Caesar Germanicus,",
+    #"German.": "Caesar Germanicus",
 
     #"Gloss.": "Glossarium",
     "Gloss. Cyril.": "Glossarium Cyrilli",
@@ -449,7 +449,7 @@ cites = {
     #"Jul. Val.": "Julius Valerius",
     "Jul. Val. Res Gest. Alex.": "Julius Valerius' Res Gestae Alexandri Macedonis",
 
-    #"Julian.": "Salvius Julianus,",
+    #"Julian.": "Salvius Julianus",
 
     #"Just.": "Justinus, historian",
 
@@ -477,11 +477,11 @@ cites = {
 
     "Leg. XII. Tab.": "Leges duodecim Tabularum",
 
-    #"Liv.": "Titus Livius,",
+    #"Liv.": "Titus Livius",
 
     "Liv. Andron.": "Livius Andronicus",
 
-    #"Luc.": "M. Annaeus Lucanus,",
+    #"Luc.": "M. Annaeus Lucanus",
 
     #"Lucil.": "C. Ennius Lucilius",
 
@@ -517,7 +517,7 @@ cites = {
 
     "Monum. Ancyr.": "Monumentum Ancyranum (an inscription placed on the wall of the pronaos at Ancyra by Augustus Caesar)",
 
-    #"Naev.": "C. Naevius,",
+    #"Naev.": "C. Naevius",
 
     #"Nazar.": "Nazarius",
     "Nazar. Pan. Const.": "Nazarius' Panegyricus Constantini",
@@ -878,7 +878,7 @@ cites = {
     "Varr. L. L.": "Marcus Terentius Varro's De Linguā Latinā",
     "Varr. R. R.": "Marcus Terentius Varro's De Re Rusticā",
 
-    #"Veg.": "F. Vegetius Renatus,",
+    #"Veg.": "F. Vegetius Renatus,
     "Veg. Mil.": "Vegetius' De Re Militari",
     "Veg. Vet.": "Vegetius' De Arte Veterinariā sive De Mulomedicinā",
     "Veg. Art. Vet.": "Vegetius' De Arte Veterinariā sive De Mulomedicinā",
