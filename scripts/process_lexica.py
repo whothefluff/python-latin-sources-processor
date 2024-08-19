@@ -52,6 +52,7 @@ for cite, replacement in sorted_cites:
     cite_patterns.append(re.escape(cite))
     cite_replacements[cite] = replacement
 combined_cite_pattern = "|".join(cite_patterns)
+COMBINED_CITES = re.compile(combined_cite_pattern)
 
 # Aggregate abbreviations substitutions
 abbr_patterns = []
@@ -61,19 +62,59 @@ for abbr, replacement in sorted_abbreviations:
     abbr_patterns.append(full_abbr_pat)
     abbr_replacements[abbr] = replacement
 combined_abbr_pattern = "|".join(abbr_patterns)
+COMBINED_ABBREVIATIONS = re.compile(combined_abbr_pattern)
+
+CS_LEADING_CHARS = re.compile( r"^[,;:.]\s*" )
+CS_EMPTY_PARENTHESES = re.compile( r"\s*\(\s*\)" )
+CS_LOWERCASE_START = re.compile( r"^[a-z]" )
+CS_TRAILING_CHARS = re.compile( r"[—,;:](?=\s?$)" )
+CS_PUNC_WO_PREV_SPACE = re.compile( r"\s+([,.;:!?])" )
+CS_PUNC_WO_NEXT_SPACE = re.compile( r"([,;:!?])\s*" )
+
+ITYPE_POS_NO_DIGITS_END = re.compile( r"\d+$" )
+
+ETYM_CONTENT = re.compile( r"<etym>(.*?)</etym>" )
+
+UNAMBIGUOUS_VIDE = re.compile( r"<lbl>v.</lbl>" )
 
 
-def clean_content(content):
-    """
-    Clean up content by removing spaces after punctuation and normalizing whitespace.
-    """
-    # Remove spaces after punctuation
-    content = re.sub(r"\s+([.,;:!?])", r"\1", content)
+def clean_sense( t ):
 
+    def clean_unmatched_parentheses( s ):
+        stack = [ ]
+        to_remove = set( )
+        # Find unmatched parentheses
+        for i, char in enumerate( s ):
+            if char == "(":
+                stack.append( i )
+            elif char == ")":
+                if stack:
+                    stack.pop( )
+                else:
+                    to_remove.add( i )
+        # Add remaining open parentheses to remove set
+        to_remove.update( stack )
+        # Build the result string
+        return "".join( char for i, char in enumerate( s ) if i not in to_remove )
+
+    t = clean_unmatched_parentheses( t )
+    # remove leading spaces, dots, and commas
+    t = t.lstrip( " .," )
+    # delete any of the following leading strings ", " ". " "; " ": ", including the spaces
+    t = CS_LEADING_CHARS.sub( "", t )
+    # delete empty parentheses
+    t = CS_EMPTY_PARENTHESES.sub( "", t )
+    # change first lowercase letter to uppercase
+    t = CS_LOWERCASE_START.sub( lambda m: m.group( 0 ).upper( ), t )
+    # delete any of the following trailing chars "—" "," ";" ":", even if followed by a space
+    t = CS_TRAILING_CHARS.sub( "", t )
+    # Remove spaces before certain punctuation marks
+    t = CS_PUNC_WO_PREV_SPACE.sub( r"\1", t )
+    # Ensure single space after punctuation marks (except for opening parentheses and quotes)
+    t = CS_PUNC_WO_NEXT_SPACE.sub( r"\1 ", t )
     # Normalize whitespace
-    content = " ".join(content.split())
-
-    return content
+    t = " ".join( t.split( ) )
+    return t
 
 
 # noinspection SpellCheckingInspection
@@ -121,7 +162,7 @@ def clean_data(xml_string):
 def part_of_speech_from_itype(lemma, itype):
 
     def ends_with(suffix):
-        lemma_base = re.sub( r"\d+$", "", lemma )
+        lemma_base = ITYPE_POS_NO_DIGITS_END.sub( "", lemma )
         return lemma_base.endswith(suffix)
 
     def itype_starts_with(prefix):
@@ -216,20 +257,20 @@ def substitute_abbreviations(text):
             return abbr_replacements.get(m_content, m_content)
 
     if SUBSTITUTE_ABBREVIATIONS:
-        no_cites = re.sub(combined_cite_pattern, cite_replace, text)
-        no_cites_nor_abbrs = re.sub(combined_abbr_pattern, abbr_replace, no_cites)
+        no_cites = COMBINED_CITES.sub( cite_replace, text )
+        no_cites_nor_abbrs = COMBINED_ABBREVIATIONS.sub( abbr_replace, no_cites )
         return no_cites_nor_abbrs
     else:
         return text
 
 
-def substitute_etym(text):
-    text = re.sub(r"<etym>(.*?)</etym>", r"from \1", text)
+def substitute_etym( text ):
+    text = ETYM_CONTENT.sub( r"from \1", text )
     return text
 
 
-def substitute_vide(text):
-    text = re.sub(r"<lbl>v.</lbl>", "see", text)
+def substitute_vide( text ):
+    text = UNAMBIGUOUS_VIDE.sub( "see", text )
     return text
 
 
@@ -300,20 +341,6 @@ def text_before_sense(parent, current, current_index):
         inflection_tags = ("orth", "pos", "itype", "mood", "gen")
         return not prefix_started and element.getnext().tag not in inflection_tags
 
-    def clean(text):
-        # remove leading punctuation signs
-        while text and text[0] in " .,":
-            text = text.lstrip(" .,")
-        # Normalize whitespace: replace any sequence of whitespace characters (including newlines) with a single space
-        text = re.sub(r"\s+", " ", text)
-        # Remove spaces before certain punctuation marks
-        text = re.sub(r"\s+([,.;:!?])", r"\1", text)
-        # Ensure single space after punctuation marks (except for opening parentheses and quotes)
-        text = re.sub(r"([,.;:!?])\s*", r"\1 ", text)
-        # Remove trailing line breaks
-        text = text.rstrip("\n\r")
-        return text
-
     def extract_for_first_sense(p, c):
         r = ""
         start_capture = False
@@ -362,7 +389,7 @@ def text_before_sense(parent, current, current_index):
     extracted = ( extract_for_first_sense(parent, current)
                     if current_index == 1
                     else extract_for_other_senses(parent, current) )
-    return clean(extracted)
+    return extracted
 
 
 def concatenate_prefix(prefix, content):
@@ -473,7 +500,7 @@ def parse_xml_and_write_csv(input_file, output_dir):
                             content = concatenate_prefix(prefix_text, content)
 
                         content = substitute_abbreviations(content)
-                        content = clean_content(content)
+                        content = clean_sense( content )
 
                         write_csv_row( senses_writer, [ dictionary_id, lemma, level_notation, pretty_level, content, ], )
 
