@@ -409,6 +409,24 @@ def concatenate_prefix( prefix, content ):
     return prefix + content
 
 
+def text_without_nested( element ):
+    """
+    Get all text content from an element that is not inside nested tags,
+    preserving the order of appearance.
+    """
+    # Start with the initial text content (if any)
+    pieces = []
+    if element.text:
+        pieces.append( element.text )
+
+    # Add the tail of each child in order
+    for child in element:
+        if child.tail:
+            pieces.append( child.tail )
+
+    return ''.join( pieces )
+
+
 def parse_xml_and_write_csv( input_file, output_dir ):
     logging.basicConfig( level = logging.INFO )
     os.makedirs( output_dir, exist_ok = True )
@@ -416,7 +434,7 @@ def parse_xml_and_write_csv( input_file, output_dir ):
     dictionaries_file = os.path.join( output_dir, "dictionaries.csv" )
     entries_file = os.path.join( output_dir, "dictionary_entries.csv" )
     senses_file = os.path.join( output_dir, "dict_entry_senses.csv" )
-    # quotes_file = os.path.join(output_dir, "dic_entry_sense_quotes.csv")
+    quotes_file = os.path.join(output_dir, "dict_entry_sense_quotes.csv")
 
     # Read the entire XML file
     with open( input_file, "r", encoding = "utf-8" ) as f:
@@ -433,20 +451,22 @@ def parse_xml_and_write_csv( input_file, output_dir ):
     with open( dictionaries_file, "w", newline = "", encoding = "utf-8" ) as f:
         writer = csv.writer( f )
         write_csv_row( writer, ["ID", "name", "language", "publisher", "publicationDate"] )
-        write_csv_row( writer, [dictionary_id, "Lewis & Short", "EN", "Perseus Digital Library", ""], )
+        write_csv_row( writer, [dictionary_id, "Lewis & Short", "EN", "Harper and Brothers", "1879-07-01 00:00:00.000Z"], )
 
     with (open( entries_file, "w", newline = "", encoding = "utf-8" ) as entries_csv,
-          open( senses_file, "w", newline = "", encoding = "utf-8" ) as senses_csv, ):
+          open( senses_file, "w", newline = "", encoding = "utf-8" ) as senses_csv,
+          open( quotes_file, "w", newline = "", encoding = "utf-8" ) as quotes_csv):
 
         entries_writer = csv.writer( entries_csv )
         senses_writer = csv.writer( senses_csv )
 
-        write_csv_row( entries_writer, ["dictionary", "lemma", "partOfSpeech", "inflection"] )
+        write_csv_row( entries_writer, ["dictionary", "lemma", "partOfSpeech", "inflection", "index"] )
         write_csv_row( senses_writer, ["dictionary", "lemma", "level", "prettyLevel", "content"] )
         # write_csv_row( quotes_writer, ["dictionary", "lemma", "level", "seq", "content", "translation"], )
 
         try:
             context = etree.iterparse( xml_file, events = ("end",), tag = "entryFree" )
+            entry_counter = 0
             for event, entry in context:
                 try:
                     lemma = entry.get( "key", "" )
@@ -472,38 +492,49 @@ def parse_xml_and_write_csv( input_file, output_dir ):
                         part_of_speech = part_of_speech_of( entry, lemma )
                         inflection = inflection_of( entry )
 
-                    write_csv_row( entries_writer, [dictionary_id, lemma, part_of_speech, inflection], )
+                    write_csv_row( entries_writer, [dictionary_id, lemma, part_of_speech, inflection, entry_counter], )
+                    entry_counter += 1
 
                     senses = entry.xpath( ".//sense" )
-                    level_stack = []
-                    current_level = 0
 
-                    for i, sense in enumerate( senses, 1 ):
-                        level = int( sense.get( "level", "1" ) )
-
-                        if level > current_level:
-                            level_stack.append( 1 )
-                        elif level < current_level:
-                            level_stack = level_stack[:level]
-                            level_stack[-1] += 1
-                        else:
-                            level_stack[-1] += 1
-
-                        current_level = level
-
-                        level_notation = ".".join( f"{l1:03d}" for l1 in level_stack )
-                        pretty_level = ".".join( str( l2 ) for l2 in level_stack )
-
-                        prefix_text = text_before_sense( entry, sense, i )
-                        content = "".join( sense.itertext( ) )
-                        if prefix_text:
-                            content = concatenate_prefix( prefix_text, content )
-
+                    if not senses:
+                        # Handle entries without sense tags
+                        content = text_without_nested( entry )
                         content = substitute_abbreviations( content )
                         content = clean_sense( content )
+                        if content:
+                            write_csv_row( senses_writer,
+                                           [dictionary_id, lemma, "001", "1", content] )
 
-                        write_csv_row( senses_writer,
-                                       [dictionary_id, lemma, level_notation, pretty_level, content, ], )
+                    else:
+                        level_stack = []
+                        current_level = 0
+                        for i, sense in enumerate( senses, 1 ):
+                            level = int( sense.get( "level", "1" ) )
+
+                            if level > current_level:
+                                level_stack.append( 1 )
+                            elif level < current_level:
+                                level_stack = level_stack[:level]
+                                level_stack[-1] += 1
+                            else:
+                                level_stack[-1] += 1
+
+                            current_level = level
+
+                            level_notation = ".".join( f"{l1:03d}" for l1 in level_stack )
+                            pretty_level = ".".join( str( l2 ) for l2 in level_stack )
+
+                            prefix_text = text_before_sense( entry, sense, i )
+                            content = "".join( sense.itertext( ) )
+                            if prefix_text:
+                                content = concatenate_prefix( prefix_text, content )
+
+                            content = substitute_abbreviations( content )
+                            content = clean_sense( content )
+
+                            write_csv_row( senses_writer,
+                                           [dictionary_id, lemma, level_notation, pretty_level, content, ], )
 
                     # Clear the element to free memory
                     entry.clear( )
