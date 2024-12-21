@@ -287,8 +287,7 @@ def write_csv_row( writer, row ):
     """
     Write a row to the CSV file, properly escaping and encoding each field.
     """
-    escaped_row = [escape_csv_field( str( field ) ) for field in row]
-    writer.writerow( escaped_row )
+    writer.writerow( row )
 
 
 def inflection_of( entry ):
