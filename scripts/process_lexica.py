@@ -274,15 +274,6 @@ def substitute_vide( text ):
     return text
 
 
-def escape_csv_field( field ):
-    """
-    Escape special characters in CSV fields and enclose in quotes if necessary.
-    """
-    if re.search( r'[,"\n\r]', field ):
-        return f'"{field.replace( '"', '""' )}"'
-    return field
-
-
 def write_csv_row( writer, row ):
     """
     Write a row to the CSV file, properly escaping and encoding each field.
@@ -454,7 +445,7 @@ def parse_xml_and_write_csv( input_file, output_dir ):
 
     with (open( entries_file, "w", newline = "", encoding = "utf-8" ) as entries_csv,
           open( senses_file, "w", newline = "", encoding = "utf-8" ) as senses_csv,
-          open( quotes_file, "w", newline = "", encoding = "utf-8" ) as quotes_csv):
+          open( quotes_file, "w", newline = "", encoding = "utf-8" )):
 
         entries_writer = csv.writer( entries_csv )
         senses_writer = csv.writer( senses_csv )
