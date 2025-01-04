@@ -7,11 +7,11 @@ import uuid
 
 from lxml import etree
 
-from scripts.process_lexica_aux.abbreviations import abbreviations
-from scripts.process_lexica_aux.broken_itypes import broken_itypes
-from scripts.process_lexica_aux.cites import cites
-from scripts.process_lexica_aux.fake_itypes import fake_itypes
-from scripts.process_lexica_aux.pos_tags import pos_tags
+from scripts.dictionary.process_lexica_aux.abbreviations import abbreviations
+from scripts.dictionary.process_lexica_aux.broken_itypes import broken_itypes
+from scripts.dictionary.process_lexica_aux.cites import cites
+from scripts.dictionary.process_lexica_aux.fake_itypes import fake_itypes
+from scripts.dictionary.process_lexica_aux.pos_tags import pos_tags
 
 SUBSTITUTE_ABBREVIATIONS = True
 
@@ -231,9 +231,9 @@ def part_of_speech_from_hi_tag( entry ):
 def file( ):
     file_name = "lat.ls.perseus-eng2.xml"
     script_dir = os.path.dirname( __file__ )
-    script_parent_dir = os.path.dirname( script_dir )
+    root = os.path.dirname( os.path.dirname( script_dir ) )
     # noinspection SpellCheckingInspection
-    file_path = os.path.join( script_parent_dir, "data", "lexica", file_name )
+    file_path = os.path.join( root, "data", "dictionary", "lexica", file_name )
     return file_path
 
 
@@ -544,5 +544,5 @@ def parse_xml_and_write_csv( input_file, output_dir ):
 
 if __name__ == "__main__":
     # noinspection SpellCheckingInspection
-    parse_xml_and_write_csv( file( ), "../output/lexica/" )
+    parse_xml_and_write_csv( file( ), "../../output/dictionary/lexica/" )
     print( "XML parsing and CSV writing completed successfully." )

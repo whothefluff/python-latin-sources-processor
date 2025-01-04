@@ -9,15 +9,15 @@ import re
 import base64
 
 
-def choose_file():
-    # root = tk.Tk()
-    # root.withdraw()  # Hide the main window
-    # file_path = filedialog.askopenfilename(filetypes=[("XML files", "*.xml")])
-    file_name = "phi0975.phi001.perseus-lat2_modified.xml"
-    script_dir = os.path.dirname(__file__)
-    script_parent_dir = os.path.dirname(script_dir)
-    file_path = os.path.join(script_parent_dir, "data", "phaedrus", file_name)
+def asset_path(asset_name):
+    file_path = os.path.join(project_root( ), "data", "library", "item", "phaedrus", asset_name)
     return file_path
+
+
+def project_root( ):
+    script_dir = os.path.dirname( __file__ )
+    root = os.path.dirname( os.path.dirname( os.path.dirname( script_dir ) ) )
+    return root
 
 
 def generate_uuid():
@@ -232,9 +232,7 @@ def process_verse(xml_string, output_dir):
 
 
 def get_work_data(work_id, work_name):
-    script_dir = os.path.dirname(__file__)
-    script_parent_dir = os.path.dirname(script_dir)
-    about_file = os.path.join(script_parent_dir, "data", "phaedrus", 'about_phi0975_phi001.txt')
+    about_file = asset_path('about_phi0975_phi001.txt')
     with open(about_file, 'r', encoding='utf-8') as about:
         about_text = about.read()
     work_data = [work_id, work_name, about_text]
@@ -242,12 +240,10 @@ def get_work_data(work_id, work_name):
 
 
 def get_author_data(author_id, author_name):
-    script_dir = os.path.dirname(__file__)
-    script_parent_dir = os.path.dirname(script_dir)
-    about_file = os.path.join(script_parent_dir, "data", "phaedrus", 'about.txt')
+    about_file = asset_path('about.txt')
     with open(about_file, 'r', encoding='utf-8') as about:
         about_text = about.read()
-    image_file = os.path.join(script_parent_dir, "data", "phaedrus", 'expanded.webp')
+    image_file = asset_path('expanded.webp')
     with open(image_file, 'rb') as expanded:
         image_data = expanded.read()
         image_data = base64.b64encode(image_data).decode()  # Convert binary data to base64 string
@@ -489,8 +485,8 @@ def validate_p_tags(errors, xml_string, subdivisions):
 if __name__ == "__main__":
     # noinspection HttpUrlsUsage
     tei_namespace = 'http://www.tei-c.org/ns/1.0'
-    xml_file = choose_file()
-    output_dir_outer = '../output/phaedrus/'
+    xml_file = asset_path("phi0975.phi001.perseus-lat2_modified.xml")
+    output_dir_outer = project_root( ) + '/output/library/item/phaedrus/'
     with open(xml_file, 'r', encoding='utf-8') as file:
         xml_string_outer = file.read()  # Parse the XML file as a string
     process_verse(xml_string_outer, output_dir_outer)
