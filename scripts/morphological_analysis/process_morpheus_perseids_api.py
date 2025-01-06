@@ -148,7 +148,7 @@ class MorphologicalAnalyzer:
                         "partOfSpeech": (
                             "adverb"
                             if gender == "adverbial"
-                            else dict_info["pofs"].get("$", "")
+                            else infl["pofs"].get("$", "")
                         ),
                         "stem": MorphologicalAnalyzer.macronize(
                             infl["term"].get("stem", {}).get("$", "")
@@ -156,16 +156,16 @@ class MorphologicalAnalyzer:
                         "suffix": MorphologicalAnalyzer.macronize(
                             infl["term"].get("suff", {}).get("$", "")
                         ),
-                        "gender": gender,
+                        "gender": None if gender == "adverbial" else gender,
                         "number": infl.get("num", {}).get("$"),
-                        "declension": dict_info.get("decl", {}).get("$"),
+                        "declension": infl.get("decl", {}).get("$"),
                         "gramm_case": infl.get("case", {}).get("$"),
                         "mood": infl.get("mood", {}).get("$"),
                         "tense": infl.get("tense", {}).get("$"),
                         "voice": infl.get("voice", {}).get("$"),
                         "person": infl.get("pers", {}).get("$"),
                     }
-                    
+
                     if word in WORDS:
                         inflection.update( WORDS[word] ) # Apply optional overrides for this word
 
