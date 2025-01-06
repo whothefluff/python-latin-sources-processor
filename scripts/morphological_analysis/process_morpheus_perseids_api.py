@@ -7,16 +7,16 @@ from typing import Dict, List, Set, TextIO
 
 class MorphologicalAnalyzer:
     MACRON_MAP = {
-        'a_': 'ā',
-        'e_': 'ē',
-        'i_': 'ī',
-        'o_': 'ō',
-        'u_': 'ū',
-        'A_': 'Ā',
-        'E_': 'Ē',
-        'I_': 'Ī',
-        'O_': 'Ō',
-        'U_': 'Ū'
+        "a_": "ā",
+        "e_": "ē",
+        "i_": "ī",
+        "o_": "ō",
+        "u_": "ū",
+        "A_": "Ā",
+        "E_": "Ē",
+        "I_": "Ī",
+        "O_": "Ō",
+        "U_": "Ū",
     }
 
     def __init__(self, project_root: str):
@@ -34,8 +34,7 @@ class MorphologicalAnalyzer:
 
         # Setup logging
         logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s'
+            level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
         )
 
         # Create output directory if it doesn't exist
@@ -47,13 +46,13 @@ class MorphologicalAnalyzer:
         self.collect_unique_words()
 
     @staticmethod
-    def macronize( text: str ) -> str:
+    def macronize(text: str) -> str:
         """Convert underscore notation to macrons"""
         if not text:
             return text
         result = text
-        for underscore_vowel, macron_vowel in MorphologicalAnalyzer.MACRON_MAP.items( ):
-            result = result.replace( underscore_vowel, macron_vowel )
+        for underscore_vowel, macron_vowel in MorphologicalAnalyzer.MACRON_MAP.items():
+            result = result.replace(underscore_vowel, macron_vowel)
         return result
 
     def load_existing_forms(self):
@@ -63,7 +62,9 @@ class MorphologicalAnalyzer:
                 with open(self.details_file, "r", encoding="utf-8") as f:
                     reader = csv.DictReader(f)
                     self.processed_forms = {row["form"] for row in reader}
-                logging.info(f"Loaded {len(self.processed_forms)} existing processed forms")
+                logging.info(
+                    f"Loaded {len(self.processed_forms)} existing processed forms"
+                )
             except Exception as e:
                 logging.error(f"Error loading existing forms: {str(e)}")
                 raise
@@ -75,7 +76,7 @@ class MorphologicalAnalyzer:
                 reader = csv.DictReader(f)
                 self.unique_words = {row["word"] for row in reader}
                 # Filter out nulls
-                self.unique_words.discard( '' )
+                self.unique_words.discard("")
             logging.info(f"Collected {len(self.unique_words)} unique words from source")
         except Exception as e:
             logging.error(f"Error collecting unique words: {str(e)}")
@@ -91,27 +92,33 @@ class MorphologicalAnalyzer:
             if response.status_code == 201:
                 return response.json()
             else:
-                logging.warning(f"API request failed for word '{word}' with status {response.status_code}")
+                logging.warning(
+                    f"API request failed for word '{word}' with status {response.status_code}"
+                )
                 return {}
         except requests.RequestException as e:
             logging.error(f"API request error for word '{word}': {str(e)}")
             return {}
 
     @staticmethod
-    def process_analysis(
-            word: str, analysis: Dict
-    ) -> tuple[List[Dict], List[Dict]]:
+    def process_analysis(word: str, analysis: Dict) -> tuple[List[Dict], List[Dict]]:
         """Process the analysis JSON and return details and inflections"""
         details = []
         inflections = []
 
         # Handle unknown words (no Body object)
-        if not analysis or "RDF" not in analysis or "Body" not in analysis["RDF"]["Annotation"]:
-            details.append({
-                "form": word,
-                "item": 0,
-                "dictionaryRef": word  # Use the word itself as dictionary reference
-            })
+        if (
+            not analysis
+            or "RDF" not in analysis
+            or "Body" not in analysis["RDF"]["Annotation"]
+        ):
+            details.append(
+                {
+                    "form": word,
+                    "item": 0,
+                    "dictionaryRef": word,  # Use the word itself as dictionary reference
+                }
+            )
             return details, inflections
 
         bodies = analysis["RDF"]["Annotation"]["Body"]
@@ -142,8 +149,12 @@ class MorphologicalAnalyzer:
                         "cnt": cnt,
                         "term": infl["term"].get("$", ""),
                         "partOfSpeech": dict_info["pofs"].get("$", ""),
-                        "stem": MorphologicalAnalyzer.macronize(infl["term"].get("stem", {}).get("$", "")),
-                        "suffix": MorphologicalAnalyzer.macronize(infl["term"].get("suff", {}).get("$", "")),
+                        "stem": MorphologicalAnalyzer.macronize(
+                            infl["term"].get("stem", {}).get("$", "")
+                        ),
+                        "suffix": MorphologicalAnalyzer.macronize(
+                            infl["term"].get("suff", {}).get("$", "")
+                        ),
                         "gender": infl.get("gend", {}).get("$"),
                         "number": infl.get("num", {}).get("$"),
                         "declension": dict_info.get("decl", {}).get("$"),
@@ -167,9 +178,20 @@ class MorphologicalAnalyzer:
         try:
             details_fieldnames = ["form", "item", "dictionaryRef"]
             inflections_fieldnames = [
-                "form", "item", "cnt", "term", "partOfSpeech", "stem",
-                "suffix", "gender", "number", "declension", "gramm_case",
-                "mood", "tense", "voice", "person",
+                "form",
+                "item",
+                "cnt",
+                "partOfSpeech",
+                "stem",
+                "suffix",
+                "gender",
+                "number",
+                "declension",
+                "gramm_case",
+                "mood",
+                "tense",
+                "voice",
+                "person",
             ]
 
             # Write details
@@ -194,39 +216,42 @@ class MorphologicalAnalyzer:
             logging.error(f"Error writing results: {str(e)}")
             raise
 
-    def process_words( self ):
+    def process_words(self):
         """Process all words from the input file"""
         words_to_process = self.unique_words - self.processed_forms
-        logging.info( f"Starting to process {len( words_to_process )} new words" )
+        logging.info(f"Starting to process {len( words_to_process )} new words")
 
         for word in words_to_process:
-            logging.debug( f"Processing word: {word}" )
+            logging.debug(f"Processing word: {word}")
             try:
-                analysis = self.analyze_word( word )
-                details, inflections = self.process_analysis( word, analysis )
+                analysis = self.analyze_word(word)
+                details, inflections = self.process_analysis(word, analysis)
 
                 if details:
-                    self.write_results( details, inflections )
-                    self.processed_forms.add( word )
-                    logging.info( f"Successfully processed word: {word}" )
+                    self.write_results(details, inflections)
+                    self.processed_forms.add(word)
+                    logging.info(f"Successfully processed word: {word}")
                 else:
-                    logging.warning( f"No analysis results for word: {word}" )
+                    logging.warning(f"No analysis results for word: {word}")
 
             except Exception as e:
-                logging.error( f"Error processing word '{word}': {str( e )}" )
+                logging.error(f"Error processing word '{word}': {str( e )}")
                 continue
 
-        logging.info( f"Finished processing words. Total processed: {len( self.processed_forms )}" )
+        logging.info(
+            f"Finished processing words. Total processed: {len( self.processed_forms )}"
+        )
 
 
 def main():
     try:
-        project_root = os.path.dirname( os.path.dirname( os.path.dirname( __file__ ) ) )
-        analyzer = MorphologicalAnalyzer( project_root )
-        analyzer.process_words( )
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        analyzer = MorphologicalAnalyzer(project_root)
+        analyzer.process_words()
     except Exception as e:
-        logging.critical( f"Critical error in main execution: {str( e )}" )
+        logging.critical(f"Critical error in main execution: {str( e )}")
         raise
 
+
 if __name__ == "__main__":
-    main( )
+    main()
