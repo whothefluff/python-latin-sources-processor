@@ -4,6 +4,8 @@ import requests
 import logging
 from typing import Dict, List, Set, TextIO
 
+from scripts.morphological_analysis.process_morpheys_perseids_api_aux.overrides import WORDS
+
 
 class MorphologicalAnalyzer:
     MACRON_MAP = {
@@ -163,6 +165,10 @@ class MorphologicalAnalyzer:
                         "voice": infl.get("voice", {}).get("$"),
                         "person": infl.get("pers", {}).get("$"),
                     }
+                    
+                    if word in WORDS:
+                        inflection.update( WORDS[word] ) # Apply optional overrides for this word
+
                     inflections.append(inflection)
 
                 item += 1
