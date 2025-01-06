@@ -75,7 +75,7 @@ class MorphologicalAnalyzer:
             with open(self.input_file, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 # Since the API doesn't handle proper nouns anyway, treat all words as lower case to avoid duplicates
-                self.unique_words = { row["word"].lower( ) for row in reader }
+                self.unique_words = {row["word"].lower() for row in reader}
                 # Filter out nulls
                 self.unique_words.discard("")
             logging.info(f"Collected {len(self.unique_words)} unique words from source")
@@ -113,13 +113,7 @@ class MorphologicalAnalyzer:
             or "RDF" not in analysis
             or "Body" not in analysis["RDF"]["Annotation"]
         ):
-            details.append(
-                {
-                    "form": word,
-                    "item": 0,
-                    "dictionaryRef": None
-                }
-            )
+            details.append({"form": word, "item": 0, "dictionaryRef": None})
             return details, inflections
 
         bodies = analysis["RDF"]["Annotation"]["Body"]
@@ -144,12 +138,16 @@ class MorphologicalAnalyzer:
                     infl_list = [infl_list]
 
                 for cnt, infl in enumerate(infl_list):
-                    gender = infl.get( "gend", { } ).get( "$" )
+                    gender = infl.get("gend", {}).get("$")
                     inflection = {
                         "form": word,
                         "item": item,
                         "cnt": cnt,
-                        "partOfSpeech": "adverb" if gender == "adverbial" else dict_info["pofs"].get( "$", "" ),
+                        "partOfSpeech": (
+                            "adverb"
+                            if gender == "adverbial"
+                            else dict_info["pofs"].get("$", "")
+                        ),
                         "stem": MorphologicalAnalyzer.macronize(
                             infl["term"].get("stem", {}).get("$", "")
                         ),
