@@ -74,7 +74,8 @@ class MorphologicalAnalyzer:
         try:
             with open(self.input_file, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
-                self.unique_words = {row["word"] for row in reader}
+                # Since the API doesn't handle proper nouns anyway, treat all words as lower case to avoid duplicates
+                self.unique_words = { row["word"].lower( ) for row in reader }
                 # Filter out nulls
                 self.unique_words.discard("")
             logging.info(f"Collected {len(self.unique_words)} unique words from source")
