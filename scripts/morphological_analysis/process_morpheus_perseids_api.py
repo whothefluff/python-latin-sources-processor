@@ -148,7 +148,6 @@ class MorphologicalAnalyzer:
                         "form": word,
                         "item": item,
                         "cnt": cnt,
-                        "term": infl["term"].get("$", ""),
                         "partOfSpeech": dict_info["pofs"].get("$", ""),
                         "stem": MorphologicalAnalyzer.macronize(
                             infl["term"].get("stem", {}).get("$", "")
