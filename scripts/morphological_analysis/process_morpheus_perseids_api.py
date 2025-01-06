@@ -144,18 +144,19 @@ class MorphologicalAnalyzer:
                     infl_list = [infl_list]
 
                 for cnt, infl in enumerate(infl_list):
+                    gender = infl.get( "gend", { } ).get( "$" )
                     inflection = {
                         "form": word,
                         "item": item,
                         "cnt": cnt,
-                        "partOfSpeech": dict_info["pofs"].get("$", ""),
+                        "partOfSpeech": "adverb" if gender == "adverbial" else dict_info["pofs"].get( "$", "" ),
                         "stem": MorphologicalAnalyzer.macronize(
                             infl["term"].get("stem", {}).get("$", "")
                         ),
                         "suffix": MorphologicalAnalyzer.macronize(
                             infl["term"].get("suff", {}).get("$", "")
                         ),
-                        "gender": infl.get("gend", {}).get("$"),
+                        "gender": gender,
                         "number": infl.get("num", {}).get("$"),
                         "declension": dict_info.get("decl", {}).get("$"),
                         "gramm_case": infl.get("case", {}).get("$"),
