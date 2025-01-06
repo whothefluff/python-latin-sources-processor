@@ -117,7 +117,7 @@ class MorphologicalAnalyzer:
                 {
                     "form": word,
                     "item": 0,
-                    "dictionaryRef": word,  # Use the word itself as dictionary reference
+                    "dictionaryRef": None
                 }
             )
             return details, inflections
