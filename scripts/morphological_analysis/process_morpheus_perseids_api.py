@@ -155,7 +155,7 @@ class MorphologicalAnalyzer:
                         ),
                         "stem": MorphologicalAnalyzer.macronize(
                             infl["term"].get("stem", {}).get("$", "")
-                        ),
+                        ).replace(":", "-"),
                         "suffix": MorphologicalAnalyzer.macronize(
                             infl["term"].get("suff", {}).get("$", "")
                         ),
