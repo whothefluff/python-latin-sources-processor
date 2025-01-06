@@ -1,8 +1,14 @@
 WORDS = {
+    "fas": {
+        "partOfSpeech": "noun",
+    },
     "nil": {
         "partOfSpeech": "noun",
     },
-    "fas": {
+    "nihil": {
         "partOfSpeech": "noun",
+    },
+    "satis": {
+        "partOfSpeech": "adjective",
     },
 }
