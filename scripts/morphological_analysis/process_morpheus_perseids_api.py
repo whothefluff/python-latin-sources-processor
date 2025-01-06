@@ -4,7 +4,9 @@ import requests
 import logging
 from typing import Dict, List, Set, TextIO
 
-from scripts.morphological_analysis.process_morpheys_perseids_api_aux.overrides import WORDS
+from scripts.morphological_analysis.process_morpheys_perseids_api_aux.overrides import (
+    WORDS,
+)
 
 
 class MorphologicalAnalyzer:
@@ -141,14 +143,15 @@ class MorphologicalAnalyzer:
 
                 for cnt, infl in enumerate(infl_list):
                     gender = infl.get("gend", {}).get("$")
+                    pos = infl["pofs"].get("$", "")
                     inflection = {
                         "form": word,
                         "item": item,
                         "cnt": cnt,
                         "partOfSpeech": (
-                            "adverb"
-                            if gender == "adverbial"
-                            else infl["pofs"].get("$", "")
+                            "interjection"
+                            if pos == "exclamation"
+                            else "adverb" if gender == "adverbial" else pos
                         ),
                         "stem": MorphologicalAnalyzer.macronize(
                             infl["term"].get("stem", {}).get("$", "")
@@ -167,7 +170,8 @@ class MorphologicalAnalyzer:
                     }
 
                     if word in WORDS:
-                        inflection.update( WORDS[word] ) # Apply optional overrides for this word
+                        # Apply optional overrides for this word
+                        inflection.update(WORDS[word])
 
                     inflections.append(inflection)
 
