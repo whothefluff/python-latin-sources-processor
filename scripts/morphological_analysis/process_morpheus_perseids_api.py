@@ -5,7 +5,7 @@ import logging
 from typing import Dict, List, Set, TextIO
 
 from scripts.morphological_analysis.process_morpheys_perseids_api_aux.overrides import (
-    WORDS,
+    FORMS, NOT_WANTED_INFLECTIONS,
 )
 
 
@@ -103,7 +103,7 @@ class MorphologicalAnalyzer:
                 return {}
         except requests.RequestException as e:
             logging.error(f"API request error for word '{word}': {str(e)}")
-            return {}
+            raise e
 
     @staticmethod
     def process_analysis(word: str, analysis: Dict) -> tuple[List[Dict], List[Dict]]:
@@ -141,39 +141,47 @@ class MorphologicalAnalyzer:
                 if not isinstance(infl_list, list):
                     infl_list = [infl_list]
 
+                pos_dict = dict_info.get("pofs", {} ).get("$")
+
                 for cnt, infl in enumerate(infl_list):
+                    term = infl.get("term", {})
                     gender = infl.get("gend", {}).get("$")
-                    pos = infl["pofs"].get("$", "")
+                    pos_infl = infl.get("pofs", {}).get("$")
+                    verb_form = infl.get("mood", {}).get("$")
+                    gramm_case = infl.get("case", {}).get("$")
+                    suffix = MorphologicalAnalyzer.macronize(term.get("suff", {}).get("$"))
+                    declension = infl.get("decl", {}).get("$")
+                    stem_type = infl.get("stemtype", {}).get("$")
+                    computed_pos = part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, gramm_case, word)
                     inflection = {
                         "form": word,
                         "item": item,
                         "cnt": cnt,
-                        "partOfSpeech": (
-                            "interjection"
-                            if pos == "exclamation"
-                            else "adverb" if gender == "adverbial" else pos
-                        ),
-                        "stem": MorphologicalAnalyzer.macronize(
-                            infl["term"].get("stem", {}).get("$", "")
-                        ).replace(":", "-"),
-                        "suffix": MorphologicalAnalyzer.macronize(
-                            infl["term"].get("suff", {}).get("$", "")
-                        ),
-                        "gender": None if gender == "adverbial" else gender,
-                        "number": infl.get("num", {}).get("$"),
-                        "declension": infl.get("decl", {}).get("$"),
-                        "gramm_case": infl.get("case", {}).get("$"),
-                        "mood": infl.get("mood", {}).get("$"),
+                        "partOfSpeech": computed_pos,
+                        "stem": MorphologicalAnalyzer.macronize(term.get("stem", {}).get("$")).replace(":", "-"),
+                        "suffix": suffix,
+                        "gender": None if gender == "adverbial" else "neuter" if verb_form == "infinitive" else "masculine/feminine/neuter" if gender is None and declension == "3rd" else gender,
+                        "number": "singular" if verb_form == "infinitive" else infl.get("num", {}).get("$"),
+                        "declension": "1st & 2nd" if declension is None and verb_form in ["participle", "gerundive"] else "4th" if verb_form == "supine" else "3rd" if declension is None and computed_pos == "noun" and suffix is not None and suffix.startswith(("ior", "ius", "issim")) else declension,
+                        "gramm_case": "nominative/vocative" if gramm_case is None and suffix == "er" and stem_type == "er_eris" else gramm_case,
+                        "verb_form": verb_form,
                         "tense": infl.get("tense", {}).get("$"),
                         "voice": infl.get("voice", {}).get("$"),
                         "person": infl.get("pers", {}).get("$"),
+
+                        #"stem_type": stem_type,
+                        #"posDict": pos_dict,
+                        #"posInfl": pos_infl,
+                        #"gend": gender,  """)
                     }
 
-                    if word in WORDS:
-                        # Apply optional overrides for this word
-                        inflection.update(WORDS[word])
-
-                    inflections.append(inflection)
+                    key = f"{word}_{item}_{cnt}"
+                    if key in FORMS:
+                        inflection.update( FORMS[key] )
+                    if key in NOT_WANTED_INFLECTIONS:
+                        continue
+                    else:
+                        inflections.append(inflection)
 
                 item += 1
             except KeyError as e:
@@ -197,10 +205,15 @@ class MorphologicalAnalyzer:
                 "number",
                 "declension",
                 "gramm_case",
-                "mood",
+                "verb_form",
                 "tense",
                 "voice",
                 "person",
+
+                #"stem_type",
+                #"posDict",
+                #"posInfl",
+                #"gend",
             ]
 
             # Write details
@@ -250,6 +263,144 @@ class MorphologicalAnalyzer:
         logging.info(
             f"Finished processing words. Total processed: {len( self.processed_forms )}"
         )
+
+
+def part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, case, form) -> str:
+    """
+    The service ignore the fact that gerund exists, so there's that
+
+    Some adjectives like *fallaci* don't have gender, so there's that
+
+    I suspect some comparatives are broken in such a way that a form from a 1st & 2nd declension will not show the actual declension of the comparative form (*notior* for *notus*), so there's that
+
+    :param pos_dict: pofs tag
+    :param pos_infl: infl.pofs tag
+    :param verb_form: mood tag
+    :param gender: gend tag
+    :param suffix: suff tag
+    :param case: case tag
+    :param form: the word
+    :return: a normalized part of speech
+    """
+
+    # adjective first
+    if pos_dict == "adjective":
+        if case is None and ( gender == "adverbial"
+                              or suffix in ["ē", "ius", "ter", "issimē"]
+                              or form.endswith(("e", "ius", "ter", "issime"))):
+            return "adverb"
+        else:
+            if pos_infl in ["adjective", "numeral", "verb", "verb participle"]:
+                return "adjective"
+            elif pos_infl == "noun":
+                return "noun"
+            else:
+                return "new combination, check"
+
+    # adverb first
+    elif pos_dict == "adverb":
+        if pos_infl == "adverb":
+            return "adverb"
+        elif pos_infl == "adjective":
+            return "adjective"
+        elif pos_infl == "conjunction":
+            return "conjunction"
+        elif pos_infl == "irregular":
+            return "noun"
+        elif pos_infl == "noun":
+            return "noun"
+        elif pos_infl == "preposition":
+            return "preposition"
+        elif pos_infl == "pronoun":
+            return "pronoun"
+        elif pos_infl == "verb":
+            return "verb"
+        else:
+            return "new combination, check"
+
+    # conjunction first
+    elif pos_dict == "conjunction":
+        if pos_infl == "conjunction":
+            return "conjunction"
+        elif pos_infl == "preposition":
+            return "preposition"
+        elif pos_infl == "adverb":
+            return "adverb"
+        else:
+            return "new combination, check"
+
+    # exclamation first
+    elif pos_dict == "exclamation":
+        if pos_infl == "exclamation":
+            return "interjection"
+        else:
+            return "new combination, check"
+
+    # irregular first
+    elif pos_dict == "irregular":
+        return "irregular"
+
+    # noun first
+    elif pos_dict == "noun":
+        if case is None and gender == "adverbial":
+            return "adverb"
+        else:
+            if pos_infl == "noun":
+                return "noun"
+            elif pos_infl == "adjective":
+                return "adjective"
+            elif pos_infl == "verb":
+                return "verb"
+            else:
+                return "new combination, check"
+
+    # numeral first
+    elif pos_dict == "numeral":
+        if pos_infl == "numeral":
+            return "numeral"
+        else:
+            return "new combination, check"
+
+    # preposition first
+    elif pos_dict == "preposition":
+        if pos_infl == "preposition":
+            return "preposition"
+        else:
+            return "new combination, check"
+
+    # pronoun first
+    elif pos_dict == "pronoun":
+        if pos_infl == "pronoun":
+            return "pronoun"
+        else:
+            return "new combination, check"
+
+    # verb first
+    elif pos_dict == "verb":
+        if verb_form is None:
+            if gender == "adverbial":
+                return "adverb"
+            else:
+                return "new combination, check"
+        else:
+            if pos_infl == "verb":
+                if verb_form == "infinitive":
+                    return "noun"
+                elif verb_form == "gerundive":
+                    return "adjective"
+                elif verb_form in ["indicative", "subjunctive", "imperative"]:
+                    return "verb"
+                else:
+                    return "new combination, check"
+            elif pos_infl == "noun": # supine
+                return "noun"
+            elif pos_infl == "verb participle":
+                return "adjective"
+            else:
+                return "new combination, check"
+
+    # no matches
+    return "new combination, check"
 
 
 def main():
