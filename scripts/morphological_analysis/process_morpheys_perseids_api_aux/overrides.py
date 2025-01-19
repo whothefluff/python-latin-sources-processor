@@ -3,11 +3,11 @@ FORMS = {
         "partOfSpeech": "noun",
         "gender": "neuter",
         "number": "singular",
-        "gramm_case": "nominative/accusative",
+        "case": "nominative/accusative",
     },
     "nil_0_0": {
         "partOfSpeech": "noun",
-        "gramm_case": "nominative/accusative",
+        "case": "nominative/accusative",
     },
     "circumeunti_0_0": {
         "gender": "masculine/feminine/neuter",
@@ -29,29 +29,29 @@ FORMS = {
     },
     "os_0_0": {
         "number": "singular",
-        "gramm_case": "nominative/vocative/accusative",
+        "case": "nominative/vocative/accusative",
     },
     "satis_1_1": {
         "partOfSpeech": "adjective",
         "gender": None,
     },
     "nihil_0_1": {
-        "gramm_case": "nominative/accusative",
+        "case": "nominative/accusative",
     },
     "ferret_0_0": {
-        "verb_form": "subjunctive",
+        "verbForm": "subjunctive",
         "partOfSpeech": "verb",
     },
     "ferrem_0_0": {
-        "verb_form": "subjunctive",
+        "verbForm": "subjunctive",
         "partOfSpeech": "verb",
     },
     "referret_0_0": {
-        "verb_form": "subjunctive",
+        "verbForm": "subjunctive",
         "partOfSpeech": "verb",
     },
     "referret_0_1": {
-        "verb_form": "subjunctive",
+        "verbForm": "subjunctive",
         "partOfSpeech": "verb",
     },
     "constantior_0_0": {
