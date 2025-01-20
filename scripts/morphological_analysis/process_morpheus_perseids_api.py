@@ -149,10 +149,12 @@ class MorphologicalAnalyzer:
                     pos_infl = infl.get("pofs", {}).get("$")
                     verb_form = infl.get("mood", {}).get("$")
                     gramm_case = infl.get("case", {}).get("$")
-                    suffix = MorphologicalAnalyzer.macronize(term.get("suff", {}).get("$"))
-                    declension = infl.get("decl", {}).get("$")
+                    suffix_aux = MorphologicalAnalyzer.macronize(term.get("suff", {}).get("$"))
+                    suffix = None if suffix_aux == "*" else None if suffix_aux is None else suffix_aux.replace("^", "")
+                    decl = infl.get("decl", {}).get("$")
                     stem_type = infl.get("stemtype", {}).get("$")
                     computed_pos = part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, gramm_case, word)
+                    tense = infl.get("tense", {}).get("$")
                     inflection = {
                         "form": word,
                         "item": item,
@@ -160,13 +162,13 @@ class MorphologicalAnalyzer:
                         "partOfSpeech": computed_pos,
                         "stem": MorphologicalAnalyzer.macronize(term.get("stem", {}).get("$")).replace(":", "-"),
                         "suffix": suffix,
-                        "segmentsInfo": segments_info(computed_pos, verb_form, stem_type),
-                        "gender": None if gender == "adverbial" else "neuter" if verb_form == "infinitive" else "masculine/feminine/neuter" if gender is None and declension == "3rd" else gender,
+                        "segmentsInfo": segments_info(computed_pos, verb_form, tense, stem_type, suffix),
+                        "gender": None if gender == "adverbial" else "neuter" if verb_form == "infinitive" else "masculine/feminine/neuter" if gender is None and decl == "3rd" else gender,
                         "number": "singular" if verb_form == "infinitive" else infl.get("num", {}).get("$"),
-                        "declension": "1st & 2nd" if declension is None and verb_form in ["participle", "gerundive"] else "4th" if verb_form == "supine" else "3rd" if declension is None and computed_pos == "noun" and suffix is not None and suffix.startswith(("ior", "ius", "issim")) else declension,
+                        "declension": declension( computed_pos, decl, suffix, verb_form, tense ),
                         "case": "nominative/vocative" if gramm_case is None and suffix == "er" and stem_type == "er_eris" else gramm_case,
                         "verbForm": verb_form,
-                        "tense": infl.get("tense", {}).get("$"),
+                        "tense": tense,
                         "voice": infl.get("voice", {}).get("$"),
                         "person": infl.get("pers", {}).get("$"),
 
@@ -174,7 +176,7 @@ class MorphologicalAnalyzer:
                         #"stem_type": stem_type,
                         #"pos_dict": pos_dict,
                         #"pos_infl": pos_infl,
-                        #"gend": gender,  """)
+                        #"gend": gender,
                     }
 
                     key = f"{word}_{item}_{cnt}"
@@ -191,6 +193,7 @@ class MorphologicalAnalyzer:
                 continue
 
         return details, inflections
+
 
     def write_results(self, details: List[Dict], inflections: List[Dict]):
         """Write results to CSV files"""
@@ -406,13 +409,30 @@ def part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, case, form) ->
     return "new combination, check"
 
 
-def segments_info( computed_pos: str, verb_form: str, stemtype_tag: str ) -> str:
-    #TODO: at some point fix the participles declensions (which are corrupted beyond reason) and then return decent suffixes
+def declension( computed_pos:str, decl_tag:str, suffix:str, verb_form:str, verb_tense:str ) -> str:
+    if verb_form == "gerundive":
+        return "1st & 2nd"
+    elif verb_form == "participle":
+        if verb_tense == "present":
+            return "3rd"
+        elif verb_tense in ["perfect", "future"]:
+            return "1st & 2nd"
+    elif verb_form == "supine":
+        return "4th"
+    elif computed_pos in ["noun","adjective"] and suffix is not None and ( suffix.find("ior") != -1 or suffix.find("ius") != -1 ):
+        return "3rd"
+    elif computed_pos in ["noun","adjective"] and suffix is not None and suffix.find("issim") != -1:
+        return "1st & 2nd"
+    else:
+        return decl_tag
+
+
+def segments_info( computed_pos: str, verb_form: str, verb_tense: str, stemtype_tag: str, suffix: str ) -> str:
 
     def remove_adj_suffix( text:str ) -> str:
         suffixes = ['_adj', '_adj1', '_adj2', '_adj3', '_comp']
-        for suffix in suffixes:
-            text = text.removesuffix( suffix )
+        for s in suffixes:
+            text = text.removesuffix( s )
         return text
 
     def process_tag( stemtype: str ) -> str:
@@ -446,33 +466,41 @@ def segments_info( computed_pos: str, verb_form: str, stemtype_tag: str ) -> str
         # for nouns
         if computed_pos == "noun":
             if verb_form is None:
-                if stemtype_tag == "pp4":
-                    return "derived from perfect participle"
-                else:
-                    noun_st_tag = "is_is" if stemtype_tag == "is_is_C" else "ion_iī" if stemtype_tag == "ios_i" else stemtype_tag
-                    if noun_st_tag.count("_") == 1:
-                        return process_tag( noun_st_tag )
+                noun_st_tag = "is_is" if stemtype_tag == "is_is_C" else "ion_iī" if stemtype_tag == "ios_i" else stemtype_tag
+                if noun_st_tag.count("_") == 1:
+                    return process_tag( noun_st_tag )
+                elif suffix is not None and ( suffix.find("ior") != -1 or suffix.find("ius") != -1 ):
+                    return "ior, -ius"
+                elif suffix is not None and suffix.find("issim") != -1:
+                    return "issimus, -issima, -issimum"
             elif verb_form == "supine":
                 return "supine stem"
 
         # for adjectives
         elif computed_pos == "adjective":
-            if verb_form is None:
-                if stemtype_tag == "pp4":
-                    return "derived from perfect participle"
-                elif stemtype_tag == "conj1":
-                    return "āns, -antis"
-                elif stemtype_tag in ["conj2", "conj3"]:
-                    return "ēns, -entis"
-                elif stemtype_tag == "conj3_io":
-                    return "iēns, -ientis"
-                else:
-                    adj_st_tag = remove_adj_suffix(stemtype_tag)
-                    return process_tag( adj_st_tag )
+            if verb_form == "participle":
+                if verb_tense == "present":
+                    if stemtype_tag == "conj1":
+                        return "āns, -antis"
+                    elif stemtype_tag in ["conj2", "conj3"]:
+                        return "ēns, -entis"
+                    elif stemtype_tag in ["conj3_io", "conj4"]:
+                        return "iēns, -ientis"
+                elif verb_tense == "perfect":
+                    return "us, -a, -um"
+                elif verb_tense == "future": # voice not necessary because it is always active (the passive one has form *gerundive*)
+                    return "ūrus, -ūra, -ūrum"
             elif verb_form == "gerundive":
                 gerundive_suffixes = { "conj1": "andus, -anda, -andum", "conj2": "endus, -enda, -endum", "conj3": "endus, -enda, -endum", "conj3_io": "iendus, -ienda, -iendum","conj4": "iendus, -ienda, -iendum",}
                 if stemtype_tag in gerundive_suffixes:
                     return gerundive_suffixes[stemtype_tag]
+            elif suffix is not None and ( suffix.find("ior") != -1 or suffix.find("ius") != -1 ):
+                return "ior, -ius"
+            elif suffix is not None and suffix.find("issim") != -1:
+                return "issimus, -issima, -issimum"
+            else:
+                adj_st_tag = remove_adj_suffix(stemtype_tag)
+                return process_tag( adj_st_tag )
 
         # for verbs
         elif computed_pos == "verb":
@@ -481,6 +509,9 @@ def segments_info( computed_pos: str, verb_form: str, stemtype_tag: str ) -> str
             verb_inflections = perfect_stems | conjugations
             if stemtype_tag in verb_inflections:
                 return verb_inflections[stemtype_tag]
+
+        elif computed_pos == "new combination, check":
+            return "new combination, check"
 
 
 def main():

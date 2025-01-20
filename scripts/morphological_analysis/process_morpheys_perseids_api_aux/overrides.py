@@ -57,38 +57,56 @@ FORMS = {
     "constantior_0_0": {
         "declension": "3rd",
         "partOfSpeech": "adjective",
+        "segmentsInfo": "ior, -ius",
     },
     "constantior_0_1": {
         "declension": "3rd",
         "partOfSpeech": "adjective",
+        "segmentsInfo": "ior, -ius",
     },
     "constantior_0_2": {
         "declension": "3rd",
         "partOfSpeech": "adjective",
+        "segmentsInfo": "ior, -ius",
     },
     "constantior_0_3": {
         "declension": "3rd",
         "partOfSpeech": "adjective",
+        "segmentsInfo": "ior, -ius",
     },
     "diligentius_1_1": {
         "declension": "3rd",
         "partOfSpeech": "adjective",
+        "segmentsInfo": "ior, -ius",
     },
     "diligentius_1_2": {
         "declension": "3rd",
         "partOfSpeech": "adjective",
+        "segmentsInfo": "ior, -ius",
     },
     "diligentius_1_3": {
         "declension": "3rd",
         "partOfSpeech": "adjective",
+        "segmentsInfo": "ior, -ius",
     },
     "iactantiorem_0_0": {
         "declension": "3rd",
         "partOfSpeech": "adjective",
+        "segmentsInfo": "ior, -ius",
     },
     "iactantiorem_0_1": {
         "declension": "3rd",
         "partOfSpeech": "adjective",
+        "segmentsInfo": "ior, -ius",
+    },
+    "celeri_0_0": {
+        "segmentsInfo": ", is, e",
+    },
+    "celeri_0_1": {
+        "segmentsInfo": ", is, e",
+    },
+    "celeri_0_2": {
+        "segmentsInfo": ", is, e",
     },
 }
 
