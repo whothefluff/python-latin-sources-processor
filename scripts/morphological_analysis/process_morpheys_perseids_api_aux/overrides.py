@@ -100,13 +100,13 @@ FORMS = {
         "segmentsInfo": "ior, -ius",
     },
     "celeri_0_0": {
-        "segmentsInfo": ", is, e",
+        "segmentsInfo": ", -is, -e",
     },
     "celeri_0_1": {
-        "segmentsInfo": ", is, e",
+        "segmentsInfo": ", -is, -e",
     },
     "celeri_0_2": {
-        "segmentsInfo": ", is, e",
+        "segmentsInfo": ", -is, -e",
     },
 }
 
