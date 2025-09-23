@@ -23,6 +23,12 @@ class MorphologicalAnalyzer:
         "U_": "Ū",
     }
 
+    # List of Latin enclitics, sorted by length descending to match longer ones first (e.g., "cumque" before "que")
+    ENCLITICS = sorted([
+        "que", "ne", "ve", "ue", "vis", "piam", "dem", "dum",
+    ], key=len, reverse=True)
+
+
     def __init__(self, project_root: str):
         self.project_root = project_root
         self.input_file = os.path.join(
@@ -245,7 +251,7 @@ class MorphologicalAnalyzer:
             raise
 
     def process_words(self):
-        """Process all words from the input file"""
+        """Process all words from the input file, with retries for enclitics."""
         words_to_process = self.unique_words - self.processed_forms
         logging.info(f"Starting to process {len( words_to_process )} new words")
 
@@ -255,13 +261,37 @@ class MorphologicalAnalyzer:
                 analysis = self.analyze_word(word)
                 details, inflections = self.process_analysis(word, analysis)
 
+                # If the initial analysis found no inflections, try stripping enclitics.
+                if not inflections:
+                    logging.debug(f"Initial analysis for '{word}' failed, checking for enclitics.")
+                    for enclitic in self.ENCLITICS:
+                        if word.endswith(enclitic) and len(word) > len(enclitic):
+                            base_word = word[:-len(enclitic)]
+                            logging.info(f"Retrying '{word}' as base '{base_word}' (enclitic '{enclitic}').")
+
+                            retry_analysis = self.analyze_word(base_word)
+                            # Pass the original `word` to keep it as the `form` in the output.
+                            retry_details, retry_inflections = self.process_analysis(word, retry_analysis)
+
+                            if retry_inflections:
+                                details = retry_details
+                                inflections = retry_inflections
+                                break  # Success, exit enclitic loop
+
+                # After all attempts, write the result (success, retry-success, or failure)
                 if details:
                     self.write_results(details, inflections)
                     self.processed_forms.add(word)
-                    logging.info(f"Successfully processed word: {word}")
+                    if inflections:
+                        logging.info(f"Successfully processed word: {word}")
+                    else:
+                        logging.warning(f"No analysis found for '{word}', stored as unknown.")
                 else:
                     logging.warning(f"No analysis results for word: {word}")
 
+            except requests.RequestException as e:
+                logging.error(f"API request error for word '{word}': {str(e)}. Will retry next run.")
+                continue
             except Exception as e:
                 logging.error(f"Error processing word '{word}': {str( e )}")
                 continue
