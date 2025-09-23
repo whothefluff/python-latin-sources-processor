@@ -5,7 +5,7 @@ import logging
 from typing import Dict, List, Set, TextIO
 
 from scripts.morphological_analysis.process_morpheys_perseids_api_aux.overrides import (
-    FORMS, NOT_WANTED_INFLECTIONS, FULL_OVERRIDES,
+    FORMS, NOT_WANTED_INFLECTIONS, FULL_OVERRIDES, ANALYSIS_ALIASES,
 )
 
 
@@ -266,15 +266,23 @@ class MorphologicalAnalyzer:
                 continue  # Already processed, skip to next word
 
             try:
-                analysis = self.analyze_word(word)
+
+                word_for_analysis = ANALYSIS_ALIASES.get(word, word)
+                if word_for_analysis != word:
+                    logging.info(f"'{word}' analyzed as '{word_for_analysis }'")
+
+                analysis = self.analyze_word(word_for_analysis)
                 details, inflections = self.process_analysis(word, analysis)
 
                 # If the initial analysis found no inflections, try stripping enclitics.
                 if not inflections:
-                    logging.debug(f"Initial analysis for '{word}' failed, checking for enclitics.")
+                    if word_for_analysis == word:
+                        logging.debug(f"Initial analysis for '{word}' failed, checking for enclitics.")
+                    else:
+                        logging.debug(f"Initial analysis for '{word}' (as '{word_for_analysis}') failed, checking for enclitics.")
                     for enclitic in self.ENCLITICS:
-                        if word.endswith(enclitic) and len(word) > len(enclitic):
-                            base_word = word[:-len(enclitic)]
+                        if word_for_analysis.endswith(enclitic) and len(word_for_analysis) > len(enclitic):
+                            base_word = word_for_analysis[:-len(enclitic)]
                             logging.info(f"Retrying '{word}' as base '{base_word}' (enclitic '{enclitic}').")
 
                             retry_analysis = self.analyze_word(base_word)

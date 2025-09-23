@@ -1,3 +1,10 @@
+# Maps a word to a different word that should be used for the API query
+ANALYSIS_ALIASES = {
+    # iamque returns an adverb "iamque" that is not found in L&S, so we don't want it
+    "iamque": "iam",
+    "jamque": "jam",
+}
+
 FULL_OVERRIDES = {
     # Not recognized by Morpheus apparently
     "dispersus": (
