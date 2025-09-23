@@ -172,7 +172,7 @@ class MorphologicalAnalyzer:
                         "gender": None if gender == "adverbial" else "neuter" if verb_form == "infinitive" else "masculine/feminine/neuter" if gender is None and decl == "3rd" else gender,
                         "number": "singular" if verb_form == "infinitive" else infl.get("num", {}).get("$"),
                         "declension": declension( computed_pos, decl, suffix, verb_form, tense ),
-                        "case": "nominative/vocative" if gramm_case is None and suffix == "er" and stem_type == "er_eris" else gramm_case,
+                        "case": case(gramm_case, verb_form, suffix, stem_type),
                         "verbForm": verb_form,
                         "tense": tense,
                         "voice": infl.get("voice", {}).get("$"),
@@ -455,6 +455,26 @@ def declension( computed_pos:str, decl_tag:str, suffix:str, verb_form:str, verb_
         return "1st & 2nd"
     else:
         return decl_tag
+
+
+def case(gramm_case: str, verb_form: str, suffix: str, stem_type: str) -> str:
+    """
+    Determines the grammatical case, overriding API errors for specific forms like supine.
+    """
+    # Supine seems mis-cased by the API. Override based on the suffix.
+    if verb_form == "supine":
+        if suffix == "um":
+            return "accusative"
+        elif suffix == "ū":
+            return "ablative"
+        return gramm_case # Fallback
+
+    # Handle -er adjectives
+    if gramm_case is None and suffix == "er" and stem_type == "er_eris":
+        return "nominative/vocative"
+
+    # Otherwise
+    return gramm_case
 
 
 def segments_info( computed_pos: str, verb_form: str, verb_tense: str, stemtype_tag: str, suffix: str ) -> str:
