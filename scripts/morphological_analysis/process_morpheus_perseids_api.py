@@ -5,7 +5,7 @@ import logging
 from typing import Dict, List, Set, TextIO
 
 from scripts.morphological_analysis.process_morpheys_perseids_api_aux.overrides import (
-    FORMS, NOT_WANTED_INFLECTIONS,
+    FORMS, NOT_WANTED_INFLECTIONS, FULL_OVERRIDES,
 )
 
 
@@ -257,6 +257,14 @@ class MorphologicalAnalyzer:
 
         for word in words_to_process:
             logging.debug(f"Processing word: {word}")
+
+            if word in FULL_OVERRIDES: # Some words might not be found or be complete wack, these are overridden
+                logging.info(f"Using full override for '{word}'")
+                details, inflections = FULL_OVERRIDES[word]
+                self.write_results(details, inflections)
+                self.processed_forms.add(word)
+                continue  # Already processed, skip to next word
+
             try:
                 analysis = self.analyze_word(word)
                 details, inflections = self.process_analysis(word, analysis)

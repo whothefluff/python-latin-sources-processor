@@ -1,3 +1,75 @@
+FULL_OVERRIDES = {
+    # Not recognized by Morpheus apparently
+    "dispersus": (
+        [{"form": "dispersus", "item": 0, "dictionaryRef": "dispergo"}],
+        [{
+            'form': 'dispersus', 'item': 0, 'cnt': 0,
+            'partOfSpeech': 'adjective',
+            'stem': 'dispers',
+            'suffix': 'us',
+            'segmentsInfo': 'us, -a, -um', # Inferred by code (replicate behavior)
+            'gender': 'masculine',
+            'number': 'singular',
+            'declension': '1st & 2nd',# Inferred by code (replicate behavior)
+            'case': 'nominative',
+            'verbForm': 'participle',
+            'tense': 'perfect',
+            'voice': 'passive',
+            'person': None,
+        }]
+    ),
+    # Only recognized by the version of Morpheus with no nice fixes
+    "ascribere": (
+        [{"form": "ascribere", "item": 0, "dictionaryRef": "ascribo"}],
+        [
+            {
+                'form': 'ascribere', 'item': 0, 'cnt': 0, 'partOfSpeech': 'verb', 'stem': 'a-scrīb', 'suffix': 'ēre',
+                'segmentsInfo': '3rd conjugation', 'gender': None, 'number': 'singular', 'declension': None, 'case': None,
+                'verbForm': 'indicative', 'tense': 'future', 'voice': None, 'person': None,
+            },
+            {
+                'form': 'ascribere', 'item': 0, 'cnt': 1, 'partOfSpeech': 'verb', 'stem': 'a-scrīb', 'suffix': 'ere',
+                'segmentsInfo': '3rd conjugation', 'gender': None, 'number': 'singular', 'declension': None, 'case': None,
+                'verbForm': 'imperative', 'tense': 'present', 'voice': None, 'person': None,
+            },
+            {
+                'form': 'ascribere', 'item': 0, 'cnt': 2, 'partOfSpeech': 'verb', 'stem': 'a-scrīb', 'suffix': 'ere',
+                'segmentsInfo': '3rd conjugation', 'gender': None, 'number': 'singular', 'declension': None, 'case': None,
+                'verbForm': 'indicative', 'tense': 'present', 'voice': None, 'person': None,
+            },
+            {
+                'form': 'ascribere', 'item': 0, 'cnt': 3, 'partOfSpeech': 'noun', 'stem': 'a-scrīb', 'suffix': 'ere',
+                'segmentsInfo': None, 'gender': 'neuter', 'number': 'singular', 'declension': None, 'case': None,
+                'verbForm': 'infinitive', 'tense': 'present', 'voice': 'active', 'person': None,
+            },
+        ]
+    ),
+    "ascribi": (
+        [{"form": "ascribi", "item": 0, "dictionaryRef": "ascribo"}],
+        [{
+            'form': 'ascribi', 'item': 0, 'cnt': 0, 'partOfSpeech': 'noun', 'stem': 'a-scrīb', 'suffix': 'ī',
+            'segmentsInfo': None, 'gender': 'neuter', 'number': 'singular', 'declension': None, 'case': None,
+            'verbForm': 'infinitive', 'tense': 'present', 'voice': 'passive', 'person': None,
+        }]
+    ),
+    "ascripserunt": (
+        [{"form": "ascripserunt", "item": 0, "dictionaryRef": "ascribo"}],
+        [{
+            'form': 'ascripserunt', 'item': 0, 'cnt': 0, 'partOfSpeech': 'verb', 'stem': 'a-scrīps', 'suffix': 'ērunt',
+            'segmentsInfo': 'perfect stem', 'gender': None, 'number': 'plural', 'declension': None, 'case': None,
+            'verbForm': 'indicative', 'tense': 'perfect', 'voice': 'active', 'person': '3rd',
+        }]
+    ),
+    "ascriptus": (
+        [{"form": "ascriptus", "item": 0, "dictionaryRef": "ascribo"}],
+        [{
+            'form': 'ascriptus', 'item': 0, 'cnt': 0, 'partOfSpeech': 'adjective', 'stem': 'a-scrīpt', 'suffix': 'us',
+            'segmentsInfo': 'us, -a, -um', 'gender': 'masculine', 'number': 'singular', 'declension': '1st & 2nd',
+            'case': 'nominative', 'verbForm': 'participle', 'tense': 'perfect', 'voice': 'passive', 'person': None,
+        }]
+    ),
+}
+
 FORMS = {
     "fas_0_0": {
         "partOfSpeech": "noun",
