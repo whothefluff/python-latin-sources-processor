@@ -138,7 +138,7 @@ class MorphologicalAnalyzer:
             try:
                 entry = body["rest"]["entry"]
                 dict_info = entry["dict"]
-                headword = dict_info["hdwd"]["$"]
+                headword = dict_info["hdwd"]["$"].replace("^", "")
 
                 detail = {"form": word, "item": item, "dictionaryRef": headword}
                 details.append(detail)
@@ -166,7 +166,7 @@ class MorphologicalAnalyzer:
                         "item": item,
                         "cnt": cnt,
                         "partOfSpeech": computed_pos,
-                        "stem": MorphologicalAnalyzer.macronize(term.get("stem", {}).get("$")).replace(":", "-"),
+                        "stem": MorphologicalAnalyzer.macronize(term.get("stem", {}).get("$")).replace(":", "-").replace("^", ""),
                         "suffix": suffix,
                         "segmentsInfo": segments_info(computed_pos, verb_form, tense, stem_type, suffix),
                         "gender": None if gender == "adverbial" else "neuter" if verb_form == "infinitive" else "masculine/feminine/neuter" if gender is None and decl == "3rd" else gender,
