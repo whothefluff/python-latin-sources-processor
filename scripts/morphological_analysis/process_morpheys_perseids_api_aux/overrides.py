@@ -93,6 +93,95 @@ FULL_OVERRIDES = {
             'case': 'nominative', 'verbForm': 'participle', 'tense': 'perfect', 'voice': 'passive', 'person': None,
         }]
     ),
+    # Idem
+    "pauper": (
+        [{"form": "pauper", "item": 0, "dictionaryRef": "pauper"}],
+        [
+            {
+                'form': 'pauper', 'item': 0, 'cnt': 0, 'partOfSpeech': 'noun', 'stem': 'paup', 'suffix': 'er',
+                'segmentsInfo': 'er, -eris', 'gender': 'masculine', 'number': 'singular', 'declension': '3rd',
+                'case': 'nominative/vocative', 'verbForm': None, 'tense': None, 'voice': None, 'person': None,
+            },
+            {
+                'form': 'pauper', 'item': 0, 'cnt': 1, 'partOfSpeech': 'noun', 'stem': 'paup', 'suffix': 'er',
+                'segmentsInfo': 'er, -eris', 'gender': 'feminine', 'number': 'singular', 'declension': '3rd',
+                'case': 'nominative/vocative', 'verbForm': None, 'tense': None, 'voice': None, 'person': None,
+            },
+        ]
+    ),
+    "pauperes": (
+        [
+            {"form": "pauperes", "item": 0, "dictionaryRef": "pauper"},
+            {"form": "pauperes", "item": 1, "dictionaryRef": "paupero"}
+        ],
+        [
+            {
+                'form': 'pauperes', 'item': 0, 'cnt': 0, 'partOfSpeech': 'noun', 'stem': 'paup', 'suffix': 'erēs',
+                'segmentsInfo': 'er, -eris', 'gender': 'masculine', 'number': 'plural', 'declension': '3rd',
+                'case': 'accusative', 'verbForm': None, 'tense': None, 'voice': None, 'person': None,
+            },
+            {
+                'form': 'pauperes', 'item': 0, 'cnt': 1, 'partOfSpeech': 'noun', 'stem': 'paup', 'suffix': 'erēs',
+                'segmentsInfo': 'er, -eris', 'gender': 'feminine', 'number': 'plural', 'declension': '3rd',
+                'case': 'accusative', 'verbForm': None, 'tense': None, 'voice': None, 'person': None,
+            },
+            {
+                'form': 'pauperes', 'item': 0, 'cnt': 2, 'partOfSpeech': 'noun', 'stem': 'paup', 'suffix': 'erēs',
+                'segmentsInfo': 'er, -eris', 'gender': 'masculine', 'number': 'plural', 'declension': '3rd',
+                'case': 'nominative', 'verbForm': None, 'tense': None, 'voice': None, 'person': None,
+            },
+            {
+                'form': 'pauperes', 'item': 0, 'cnt': 3, 'partOfSpeech': 'noun', 'stem': 'paup', 'suffix': 'erēs',
+                'segmentsInfo': 'er, -eris', 'gender': 'feminine', 'number': 'plural', 'declension': '3rd',
+                'case': 'nominative', 'verbForm': None, 'tense': None, 'voice': None, 'person': None,
+            },
+            {
+                'form': 'pauperes', 'item': 0, 'cnt': 4, 'partOfSpeech': 'noun', 'stem': 'paup', 'suffix': 'erēs',
+                'segmentsInfo': 'er, -eris', 'gender': 'masculine', 'number': 'plural', 'declension': '3rd',
+                'case': 'vocative', 'verbForm': None, 'tense': None, 'voice': None, 'person': None,
+            },
+            {
+                'form': 'pauperes', 'item': 0, 'cnt': 5, 'partOfSpeech': 'noun', 'stem': 'paup', 'suffix': 'erēs',
+                'segmentsInfo': 'er, -eris', 'gender': 'feminine', 'number': 'plural', 'declension': '3rd',
+                'case': 'vocative', 'verbForm': None, 'tense': None, 'voice': None, 'person': None,
+            },
+            {
+                'form': 'pauperes', 'item': 1, 'cnt': 0, 'partOfSpeech': 'verb', 'stem': 'pauper', 'suffix': 'ēs',
+                'segmentsInfo': '1st conjugation', 'gender': None, 'number': 'singular', 'declension': None,
+                'case': None, 'verbForm': 'subjunctive', 'tense': 'present', 'voice': 'active', 'person': '2nd',
+            },
+        ]
+    ),
+    "pauperi": (
+        [{"form": "pauperi", "item": 0, "dictionaryRef": "pauper"}],
+        [
+            {
+                'form': 'pauperi', 'item': 0, 'cnt': 0, 'partOfSpeech': 'noun', 'stem': 'paup', 'suffix': 'erī',
+                'segmentsInfo': 'er, -eris', 'gender': 'masculine', 'number': 'singular', 'declension': '3rd',
+                'case': 'dative', 'verbForm': None, 'tense': None, 'voice': None, 'person': None,
+            },
+            {
+                'form': 'pauperi', 'item': 0, 'cnt': 1, 'partOfSpeech': 'noun', 'stem': 'paup', 'suffix': 'erī',
+                'segmentsInfo': 'er, -eris', 'gender': 'feminine', 'number': 'singular', 'declension': '3rd',
+                'case': 'dative', 'verbForm': None, 'tense': None, 'voice': None, 'person': None,
+            },
+        ]
+    ),
+    "pauperis": (
+        [{"form": "pauperis", "item": 0, "dictionaryRef": "pauper"}],
+        [
+            {
+                'form': 'pauperis', 'item': 0, 'cnt': 0, 'partOfSpeech': 'noun', 'stem': 'paup', 'suffix': 'eris',
+                'segmentsInfo': 'er, -eris', 'gender': 'masculine', 'number': 'singular', 'declension': '3rd',
+                'case': 'genitive', 'verbForm': None, 'tense': None, 'voice': None, 'person': None,
+            },
+            {
+                'form': 'pauperis', 'item': 0, 'cnt': 1, 'partOfSpeech': 'noun', 'stem': 'paup', 'suffix': 'eris',
+                'segmentsInfo': 'er, -eris', 'gender': 'feminine', 'number': 'singular', 'declension': '3rd',
+                'case': 'genitive', 'verbForm': None, 'tense': None, 'voice': None, 'person': None,
+            },
+        ]
+    ),
 }
 
 FORMS = {
