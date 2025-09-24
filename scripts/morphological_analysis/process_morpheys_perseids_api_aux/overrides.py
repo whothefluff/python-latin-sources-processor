@@ -1,6 +1,7 @@
 # Key: incorrect ref from API, Value: correct ref to use.
 DICT_REF_REPLACEMENTS = {
     "meum1": "meum",
+    "merito": "merito1",
 }
 
 # A set of {form}_{item} keys to completely ignore
