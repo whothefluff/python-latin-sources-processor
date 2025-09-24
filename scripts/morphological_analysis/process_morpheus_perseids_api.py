@@ -5,7 +5,7 @@ import logging
 from typing import Dict, List, Set, TextIO
 
 from scripts.morphological_analysis.process_morpheys_perseids_api_aux.overrides import (
-    FORMS, NOT_WANTED_INFLECTIONS, FULL_OVERRIDES, ANALYSIS_ALIASES,
+    FORMS, NOT_WANTED_INFLECTIONS, FULL_OVERRIDES, ANALYSIS_ALIASES, FORMS_TO_IGNORE, IGNORED_DICT_REFS,
 )
 
 
@@ -131,7 +131,24 @@ class MorphologicalAnalyzer:
             bodies = [bodies]
 
         item = 0
-        for body in bodies:
+
+        # Use enumerate to get the ORIGINAL index, which is needed for the FORMS_TO_IGNORE check.
+        for original_item_index, body in enumerate(bodies):
+            # Filters
+            try:
+                headword = body["rest"]["entry"]["dict"]["hdwd"]["$"]
+                # Check FORMS_TO_IGNORE using the original index from enumerate.
+                form_key_to_ignore = f"{word}_{original_item_index}"
+                if form_key_to_ignore in FORMS_TO_IGNORE:
+                    logging.info(f"Ignoring form '{form_key_to_ignore}' based on FORMS_TO_IGNORE list.")
+                    continue # Skip to the next body without incrementing final_item_index
+                # Check IGNORED_DICT_REFS.
+                if headword in IGNORED_DICT_REFS:
+                    logging.info(f"Ignoring form '{word}_{original_item_index}' due to unwanted dictionary reference '{headword}'.")
+                    continue # Skip to the next body without incrementing final_item_index
+            except KeyError:
+                pass # Malformed body, no checks possible here so proceed as normally
+
             if "rest" not in body:
                 continue
 
@@ -252,6 +269,8 @@ class MorphologicalAnalyzer:
 
     def process_words(self):
         """Process all words from the input file, with retries for enclitics."""
+        details: list[dict]
+        inflections: list[dict]
         words_to_process = self.unique_words - self.processed_forms
         logging.info(f"Starting to process {len( words_to_process )} new words")
 

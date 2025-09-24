@@ -1,3 +1,21 @@
+# A set of {form}_{item} keys to completely ignore
+FORMS_TO_IGNORE = {
+    # It's very likely that future forms of equivalent analyses will have to be added with the next processed works
+    "praesepia_1",
+    "parum_0",
+    "infans_1",
+}
+
+IGNORED_DICT_REFS = {
+    # These are not found in L&S
+    "ne",
+    "repperio",
+    "penitus3",
+    "perpascor",
+    "quodam",
+    "meum2", # Probably some sort of pronoun, while meum1 refers to the plan (also "wrong", but the reader will find it)
+}
+
 # Maps a word to a different word that should be used for the API query
 ANALYSIS_ALIASES = {
     # iamque returns an adverb "iamque" that is not found in L&S, so we don't want it
