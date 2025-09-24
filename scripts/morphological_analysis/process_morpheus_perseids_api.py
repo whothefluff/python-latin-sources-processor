@@ -273,9 +273,10 @@ class MorphologicalAnalyzer:
         details: list[dict]
         inflections: list[dict]
         words_to_process = self.unique_words - self.processed_forms
-        logging.info(f"Starting to process {len( words_to_process )} new words")
+        sorted_words_to_process = sorted(list(words_to_process))
+        logging.info(f"Starting to process {len( sorted_words_to_process )} new words")
 
-        for word in words_to_process:
+        for word in sorted_words_to_process:
             logging.debug(f"Processing word: {word}")
 
             if word in FULL_OVERRIDES: # Some words might not be found or be complete wack, these are overridden
