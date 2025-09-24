@@ -5,7 +5,7 @@ import logging
 from typing import Dict, List, Set, TextIO
 
 from scripts.morphological_analysis.process_morpheys_perseids_api_aux.overrides import (
-    FORMS, NOT_WANTED_INFLECTIONS, FULL_OVERRIDES, ANALYSIS_ALIASES, FORMS_TO_IGNORE, IGNORED_DICT_REFS,
+    FORMS, NOT_WANTED_INFLECTIONS, FULL_OVERRIDES, ANALYSIS_ALIASES, FORMS_TO_IGNORE, IGNORED_DICT_REFS, DICT_REF_REPLACEMENTS,
 )
 
 
@@ -156,6 +156,7 @@ class MorphologicalAnalyzer:
                 entry = body["rest"]["entry"]
                 dict_info = entry["dict"]
                 headword = dict_info["hdwd"]["$"].replace("^", "")
+                headword = DICT_REF_REPLACEMENTS.get(headword, headword)
 
                 detail = {"form": word, "item": item, "dictionaryRef": headword}
                 details.append(detail)

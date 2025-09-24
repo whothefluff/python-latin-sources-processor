@@ -1,3 +1,8 @@
+# Key: incorrect ref from API, Value: correct ref to use.
+DICT_REF_REPLACEMENTS = {
+    "meum1": "meum",
+}
+
 # A set of {form}_{item} keys to completely ignore
 FORMS_TO_IGNORE = {
     # It's very likely that future forms of equivalent analyses will have to be added with the next processed works
