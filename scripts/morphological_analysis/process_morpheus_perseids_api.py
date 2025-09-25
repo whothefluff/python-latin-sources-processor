@@ -438,6 +438,8 @@ def part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, case, form) ->
     elif pos_dict == "preposition":
         if pos_infl == "preposition":
             return "preposition"
+        if pos_infl == "adverb":
+            return "adverb"
         else:
             return "new combination, check"
 
@@ -445,6 +447,8 @@ def part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, case, form) ->
     elif pos_dict == "pronoun":
         if pos_infl == "pronoun":
             return "pronoun"
+        elif pos_infl == "adverb":
+            return "adverb"
         else:
             return "new combination, check"
 
