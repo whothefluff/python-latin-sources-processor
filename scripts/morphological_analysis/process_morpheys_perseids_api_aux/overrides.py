@@ -56,17 +56,17 @@ FULL_OVERRIDES = {
             {
                 'form': 'ascribere', 'item': 0, 'cnt': 0, 'partOfSpeech': 'verb', 'stem': 'a-scrīb', 'suffix': 'ēre',
                 'segmentsInfo': '3rd conjugation', 'gender': None, 'number': 'singular', 'declension': None, 'case': None,
-                'verbForm': 'indicative', 'tense': 'future', 'voice': None, 'person': None,
+                'verbForm': 'indicative', 'tense': 'future', 'voice': 'passive', 'person': '2nd',
             },
             {
                 'form': 'ascribere', 'item': 0, 'cnt': 1, 'partOfSpeech': 'verb', 'stem': 'a-scrīb', 'suffix': 'ere',
                 'segmentsInfo': '3rd conjugation', 'gender': None, 'number': 'singular', 'declension': None, 'case': None,
-                'verbForm': 'imperative', 'tense': 'present', 'voice': None, 'person': None,
+                'verbForm': 'imperative', 'tense': 'present', 'voice': 'passive', 'person': '2nd',
             },
             {
                 'form': 'ascribere', 'item': 0, 'cnt': 2, 'partOfSpeech': 'verb', 'stem': 'a-scrīb', 'suffix': 'ere',
                 'segmentsInfo': '3rd conjugation', 'gender': None, 'number': 'singular', 'declension': None, 'case': None,
-                'verbForm': 'indicative', 'tense': 'present', 'voice': None, 'person': None,
+                'verbForm': 'indicative', 'tense': 'present', 'voice': 'passive', 'person': '2nd',
             },
             {
                 'form': 'ascribere', 'item': 0, 'cnt': 3, 'partOfSpeech': 'noun', 'stem': 'a-scrīb', 'suffix': 'ere',
@@ -220,8 +220,13 @@ FORMS = {
         "gender": "neuter",
     },
     "os_0_0": {
+         "number": "singular",
+    },
+    "os_0_1": {
         "number": "singular",
-        "case": "nominative/vocative/accusative",
+    },
+    "os_0_2": {
+        "number": "singular",
     },
     "satis_1_1": {
         "partOfSpeech": "adjective",

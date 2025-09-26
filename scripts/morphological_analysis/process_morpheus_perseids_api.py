@@ -2,7 +2,7 @@ import csv
 import os
 import requests
 import logging
-from typing import Dict, List, Set, TextIO
+from typing import Dict, List, Set, TextIO, Any, Optional
 
 from scripts.morphological_analysis.process_morpheys_perseids_api_aux.overrides import (
     FORMS, NOT_WANTED_INFLECTIONS, FULL_OVERRIDES, ANALYSIS_ALIASES, FORMS_TO_IGNORE, IGNORED_DICT_REFS, DICT_REF_REPLACEMENTS,
@@ -192,8 +192,8 @@ class MorphologicalAnalyzer:
                         "declension": declension( computed_pos, decl, suffix, verb_form, tense ),
                         "case": case(gramm_case, verb_form, suffix, stem_type),
                         "verbForm": verb_form,
-                        "tense": tense,
-                        "voice": infl.get("voice", {}).get("$"),
+                        "tense": calc_tense(verb_form, tense),
+                        "voice": voice(verb_form, tense, infl.get("voice", {}).get("$")),
                         "person": infl.get("pers", {}).get("$"),
 
                         # uncomment during development
@@ -571,6 +571,23 @@ def case(gramm_case: str, verb_form: str, suffix: str, stem_type: str) -> str:
     return gramm_case
 
 
+def voice(verb_form: Optional[str], tense: Optional[str], original_v: Optional[str]) -> Optional[str]:
+    new_v = original_v
+    if verb_form is not None and original_v is None:
+        if verb_form == 'participle' and tense == 'present':
+            new_v = 'active'
+        elif verb_form == 'gerundive':
+            new_v = 'passive'
+    return new_v
+
+def calc_tense(verb_form: Optional[str], original_t: Optional[str]) -> Optional[str]:
+    new_t = original_t
+    if verb_form is not None and original_t is None:
+        if verb_form == 'gerundive':
+            new_t = 'future'
+    return new_t
+
+
 def segments_info( computed_pos: str, verb_form: str, verb_tense: str, stemtype_tag: str, suffix: str ) -> str:
 
     def remove_adj_suffix( text:str ) -> str:
@@ -657,12 +674,177 @@ def segments_info( computed_pos: str, verb_form: str, verb_tense: str, stemtype_
         elif computed_pos == "new combination, check":
             return "new combination, check"
 
+class MorphologicalDataValidator:
+    """
+    Validates the generated morphological inflections CSV against a set of grammatical rules for Classical Latin.
+    """
+    # --- Rule Definitions ---
+    ADJECTIVE_EXCEPTIONS = {'satis'}
+    ADJECTIVE_ALLOWED_VERB_FORMS = {None, 'gerundive', 'participle'}
+    ADJECTIVE_VERB_COMBOS = {
+        # (verbForm, tense, voice)
+        (None, None, None),
+        ('gerundive', 'future', 'passive'),
+        ('participle', 'future', 'active'),
+        ('participle', 'present', 'active'),
+        ('participle', 'perfect', 'passive'),
+    }
+    PRONOUN_EXCEPTIONS = {'aliquot'}
+    UNINFLECTED_POS = {'adverb', 'conjunction', 'interjection', 'preposition'}
+
+    def __init__(self, inflections_file_path: str):
+        self.file_path = inflections_file_path
+        self.warning_count = 0
+
+    @staticmethod
+    def _is_empty(value: Any) -> bool:
+        """Checks if a value from the CSV is None or an empty string."""
+        return value is None or value == ''
+
+    def _log_warning(self, line_num: int, pos: str, form: str, message: str):
+        """Formats and logs a validation warning."""
+        logging.warning(f"L{line_num} | {pos.upper()} '{form}': {message}")
+        self.warning_count += 1
+
+    def validate(self):
+        """Runs all validation checks on the inflections file."""
+        logging.info(f"Starting validation of morphological data in '{self.file_path}'...")
+        if not os.path.exists(self.file_path):
+            logging.error(f"Validation failed: Inflections file not found at '{self.file_path}'")
+            return
+
+        with open(self.file_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for i, row in enumerate(reader):
+                line_num = i + 2  # +1 for zero-index, +1 for header
+                pos = row.get('partOfSpeech')
+
+                dispatch = {
+                    'adjective': self._validate_adjective,
+                    'noun': self._validate_noun,
+                    'verb': self._validate_verb,
+                    'pronoun': self._validate_pronoun,
+                    'numeral': self._validate_numeral,
+                }
+
+                if pos in dispatch:
+                    dispatch[pos](row, line_num)
+                elif pos in self.UNINFLECTED_POS:
+                    self._validate_uninflected(row, line_num)
+
+        if self.warning_count == 0:
+            logging.info("Validation complete. No issues found.")
+        else:
+            logging.warning(f"Validation complete. Found {self.warning_count} potential issues.")
+
+    def _validate_adjective(self, row: Dict[str, str], line_num: int):
+        form = row['form']
+        if form in self.ADJECTIVE_EXCEPTIONS:
+            return
+
+        # Required fields
+        for field in ['gender', 'number', 'declension', 'case']:
+            if self._is_empty(row.get(field)):
+                self._log_warning(line_num, 'adjective', form, f"Required field '{field}' is empty.")
+
+        # Forbidden fields
+        if not self._is_empty(row.get('person')):
+            self._log_warning(line_num, 'adjective', form, f"Field 'person' must be empty, but found '{row.get('person')}'.")
+
+        # Verb form constraints
+        verb_form = row.get('verbForm') if not self._is_empty(row.get('verbForm')) else None
+        if verb_form not in self.ADJECTIVE_ALLOWED_VERB_FORMS:
+            self._log_warning(line_num, 'adjective', form, f"Invalid verbForm '{verb_form}'. Allowed: {self.ADJECTIVE_ALLOWED_VERB_FORMS}.")
+
+        # Verb form combination constraints
+        combo = (
+            verb_form,
+            row.get('tense') if not self._is_empty(row.get('tense')) else None,
+            row.get('voice') if not self._is_empty(row.get('voice')) else None,
+        )
+        if combo not in self.ADJECTIVE_VERB_COMBOS:
+            self._log_warning(line_num, 'adjective', form, f"Invalid verbForm-tense-voice combination: {combo}.")
+
+    def _validate_noun(self, row: Dict[str, str], line_num: int):
+        form = row['form']
+        verb_form = row.get('verbForm')
+
+        if verb_form == 'infinitive':
+            if not self._is_empty(row.get('case')):
+                self._log_warning(line_num, 'noun (infinitive)', form, f"Case should be null, but is '{row.get('case')}'.")
+            if not self._is_empty(row.get('declension')):
+                self._log_warning(line_num, 'noun (infinitive)', form, f"Declension should be null, but is '{row.get('declension')}'.")
+            if self._is_empty(row.get('tense')):
+                self._log_warning(line_num, 'noun (infinitive)', form, "Tense must not be empty.")
+            if self._is_empty(row.get('voice')):
+                self._log_warning(line_num, 'noun (infinitive)', form, "Voice must not be empty.")
+        elif verb_form == 'supine':
+            if row.get('case') not in ['ablative', 'accusative']:
+                self._log_warning(line_num, 'noun (supine)', form, f"Case must be 'ablative' or 'accusative', but is '{row.get('case')}'.")
+            if row.get('declension') != '4th':
+                self._log_warning(line_num, 'noun (supine)', form, f"Declension must be '4th', but is '{row.get('declension')}'.")
+            if not self._is_empty(row.get('tense')):
+                self._log_warning(line_num, 'noun (supine)', form, f"Tense must be empty, but is '{row.get('tense')}'.")
+            if not self._is_empty(row.get('voice')):
+                self._log_warning(line_num, 'noun (supine)', form, f"Voice must be empty, but is '{row.get('voice')}'.")
+        else: # Regular noun
+            if self._is_empty(row.get('gender')):
+                self._log_warning(line_num, 'noun', form, "Required field 'gender' is empty.")
+            if self._is_empty(row.get('number')):
+                self._log_warning(line_num, 'noun', form, "Required field 'number' is empty.")
+            if not self._is_empty(row.get('person')):
+                self._log_warning(line_num, 'noun', form, f"Field 'person' must be empty, but is '{row.get('person')}'.")
+
+    def _validate_verb(self, row: Dict[str, str], line_num: int):
+        form = row['form']
+        # Required fields
+        for field in ['number', 'verbForm', 'tense', 'voice', 'person']:
+            if self._is_empty(row.get(field)):
+                self._log_warning(line_num, 'verb', form, f"Required field '{field}' is empty.")
+        # Forbidden fields
+        for field in ['gender', 'declension', 'case']:
+            if not self._is_empty(row.get(field)):
+                self._log_warning(line_num, 'verb', form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
+
+    def _validate_pronoun(self, row: Dict[str, str], line_num: int):
+        form = row['form']
+        if form in self.PRONOUN_EXCEPTIONS:
+            return
+
+        # Required fields
+        for field in ['gender', 'number', 'case']:
+            if self._is_empty(row.get(field)):
+                self._log_warning(line_num, 'pronoun', form, f"Required field '{field}' is empty.")
+        # Forbidden fields
+        for field in ['verbForm', 'tense', 'voice', 'person']:
+            if not self._is_empty(row.get(field)):
+                self._log_warning(line_num, 'pronoun', form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
+
+    def _validate_numeral(self, row: Dict[str, str], line_num: int):
+        form = row['form']
+        # Forbidden fields
+        for field in ['verbForm', 'tense', 'voice', 'person']:
+            if not self._is_empty(row.get(field)):
+                self._log_warning(line_num, 'numeral', form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
+
+    def _validate_uninflected(self, row: Dict[str, str], line_num: int):
+        pos = row['partOfSpeech']
+        form = row['form']
+        # Forbidden fields
+        for field in ['gender', 'number', 'case', 'verbForm', 'tense', 'voice', 'person']:
+            if not self._is_empty(row.get(field)):
+                self._log_warning(line_num, pos, form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
 
 def main():
     try:
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         analyzer = MorphologicalAnalyzer(project_root)
         analyzer.process_words()
+        logging.info("Morphological analysis processing complete.")
+
+        validator = MorphologicalDataValidator(analyzer.inflections_file)
+        validator.validate()
+
     except Exception as e:
         logging.critical(f"Critical error in main execution: {str( e )}")
         raise
