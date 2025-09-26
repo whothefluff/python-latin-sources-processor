@@ -43,6 +43,23 @@ which doesn't analyze proper nouns and is case-insensitive. The reader handles c
   - Run `process_library_aggregate.py` to combine all processed works
   - Run `process_morpheus_perseids_api.py` (if you have the endpoint running locally) for morphological analysis of the aggregated library data
 
+### Morpheus flow
+
+In general, we seek improvements to original API, without introducing new mistakes.
+New mistakes should be purposefully avoided in the python script
+
+1) Run [original](https://github.com/whothefluff/morpheus-perseids-api/releases/tag/v1.0-archived)
+2) Run [fork](https://github.com/whothefluff/morpheus-perseids-api)
+3) Compare differences (almost always new is better, but not always: eg. 'ascribo' not found)
+    >many of these new errors are found in these two commits
+   https://github.com/Alatius/morpheus/commit/e5f83b5627f2588ef3cb2f55c9b9f751334afba0
+   https://github.com/Alatius/morpheus/commit/b3cead6d43ddfef5e75d962e52298cbd6d2bcd9a
+4) Fix source in [this fork](https://github.com/whothefluff/morpheus-alatius-xml) if possible (better re-runs AND less manual fixes) and create new version of the [API fork](https://github.com/whothefluff/morpheus-perseids-api)
+   (for use in step 2)
+5) "Manually" fix rest by updating the script overrides
+6) Check for "new combination, check" in the inflections .csv. If there are any, update the script
+7) Can now update reader sources
+
 ## Third-Party Resources
 
 This project makes use of the following repositories from the Perseus Digital Library and Perseids Project:
