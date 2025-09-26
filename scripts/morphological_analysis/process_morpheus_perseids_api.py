@@ -216,7 +216,60 @@ class MorphologicalAnalyzer:
                 logging.error(f"Error processing analysis for word '{word}': {str(e)}")
                 continue
 
-        return details, inflections
+        # De-duplication and re-indexing
+        if not inflections:
+            return details, inflections
+
+        final_inflections = []
+        inflections_by_item = {}
+        # Group all generated inflections by their 'item' number
+        for infl in inflections:
+            item_key = infl['item']
+            inflections_by_item.setdefault(item_key, []).append(infl)
+
+        sorted_items = sorted(inflections_by_item.keys())
+        for item_key in sorted_items:
+            # This list contains all inflections for a given 'item', in their original order
+            item_inflections = inflections_by_item[item_key]
+
+            # Store unique inflections for this item, preserving the original relative order
+            ordered_unique_inflections = []
+            # Map a signature to its index in the ordered_unique_inflections list to find it quickly
+            signature_to_index = {}
+
+            for infl in item_inflections:
+                # Create a signature for the inflection, excluding fields that vary for duplicates
+                signature_dict = infl.copy()
+                signature_dict.pop('stem', None)
+                signature_dict.pop('cnt', None)
+                signature = frozenset(signature_dict.items())
+
+                if signature not in signature_to_index:
+                    # First time seeing this unique inflection. Add it to our ordered list.
+                    # Store its index so we can find it again if a preferred version comes along.
+                    signature_to_index[signature] = len(ordered_unique_inflections)
+                    ordered_unique_inflections.append(infl)
+                else:
+                    # We've seen this signature before. Check if this new version has a better stem.
+                    existing_index = signature_to_index[signature]
+                    existing_infl = ordered_unique_inflections[existing_index]
+
+                    current_stem = infl.get('stem', '') or ''
+                    existing_stem = existing_infl.get('stem', '') or ''
+
+                    # Rule: Prefer the stem with a hyphen.
+                    if '-' in current_stem and '-' not in existing_stem:
+                        # Replace the old inflection in-place with this new, preferred one.
+                        # This maintains the original position.
+                        ordered_unique_inflections[existing_index] = infl
+
+            # Now that we have the final, de-duplicated list for this item in the correct order,
+            # re-index the 'cnt' and add them to the final results.
+            for new_cnt, final_infl in enumerate(ordered_unique_inflections):
+                final_infl['cnt'] = new_cnt
+                final_inflections.append(final_infl)
+
+        return details, final_inflections
 
 
     def write_results(self, details: List[Dict], inflections: List[Dict]):
