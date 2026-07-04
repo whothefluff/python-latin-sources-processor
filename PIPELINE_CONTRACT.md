@@ -32,11 +32,30 @@ In `work_contents.csv`:
 
 ## 4. Token & Sentence Tracking
 
-In `work_contents.csv`:
+In `work_contents.csv`, every chunk of text is assigned a `tokenType`:
 
-* `wordIdx` increments if and ONLY if `tokenType <= 3` (Words, Abbreviations, Numerals). Punctuation and editorial marks
-  export a null/empty `wordIdx`.
-* `tokenType == 2` (Proper Abbreviations like 'M.') are forced to `properNounState = 1` so downstream systems case them
-  as proper nouns.
-* `tokenType == 3` (Numerals like 'XII') are forced to `properNounState = 0` so downstream systems case them as common
-  lowercase words.
+* `1`: Word (Alphabetic text categorized as a "normal" word)
+* `2`: Abbreviation (e.g., 'M.', 'Ti.')
+* `3`: Roman Numeral (e.g., 'XII', 'MDCCLXXVI', 'IIII')
+* `4`: Punctuation
+* `5`: Editorial Mark (e.g., '†', '*')
+* `6`: Other (e.g., unrecognized alphanumeric mixes)
+
+**Editorial Marks vs. Supplementary Ranges:**
+
+* `TokenType.EDITORIAL` is strictly for **literal characters present in the text stream** as if they were part of the
+  normal text.
+* Annotations that span ranges of text (like `<note>`, `<del>`, or `<gap>`) and that are stored in
+  `work_content_supplementary.csv` may or may not be accompanied by editorial tokens.
+
+**Indexing & Casing Rules:**
+
+* `wordIdx` increments if and ONLY if `tokenType <= 3`. Punctuation and editorial marks export a null/empty `wordIdx`.
+* `tokenType == 2` (Abbreviations) are forced to `properNounState = 1`.
+* `tokenType == 3` (Numerals) are forced to `properNounState = 0`.
+
+**Numeral Collisions:**
+Valid Roman numerals often collide with valid Latin words (e.g., 'I', 'VI', 'DI'). The global pipeline defaults to
+classifying these as Words (`tokenType = 1`) if the morphological analyzer finds a lemma. **If this default is
+contextually wrong for a specific text, the work-specific processor MUST explicitly overwrite the `tokenType`
+and `properNounState`.**
