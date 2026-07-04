@@ -561,7 +561,9 @@ def process_verse(xml_string, output_dir):
             [work_id, book_node, 'BOOK', book_seq, book_name, None, book_from_index, book_to_index])
 
     works_df = pd.DataFrame(works_data, columns=['id', 'name', 'about'])
-    work_contents_df = pd.DataFrame(work_contents_data, columns=['workId', 'idx', 'word', 'sourceReference', 'properNounState'])
+    work_contents_df = pd.DataFrame(work_contents_data,
+                                    columns=['workId', 'idx', 'word', 'sourceReference', 'properNounState']).astype(
+        {'properNounState': 'Int64'})
     work_content_subdivisions_df = pd.DataFrame(work_content_subdivisions_data,
                                                 columns=['workId', 'node', 'typ', 'cnt', 'name', 'parent', 'fromIndex',
                                                          'toIndex'])
