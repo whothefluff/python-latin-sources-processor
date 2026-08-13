@@ -1,12 +1,40 @@
 import csv
-import os
-import requests
 import logging
-from typing import Dict, List, Set, TextIO, Any, Optional
+import os
+from typing import Dict, List, Set, TextIO, Any, Tuple, Callable
 
+import requests
+from scripts.library.util.casing import apply_contract_casing
 from scripts.morphological_analysis.process_morpheys_perseids_api_aux.overrides import (
-    FORMS, NOT_WANTED_INFLECTIONS, FULL_OVERRIDES, ANALYSIS_ALIASES, FORMS_TO_IGNORE, IGNORED_DICT_REFS, DICT_REF_REPLACEMENTS,
+    FORMS, NOT_WANTED_INFLECTIONS, FULL_OVERRIDES, ANALYSIS_ALIASES, FORMS_TO_IGNORE, IGNORED_DICT_REFS,
+    DICT_REF_REPLACEMENTS, TRUE_ADVERB_FORMS
 )
+
+
+def _merge_bodies(analysis_lower: Dict, analysis_title: Dict) -> List[Dict]:
+    """Merge Body entries from lowercase + Title-case queries. The API is now
+    strict-case, so proper-noun-only entries (e.g. 'Athena') never surface
+    under a lowercase query. Dedupes by headword; lowercase-sourced bodies
+    come first so existing FORMS/FORMS_TO_IGNORE indices stay stable."""
+    def get_bodies(analysis):
+        if not analysis or "RDF" not in analysis or "Body" not in analysis["RDF"]["Annotation"]:
+            return []
+        bodies = analysis["RDF"]["Annotation"]["Body"]
+        return bodies if isinstance(bodies, list) else [bodies]
+
+    seen = set()
+    merged = []
+    for body in get_bodies(analysis_lower) + get_bodies(analysis_title):
+        try:
+            headword = body["rest"]["entry"]["dict"]["hdwd"]["$"]
+        except KeyError:
+            merged.append(body)
+            continue
+        if headword in seen:
+            continue
+        seen.add(headword)
+        merged.append(body)
+    return merged
 
 
 class MorphologicalAnalyzer:
@@ -71,7 +99,8 @@ class MorphologicalAnalyzer:
             try:
                 with open(self.details_file, "r", encoding="utf-8") as f:
                     reader = csv.DictReader(f)
-                    self.processed_forms = {row["form"] for row in reader}
+                    # Normalize to lowercase to match the lowercase keys in unique_words
+                    self.processed_forms = {row["form"].lower() for row in reader}
                 logging.info(
                     f"Loaded {len(self.processed_forms)} existing processed forms"
                 )
@@ -84,7 +113,9 @@ class MorphologicalAnalyzer:
         try:
             with open(self.input_file, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
-                # Since the API doesn't handle proper nouns anyway, treat all words as lower case to avoid duplicates
+                # A single input like "Veneris" can produce outputs for common
+                # words like 'venio' or proper nounds like 'Venus'
+                # Since the script handles both we can flatten it to skip them
                 self.unique_words = {row["word"].lower() for row in reader}
                 # Filter out nulls
                 self.unique_words.discard("")
@@ -97,7 +128,7 @@ class MorphologicalAnalyzer:
     def analyze_word(word: str) -> Dict:
         """Query the local API for word analysis"""
         try:
-            url = f"http://localhost:1501/analysis/word"
+            url = f"http://localhost:1500/analysis/word"
             params = {"lang": "lat", "engine": "morpheuslat", "word": word}
             response = requests.get(url, params=params)
             if response.status_code == 201:
@@ -158,14 +189,14 @@ class MorphologicalAnalyzer:
                 headword = dict_info["hdwd"]["$"].replace("^", "")
                 headword = DICT_REF_REPLACEMENTS.get(headword, headword)
 
-                detail = {"form": word, "item": item, "dictionaryRef": headword}
-                details.append(detail)
-
                 infl_list = entry.get("infl", [])
                 if not isinstance(infl_list, list):
                     infl_list = [infl_list]
 
-                pos_dict = dict_info.get("pofs", {} ).get("$")
+                pos_dict = dict_info.get("pofs", {}).get("$")
+
+                item_inflections = []
+                computed_pos_seen = []
 
                 for cnt, infl in enumerate(infl_list):
                     term = infl.get("term", {})
@@ -177,10 +208,12 @@ class MorphologicalAnalyzer:
                     suffix = None if suffix_aux == "*" else None if suffix_aux is None else suffix_aux.replace("^", "")
                     decl = infl.get("decl", {}).get("$")
                     stem_type = infl.get("stemtype", {}).get("$")
-                    computed_pos = part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, gramm_case, word)
+                    degree = infl.get("comp", {}).get("$")
+                    computed_pos = part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, gramm_case, degree, word)
+                    computed_pos_seen.append(computed_pos)
                     tense = infl.get("tense", {}).get("$")
                     inflection = {
-                        "form": word,
+                        # "form" filled in after the loop, once we know is_proper
                         "item": item,
                         "cnt": cnt,
                         "partOfSpeech": computed_pos,
@@ -189,7 +222,7 @@ class MorphologicalAnalyzer:
                         "segmentsInfo": segments_info(computed_pos, verb_form, tense, stem_type, suffix),
                         "gender": None if gender == "adverbial" else "neuter" if verb_form == "infinitive" else "masculine/feminine/neuter" if gender is None and decl == "3rd" else gender,
                         "number": "singular" if verb_form == "infinitive" else infl.get("num", {}).get("$"),
-                        "declension": declension( computed_pos, decl, suffix, verb_form, tense ),
+                        "declension": declension(computed_pos, decl, suffix, verb_form, tense),
                         "case": case(gramm_case, verb_form, suffix, stem_type),
                         "verbForm": verb_form,
                         "tense": calc_tense(verb_form, tense),
@@ -205,11 +238,24 @@ class MorphologicalAnalyzer:
 
                     key = f"{word}_{item}_{cnt}"
                     if key in FORMS:
-                        inflection.update( FORMS[key] )
+                        inflection.update(FORMS[key])
                     if key in NOT_WANTED_INFLECTIONS:
                         continue
                     else:
-                        inflections.append(inflection)
+                        item_inflections.append(inflection)
+
+                # Casing only makes sense for nouns. An interjection/adverb/etc. whose
+                # headword happens to reference a proper noun (e.g. "hercle" -> "Hercules")
+                # is not itself proper — headword casing is meaningless outside pos "noun".
+                is_proper = bool(headword) and headword[0].isupper() and "noun" in computed_pos_seen
+                contract_form = apply_contract_casing(word, is_proper)
+
+                detail = {"form": contract_form, "item": item, "dictionaryRef": headword}
+                details.append(detail)
+
+                for inflection in item_inflections:
+                    inflection["form"] = contract_form
+                    inflections.append(inflection)
 
                 item += 1
             except KeyError as e:
@@ -233,7 +279,7 @@ class MorphologicalAnalyzer:
             item_inflections = inflections_by_item[item_key]
 
             # Store unique inflections for this item, preserving the original relative order
-            ordered_unique_inflections = []
+            ordered_unique_inflections: List[Dict] = []
             # Map a signature to its index in the ordered_unique_inflections list to find it quickly
             signature_to_index = {}
 
@@ -253,6 +299,7 @@ class MorphologicalAnalyzer:
                     # We've seen this signature before. Check if this new version has a better stem.
                     existing_index = signature_to_index[signature]
                     existing_infl = ordered_unique_inflections[existing_index]
+                    assert isinstance(existing_infl, dict)
 
                     current_stem = infl.get('stem', '') or ''
                     existing_stem = existing_infl.get('stem', '') or ''
@@ -345,7 +392,7 @@ class MorphologicalAnalyzer:
                 if word_for_analysis != word:
                     logging.info(f"'{word}' analyzed as '{word_for_analysis }'")
 
-                analysis = self.analyze_word(word_for_analysis)
+                analysis = self._query_merged(word_for_analysis)
                 details, inflections = self.process_analysis(word, analysis)
 
                 # If the initial analysis found no inflections, try stripping enclitics.
@@ -359,7 +406,7 @@ class MorphologicalAnalyzer:
                             base_word = word_for_analysis[:-len(enclitic)]
                             logging.info(f"Retrying '{word}' as base '{base_word}' (enclitic '{enclitic}').")
 
-                            retry_analysis = self.analyze_word(base_word)
+                            retry_analysis = self._query_merged(base_word)
                             # Pass the original `word` to keep it as the `form` in the output.
                             retry_details, retry_inflections = self.process_analysis(word, retry_analysis)
 
@@ -390,8 +437,16 @@ class MorphologicalAnalyzer:
             f"Finished processing words. Total processed: {len( self.processed_forms )}"
         )
 
+    def _query_merged(self, word: str) -> Dict:
+        lower_form = word.lower()
+        title_form = lower_form.capitalize()
+        analysis_lower = self.analyze_word(lower_form)
+        analysis_title = self.analyze_word(title_form) if title_form != lower_form else {}
+        merged_bodies = _merge_bodies(analysis_lower, analysis_title)
+        return {"RDF": {"Annotation": {"Body": merged_bodies}}} if merged_bodies else {}
 
-def part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, case, form) -> str:
+
+def part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, gramm_case, degree, form) -> str:
     """
     The service ignore the fact that gerund exists, so there's that
 
@@ -404,16 +459,21 @@ def part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, case, form) ->
     :param verb_form: mood tag
     :param gender: gend tag
     :param suffix: suff tag
-    :param case: case tag
+    :param gramm_case: case tag
     :param form: the word
+    :param degree: adjective degree
     :return: a normalized part of speech
     """
 
+    # trust pos_infl == 'adverb' only if confirmed manually
+    if pos_infl == "adverb" and form in TRUE_ADVERB_FORMS:
+        return "adverb"
+
     # adjective first
     if pos_dict == "adjective":
-        if case is None and ( gender == "adverbial"
-                              or suffix in ["ē", "ius", "ter", "issimē"]
-                              or form.endswith(("e", "ius", "ter", "issime"))):
+        if gramm_case is None and (gender == "adverbial"
+                                   or suffix in ["ē", "ius", "ter", "issimē"]
+                                   or form.endswith(("e", "ius", "ter", "issime"))):
             return "adverb"
         else:
             if pos_infl in ["adjective", "numeral", "verb", "verb participle"]:
@@ -468,7 +528,7 @@ def part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, case, form) ->
 
     # noun first
     elif pos_dict == "noun":
-        if case is None and gender == "adverbial":
+        if gramm_case is None and gender == "adverbial":
             return "adverb"
         else:
             if pos_infl == "noun":
@@ -477,6 +537,8 @@ def part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, case, form) ->
                 return "adjective"
             elif pos_infl == "verb":
                 return "verb"
+            elif pos_infl == "verb participle" and verb_form == "participle":
+                return "adjective"
             else:
                 return "new combination, check"
 
@@ -510,6 +572,8 @@ def part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, case, form) ->
         if verb_form is None:
             if gender == "adverbial":
                 return "adverb"
+            elif degree in ["comparative", "superlative"]:
+                return "adjective"
             else:
                 return "new combination, check"
         else:
@@ -533,7 +597,7 @@ def part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, case, form) ->
     return "new combination, check"
 
 
-def declension( computed_pos:str, decl_tag:str, suffix:str, verb_form:str, verb_tense:str ) -> str:
+def declension( computed_pos:str, decl_tag:str, suffix:str | None, verb_form:str, verb_tense:str ) -> str | None:
     if verb_form == "gerundive":
         return "1st & 2nd"
     elif verb_form == "participle":
@@ -541,6 +605,7 @@ def declension( computed_pos:str, decl_tag:str, suffix:str, verb_form:str, verb_
             return "3rd"
         elif verb_tense in ["perfect", "future"]:
             return "1st & 2nd"
+        return None
     elif verb_form == "supine":
         return "4th"
     elif computed_pos in ["noun","adjective"] and suffix is not None and ( suffix.find("ior") != -1 or suffix.find("ius") != -1 ):
@@ -551,7 +616,7 @@ def declension( computed_pos:str, decl_tag:str, suffix:str, verb_form:str, verb_
         return decl_tag
 
 
-def case(gramm_case: str, verb_form: str, suffix: str, stem_type: str) -> str:
+def case(gramm_case: str, verb_form: str, suffix: str | None, stem_type: str) -> str:
     """
     Determines the grammatical case, overriding API errors for specific forms like supine.
     """
@@ -564,14 +629,14 @@ def case(gramm_case: str, verb_form: str, suffix: str, stem_type: str) -> str:
         return gramm_case # Fallback
 
     # Handle -er adjectives
-    if gramm_case is None and suffix == "er" and stem_type == "er_eris":
+    if ( gramm_case is None or gramm_case == "" ) and suffix == "er" and stem_type == "er_eris":
         return "nominative/vocative"
 
     # Otherwise
     return gramm_case
 
 
-def voice(verb_form: Optional[str], tense: Optional[str], original_v: Optional[str]) -> Optional[str]:
+def voice(verb_form: str | None, tense: str | None, original_v: str | None) -> str | None:
     new_v = original_v
     if verb_form is not None and original_v is None:
         if verb_form == 'participle' and tense == 'present':
@@ -580,7 +645,7 @@ def voice(verb_form: Optional[str], tense: Optional[str], original_v: Optional[s
             new_v = 'passive'
     return new_v
 
-def calc_tense(verb_form: Optional[str], original_t: Optional[str]) -> Optional[str]:
+def calc_tense(verb_form: str | None, original_t: str | None) -> str | None:
     new_t = original_t
     if verb_form is not None and original_t is None:
         if verb_form == 'gerundive':
@@ -588,7 +653,7 @@ def calc_tense(verb_form: Optional[str], original_t: Optional[str]) -> Optional[
     return new_t
 
 
-def segments_info( computed_pos: str, verb_form: str, verb_tense: str, stemtype_tag: str, suffix: str ) -> str:
+def segments_info( computed_pos: str, verb_form: str, verb_tense: str, stemtype_tag: str, suffix: str | None ) -> str | None:
 
     def remove_adj_suffix( text:str ) -> str:
         suffixes = ['_adj', '_adj1', '_adj2', '_adj3', '_comp']
@@ -626,7 +691,7 @@ def segments_info( computed_pos: str, verb_form: str, verb_tense: str, stemtype_
 
         # for nouns
         if computed_pos == "noun":
-            if verb_form is None:
+            if verb_form is None or verb_form == "":
                 noun_st_tag = "is_is" if stemtype_tag == "is_is_C" else "ion_iī" if stemtype_tag == "ios_i" else stemtype_tag
                 if noun_st_tag.count("_") == 1:
                     return process_tag( noun_st_tag )
@@ -674,6 +739,9 @@ def segments_info( computed_pos: str, verb_form: str, verb_tense: str, stemtype_
         elif computed_pos == "new combination, check":
             return "new combination, check"
 
+        return None
+
+
 class MorphologicalDataValidator:
     """
     Validates the generated morphological inflections CSV against a set of grammatical rules for Classical Latin.
@@ -713,13 +781,15 @@ class MorphologicalDataValidator:
             logging.error(f"Validation failed: Inflections file not found at '{self.file_path}'")
             return
 
+        self._validate_casing_pos_gate()
+
         with open(self.file_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for i, row in enumerate(reader):
                 line_num = i + 2  # +1 for zero-index, +1 for header
-                pos = row.get('partOfSpeech')
+                pos = row.get('partOfSpeech', '')
 
-                dispatch = {
+                dispatch: Dict[str, Callable[[Dict[str, str], int], None]] = {
                     'adjective': self._validate_adjective,
                     'noun': self._validate_noun,
                     'verb': self._validate_verb,
@@ -834,6 +904,23 @@ class MorphologicalDataValidator:
         for field in ['gender', 'number', 'case', 'verbForm', 'tense', 'voice', 'person']:
             if not self._is_empty(row.get(field)):
                 self._log_warning(line_num, pos, form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
+
+    def _validate_casing_pos_gate(self):
+        """If one inflection or more have partOfSpeech 'noun', then we are allowed to
+        have capitalized 'form' values. Catches cases like 'Hercle' (interjection,
+        headword references Hercules but the word itself isn't a proper noun)."""
+
+        groups: Dict[Tuple[str, str], List[str | None]] = {}
+
+        with open(self.file_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                groups.setdefault((row['form'], row['item']), []).append(row.get('partOfSpeech'))
+
+        for (form, item), pos_list in groups.items():
+            if form and form[0].isupper() and 'noun' not in pos_list:
+                self._log_warning(0, 'casing', form,
+                                  f"item {item}: capitalized but no inflection is 'noun' (pos: {pos_list}).")
 
 def main():
     try:
