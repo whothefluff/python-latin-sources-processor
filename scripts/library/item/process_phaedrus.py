@@ -1,23 +1,50 @@
 # "Ambiguous"/"ambiguity" is and should always be reserved exclusively for doubtful macronizations,
 # both in comments and code. Any other kind of uncertainty should be described with different words
 
-# noinspection PyPep8Naming
 import base64
 import json
 import logging
 import os
 import re
 import uuid
+# noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
 from functools import cache
-from typing import Dict, List, Optional, Set, Tuple, TypedDict
+from typing import Dict, List, Optional, Set, Tuple, TypedDict, TypeGuard
 
 import pandas as pd
-import requests
 
+import requests
+from scripts.library.util.nomina import NOMINA
+from scripts.library.util.text_normalization import normalize_digraphs
+from scripts.library.util.token_classification import TokenType, get_token_type
+
+# noinspection HttpUrlsUsage
 TEI_NAMESPACE = 'http://www.tei-c.org/ns/1.0'
 # Defines the clitics that are commented out in Morpheus 'checkstring.c' (and make sense)
-COMMENTED_OUT_CLITICS = ["que", "ne", "ve", "ue", "dum"]
+COMMENTED_OUT_CLITICS: list[str] = ["que", "ne", "ve", "ue", "dum"]
+
+KNOWN_ABBREVIATIONS: set[str] = {
+    *NOMINA.keys()
+}
+
+CAPITALIZATION_RESET_PUNCTUATION = ".!?:"
+
+# Punctuation that ends a grammatical sentence for sentenceIdx/wordIdx purposes.
+# Deliberately narrower than the CAPITALIZATION_RESET_PUNCTUATION set: a colon
+# introduces a clause, it doesn't end a sentence.
+SENTENCE_TERMINATORS = ".!?"
+
+WORK_SPECIFIC_TOKEN_OVERRIDES: Dict[int, "TokenType"] = {
+    # e.g. "I" used as the numeral 1, not "ire"
+    # 107: TokenType.NUMERAL,
+}
+
+WORK_SPECIFIC_EXPANSIONS: Dict[int, str] = {
+    # 42: "Gāiō", # "C." used in a dative context at fragment 42
+    # 107: "ūnum", # "I" used as an accusative numeral at fragment 107
+}
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -69,25 +96,58 @@ def _is_valid_dum_stem(xml_string: str) -> bool:
         return False
 
 
+def _surface_forms(xml_string: str) -> Set[str]:
+    """De-macronized surface forms (stem+suffix) from a Morpheus XML response."""
+    surfaces = set()
+    try:
+        root = ET.fromstring(xml_string)
+        for term in root.findall('.//term'):
+            stem = term.findtext('stem') or ''
+            suff = term.findtext('suff') or ''
+            surface = re.sub(r'[_^\-]', '', (stem + suff)).lower()
+            if surface:
+                surfaces.add(surface)
+    except ET.ParseError:
+        pass
+    return surfaces
+
+
 @cache
-def find_potential_lemmas(word_to_analyze: str) -> List[str]:
+def _analyze_word_with_clitic(word_to_analyze: str) -> Tuple[List[str], str | None]:
     """
-    Calls the local morpheus/cruncher endpoint. If the initial analysis is empty,
-    it attempts to strip a known enclitic and re-queries the API with the stem.
-    Returns a list of potential lemmas.
+    Calls the local morpheus/cruncher endpoint. If the primary analysis is empty,
+    attempts to strip a known enclitic and re-query with the stem.
+    Returns (lemmas, enclitic_used) — enclitic_used is set only when the lemmas
+    actually came from the stem-fallback path, not from a direct hit.
     """
     if not word_to_analyze or not word_to_analyze.isalpha():
-        return []
+        return [], None
 
-    url = "http://localhost:1501/analysis/word"
-    headers = { "Accept": "application/xml" }
+    url = "http://localhost:1500/analysis/word"
+    headers = {"Accept": "application/xml"}
 
     try:
         # 1. Primary API Call (with the full word)
-        params = { "lang": "lat", "engine": "morpheuslat", "word": word_to_analyze, "strictCase": str(int(True)) }
+        params = {"lang": "lat", "engine": "morpheuslat", "word": word_to_analyze, "strictCase": str(int(True))}
         response = requests.get(url, params=params, headers=headers, timeout=10)
         response.raise_for_status()
+        # inside _analyze_word_with_clitic, after the primary call:
         lemmas = _extract_lemmas_from_morpheus_xml(response.text)
+        enclitic_found: Optional[str] = None
+
+        if lemmas:
+            surfaces = _surface_forms(response.text)
+            word_lower = word_to_analyze.lower()
+            if surfaces and word_lower not in surfaces:
+                # Morpheus recognized it, but nothing covers the full word:
+                # it stripped an enclitic internally. Figure out which one.
+                for clitic in COMMENTED_OUT_CLITICS:
+                    if word_lower.endswith(clitic) and word_lower[:-len(clitic)] in surfaces:
+                        if clitic == "dum" and not _is_valid_dum_stem(response.text):
+                            lemmas = []   # reject the bogus stem analysis, fall through
+                            break  # fall through to the manual-stripping fallback (re-queries with stem alone)
+                        enclitic_found = clitic
+                        break
 
         # 2. Fallback Logic (if primary call returned nothing)
         if not lemmas:
@@ -109,26 +169,80 @@ def find_potential_lemmas(word_to_analyze: str) -> List[str]:
                         # For 'dum', only consider it a clitic if attached to an imperative, interjection, or adverb.
                         if clitic == "dum":
                             if _is_valid_dum_stem(stem_xml):
-                                logging.warning("'%s'-'%s' found", stem, clitic)
                                 lemmas = _extract_lemmas_from_morpheus_xml(stem_xml)
                         else:
                             # For other clitics, we accept the analysis of the stem.
-                            logging.warning("'%s'-'%s' found", stem, clitic)
                             lemmas = _extract_lemmas_from_morpheus_xml(stem_xml)
 
-                        # Once we've found a matching clitic and tried again, stop the loop.
-                        break
+                        if lemmas:
+                            logging.warning("'%s'-'%s' found", stem, clitic)
+                            enclitic_found = clitic
 
-        return lemmas
+                    # Once we've found a matching clitic and tried again, stop the loop.
+                    break
+
+        return lemmas, enclitic_found
 
     except requests.exceptions.RequestException:
         logging.exception("Error calling morpheus API for word '%s'", word_to_analyze)
-        return []
+        return [], None
+
+
+def find_potential_lemmas(word_to_analyze: str) -> List[str]:
+    """Same public signature as before — just delegates to the cached core."""
+    return _analyze_word_with_clitic(word_to_analyze)[0]
+
+
+def find_enclitic(word_to_analyze: str) -> str | None:
+    """The clitic detected for this exact word form, if any."""
+    return _analyze_word_with_clitic(word_to_analyze)[1]
 
 
 def is_proper_noun_lemma(lemma: str) -> bool:
     """Checks if a lemma from cruncher indicates a proper noun (i.e., is capitalized)."""
     return bool(lemma) and lemma[0].isupper()
+
+
+def project_display_casing(original: str, macronized: str) -> str:
+    """
+
+    :param original:
+    :param macronized:
+    :return:
+    """
+    if not original:
+        return macronized
+    # ALL CAPS
+    if original == original.upper() and len(original) > 1:
+        return macronized.upper()
+    # Title Case
+    if original[0].isupper() and original[0] != original[0].lower():
+        return macronized[0].upper() + macronized[1:].lower()
+    # lowercase
+    if original == original.lower():
+        return macronized.lower()
+    # passthrough
+    return macronized
+
+
+def apply_norm_casing(text: str, proper_noun_state) -> str:
+    """
+
+    :param text:
+    :param proper_noun_state:
+    :return:
+    """
+    if not text:
+        return text
+    if proper_noun_state in (1, 2):
+        return text[0].upper() + text[1:].lower()
+    return text.lower()
+
+
+_MACRON_STRIP = str.maketrans('āēīōūȳĀĒĪŌŪȲ', 'aeiouyAEIOUY')
+
+def strip_macrons(text: str) -> str:
+    return text.translate(_MACRON_STRIP)
 
 
 @cache
@@ -138,7 +252,7 @@ def determine_proper_noun_state(word_in_text: str, is_sentence_start: bool, prev
     Returns None for non-alphabetic tokens or words that cannot be analyzed at all.
     - Inherent State: Based only on dictionary lookups (is this word type not clear?).
     - Context-Aware State: Uses sentence start and capitalization sequences to refine the state for this specific instance.
-    
+
     It handles consecutive capitalized words as a sequence, aligning with *macronizer* logic.
 
     Returns: A tuple of (inherent_state, context_aware_state).
@@ -177,7 +291,7 @@ def determine_proper_noun_state(word_in_text: str, is_sentence_start: bool, prev
 
     # Step 4: Determine Context-Aware State
     context_aware_state: int | None
-    
+
     # Capitalization is "forgivable" if it's at the start of a sentence OR part of a capitalized sequence.
     is_forgivable_context = is_sentence_start or prev_word_was_capitalized
 
@@ -214,7 +328,7 @@ class TokenResult(TypedDict):
     candidates: list[str]
 
 
-def macronize_text(text: str) -> Optional[List[TokenResult]]:
+def macronize_text(text: str) -> List[TokenResult] | None:
     """
     Calls the local macronization API to get macronization data for a given text.
     """
@@ -225,54 +339,132 @@ def macronize_text(text: str) -> Optional[List[TokenResult]]:
         # Set a generous timeout as macronizing a large text can take time
         response = requests.post(url, data=json.dumps(payload), headers=headers, timeout=300)
         response.raise_for_status()
-        return response.json().get('results', [])
+        results = response.json().get('results', [])
+        for res in results:
+            if 'macronized' in res and res['macronized']:
+                res['macronized'] = normalize_digraphs(res['macronized'])
+
+        return results
+
     except requests.exceptions.RequestException:
         logging.exception("Error calling macronization API")
         return None
 
 
 def _process_text_segments(
-    segments: List[str],
-    work_id: str,
-    fragment_index: int,
-    is_next_word_sentence_start: bool,
-    work_contents_data: List,
-    inherent_states_map: Dict[str, int | None],
-) -> Tuple[int, bool]:
+        segments: List[str],
+        work_id: str,
+        fragment_index: int,
+        sentence_idx: int,
+        word_idx: int,
+        source_ref: str,
+        is_capitalization_forgivable: bool,
+        starts_new_sentence: bool,
+        work_contents_data: List,
+        inherent_states_map: Dict[str, int | None],
+) -> Tuple[int, int, int, bool, bool]:
     """
-    Helper function to process a list of text segments (words/punctuation).
+    Two independent context flags are threaded through, on purpose:
 
-    It determines the proper noun state for each segment, updates the sentence start flag,
-    and appends the processed data to the work_contents_data list. It includes tracking
-    sequences of capitalized words to align with macronizer logic.
-
-    Returns: A tuple containing the updated fragment_index and is_next_word_sentence_start flag.
+    - is_capitalization_forgivable: poetic convention capitalizes a line's first
+      word regardless of grammar. Reset by the caller at the start of every
+      line/head. Only feeds the proper-noun heuristic.
+    - starts_new_sentence: real sentence boundary, driven only by actual
+      terminal punctuation (plus a forced reset at book/poem starts). NOT reset
+      per verse line — Latin verse sentences routinely run over several lines.
     """
     prev_word_was_capitalized = False
+
     for segment in segments:
-        # Determine the state for the current word based on the *previous* word's status.
+
+        if starts_new_sentence:
+            sentence_idx += 1
+            word_idx = 0
+            starts_new_sentence = False
+
         inherent_state, context_dependent_state = determine_proper_noun_state(
-            segment, is_next_word_sentence_start, prev_word_was_capitalized
+            segment, is_capitalization_forgivable, prev_word_was_capitalized
         )
-        work_contents_data.append([work_id, fragment_index, segment, 'sourceReference', context_dependent_state])
 
-        # Store the inherent state for the word type, to be used for macronization sorting
-        if segment and segment.isalpha():
+        t_type = get_token_type(segment, inherent_state)
+        t_type = WORK_SPECIFIC_TOKEN_OVERRIDES.get(fragment_index, t_type)
+
+        if t_type == TokenType.ABBREVIATION:
+            context_dependent_state = 1
+        elif t_type == TokenType.NUMERAL:
+            context_dependent_state = 0
+
+        current_word_idx = None
+        if t_type <= 3:
+            current_word_idx = word_idx
+            word_idx += 1
+
+        enclitic = None
+        expansion = None
+        if t_type == TokenType.WORD:
+            enclitic = find_enclitic(segment)
+        elif t_type in (TokenType.ABBREVIATION, TokenType.NUMERAL):
+            expansion = WORK_SPECIFIC_EXPANSIONS.get(fragment_index)
+
+        work_contents_data.append([
+            work_id, fragment_index, segment, source_ref, context_dependent_state,
+            int(t_type), sentence_idx, current_word_idx, enclitic, expansion,
+        ])
+
+        if t_type == TokenType.WORD:
             inherent_states_map[segment.lower()] = inherent_state
-
-        # Update context flags for the *next* word.
-        if segment and segment.isalpha():
-            is_next_word_sentence_start = False
+        if t_type <= 3:
             prev_word_was_capitalized = segment[0].isupper()
-        else: # Punctuation or non-alphabetic tokens reset the capitalization sequence.
+            is_capitalization_forgivable = False
+        else:
             prev_word_was_capitalized = False
 
-        if segment and any(p in segment for p in ".!?:"):
-            is_next_word_sentence_start = True
+        if t_type == TokenType.PUNCTUATION:
+            if segment in CAPITALIZATION_RESET_PUNCTUATION:
+                is_capitalization_forgivable = True
+            if segment in SENTENCE_TERMINATORS:
+                starts_new_sentence = True
 
         logging.info("Segment: %s, %s, ProperNounState: %s", fragment_index, segment, context_dependent_state)
         fragment_index += 1
-    return fragment_index, is_next_word_sentence_start
+
+    return fragment_index, sentence_idx, word_idx, is_capitalization_forgivable, starts_new_sentence
+
+
+def _consume_clitic_tokens(word: str, api_tokens: List[TokenResult], cursor: int) -> Tuple[str, int, int]:
+    """
+    Greedily concatenates api_tokens starting at cursor until their combined
+    surface form matches word. Undoes the macronizer's own clitic-splitting
+    (e.g. "nullamque" comes back as two tokens, "nullam" + "que").
+    Returns (macronized_word, uncertainty_mask, new_cursor).
+    Raises if the tokens can't be made to match word — a desync here means
+    everything after it is unreliable, so there's no safe way to continue.
+    """
+    reconstructed, macronized, mask = "", "", 0
+    while cursor < len(api_tokens) and len(reconstructed) < len(word):
+        token = api_tokens[cursor]
+        reconstructed += token['word']
+        macronized += token['macronized']
+        mask |= token['uncertainty_mask']
+        cursor += 1
+    if reconstructed != word:
+        raise RuntimeError(
+            f"Clitic reassembly failed. Expected '{word}', reconstructed '{reconstructed}'."
+        )
+    return macronized, mask, cursor
+
+
+def _reassemble_clitic_tokens(target_words: List[str], api_tokens: List[TokenResult]) -> Dict[str, Tuple[str, int]]:
+    """
+    Maps each word in target_words to its (macronized_word, uncertainty_mask),
+    reconstructing across clitic splits via _consume_clitic_tokens.
+    """
+    result: Dict[str, Tuple[str, int]] = {}
+    cursor = 0
+    for word in target_words:
+        macronized, mask, cursor = _consume_clitic_tokens(word, api_tokens, cursor)
+        result[word] = (macronized, mask)
+    return result
 
 
 def _get_macronization_data_from_api(words: Set[str]) -> Dict[str, Tuple[str, int]]:
@@ -283,20 +475,17 @@ def _get_macronization_data_from_api(words: Set[str]) -> Dict[str, Tuple[str, in
     if not words:
         return {}
 
+    sorted_words = sorted(words)
     # The leading "et" provides context to avoid sentence-start capitalization logic for the first word.
-    text_for_api = "et " + " et ".join(sorted(list(words)))
+    # It also never has status 2
+    text_for_api = "et " + " et ".join(sorted_words)
     results = macronize_text(text_for_api)
-    macron_map: Dict[str, Tuple[str, int]] = {}
 
-    if results:
-        # Filter out the "et" tokens and spaces
-        word_tokens = [res for res in results if res['is_word'] and res['word'] != 'et']
-        for token in word_tokens:
-            word = token['word']
-            # Store both the macronized form and its mask.
-            macron_map[word] = (token['macronized'], token['uncertainty_mask'])
-            
-    return macron_map
+    if not results:
+        return {}
+
+    word_tokens = [res for res in results if res['is_word'] and res['word'] != 'et']
+    return _reassemble_clitic_tokens(sorted_words, word_tokens)
 
 
 def _full_uncertainty_mask(word: str) -> int:
@@ -306,14 +495,16 @@ def _full_uncertainty_mask(word: str) -> int:
     return 0
 
 
-def _different_macronizations_depending_on_status(words_state_2: Set[str]) -> Set[str]:
+def _different_macronizations_depending_on_status(words_state_2: Set[str]) -> Tuple[Set[str], Set[str]]:
     """
     Identifies words that have _specific_ different macronizations when capitalized vs. lowercase,
     ensuring that BOTH forms are actually known by the macronizer.
-    Returns a set of these words in their canonical lowercase form.
+    Returns:
+    - uncertain: set of lowercase words where both forms are known but macronize differently
+    - cap_unknown: set of lowercase words where the capitalized form is unknown to the macronizer
     """
     if not words_state_2:
-        return set()
+        return set(), set()
 
     # Create sets of capitalized and lowercase versions for the API calls
     cap_words = {word.capitalize() for word in words_state_2}
@@ -324,6 +515,7 @@ def _different_macronizations_depending_on_status(words_state_2: Set[str]) -> Se
     lower_macrons_data = _get_macronization_data_from_api(lower_words)
 
     uncertain = set()
+    cap_unknown = set()
     for word in words_state_2:
         cap_form = word.capitalize()
         lower_form = word.lower()
@@ -344,11 +536,17 @@ def _different_macronizations_depending_on_status(words_state_2: Set[str]) -> Se
             # Now that we know both are valid results, we can compare them.
             if macronized_cap.lower() != macronized_lower.lower():
                 uncertain.add(lower_form)
-        # If one or both are not known, we ignore this pair. It's not a case of
-        # proper-noun-based ambiguity; it's a case of missing dictionary data.
+        elif not cap_is_known and lower_is_known:
+            # The macronizer doesn't know the capitalized form at all.
+            # We can't safely fabricate a capitalized entry from the lowercase one.
+            cap_unknown.add(lower_form)
+        # If the lowercase form is unknown, we ignore it entirely — it's a case
+        # of missing dictionary data, not proper-noun-based ambiguity.
 
     logging.info("Found %s words with uncertain macronization due to them maybe being proper nouns.", len(uncertain))
-    return uncertain
+    logging.info("Found %s words where the capitalized form is unknown to the macronizer.", len(cap_unknown))
+    return uncertain, cap_unknown
+
 
 
 def asset_path(asset_name):
@@ -357,7 +555,7 @@ def asset_path(asset_name):
 
 
 def project_root( ):
-    script_dir = os.path.dirname( __file__ )
+    script_dir = os.path.dirname(os.path.abspath(__file__))
     root = os.path.dirname( os.path.dirname( os.path.dirname( script_dir ) ) )
     return root
 
@@ -366,7 +564,9 @@ def generate_uuid():
     return str(uuid.uuid4())
 
 
-def is_numeric(s):
+def is_numeric(s: str | None) -> TypeGuard[str]:
+    if s is None:
+        return False
     try:
         int(s)
         return True
@@ -376,12 +576,46 @@ def is_numeric(s):
 
 def split_text_into_segments(text: str | None) -> list:
     if text is None:
-        return [None] # This null is needed to preserve the indices when anomalous parts (like gaps) are found
+        return [None]  # preserves indices for anomalous parts (e.g. gaps)
     # Normalize spaces and split text by words and punctuation
     text = text.strip()
-    # Adjust regex to properly split text including em dash and other punctuation
-    segments = re.findall(r'\w+|[^\w\s]', text, re.UNICODE)
-    return segments
+    # Split text including em dash and other punctuation
+    raw_segments = re.findall(r'\w+|[^\w\s]', text, re.UNICODE)
+
+    # Re-attach a trailing period to a known abbreviation ["C", "."] -> ["C."]
+    # so get_token_type's abbreviation check (which needs the period) can fire.
+    segments = []
+    i = 0
+    while i < len(raw_segments):
+        current = raw_segments[i]
+        if (current in KNOWN_ABBREVIATIONS and i + 1 < len(raw_segments)
+                and raw_segments[i + 1] == "."):
+            segments.append(current + ".")
+            i += 2
+        else:
+            segments.append(current)
+            i += 1
+
+    normalized_segments = [normalize_digraphs(s) for s in segments]
+
+    return normalized_segments
+
+
+def _make_source_ref(*parts: str | int | None) -> str:
+    """
+    Builds a CTS-style ref by joining part identifiers with periods, matching
+    the book/poem/line cRefPattern in the TEI encodingDesc (e.g. "3.7.12").
+    None/empty parts are dropped, so a <p> with no @n falls back to a
+    poem-level ref rather than fabricating a line number.
+    """
+
+    valid_parts = []
+
+    for p in parts:
+        if p is not None and p != '':
+            valid_parts.append(str(p))
+
+    return '.'.join(valid_parts)
 
 
 def process_verse(xml_string, output_dir):
@@ -406,13 +640,13 @@ def process_verse(xml_string, output_dir):
 
     work_id = generate_uuid()
     title_element = root.find('.//tei:title[@xml:lang="lat"]', namespaces)
-    work_name = title_element.text if title_element is not None else 'Unknown Title'
+    work_name = title_element.text if title_element is not None and title_element.text else 'Unknown Title'
     work_data = get_work_data(work_id, work_name)
     works_data.append(work_data)
     print(f'Work: {work_id}, {work_name}')
 
     author_element = root.find('.//tei:author', namespaces)
-    author_name = author_element.text if author_element is not None else 'Unknown Author'
+    author_name = author_element.text if author_element is not None and author_element.text else 'Unknown Author'
     author_id = generate_uuid()
     author_data = get_author_data(author_id, author_name)
     authors_data.append(author_data)
@@ -427,18 +661,22 @@ def process_verse(xml_string, output_dir):
     authors_and_works_data.append([author_id, work_id])
 
     fragment_index = 0  # Global index counter for fragments
+    sentence_idx = -1 # Tracks sentences across the whole work, incremented to 0 on the first real sentence
+    word_idx = 0 # Tracks words within the current sentence
     supplementary_index = {"NOTE": 0, "GAP": 0, "ABBR": 0}  # Note index counter
 
     # Flag to track sentence starts for context
     is_next_word_sentence_start = True
-    
+    starts_new_sentence = True
+
     inherent_states: Dict[str, int | None] = {}
 
     for work in root.findall('.//tei:div[@subtype="book"]', namespaces):
         book_node = generate_uuid()
-        book_name = work.find('tei:head', namespaces).text if work.find('tei:head', namespaces) is not None else None
-        book_head_text = ''.join(work.find('tei:head', namespaces).itertext()) \
-            if work.find('tei:head', namespaces) is not None else None
+        book_n = work.get('n')
+        book_head_el = work.find('tei:head', namespaces)
+        book_name = book_head_el.text if book_head_el is not None else None
+        book_head_text = ''.join(book_head_el.itertext()) if book_head_el is not None else None
 
         # Track the fromIndex for the book
         book_from_index = fragment_index
@@ -456,19 +694,28 @@ def process_verse(xml_string, output_dir):
             work_content_subdivisions_data.append(book_head_sub)
             print(f'Book Head Subdivision: {book_head_sub}')
 
-            fragment_index, is_next_word_sentence_start = _process_text_segments(
-                book_head_segments, work_id, fragment_index, is_next_word_sentence_start, work_contents_data, inherent_states
+            fragment_index, sentence_idx, word_idx, is_next_word_sentence_start, starts_new_sentence = _process_text_segments(
+                book_head_segments,
+                work_id,
+                fragment_index,
+                sentence_idx,
+                word_idx,
+                _make_source_ref(book_n),
+                is_next_word_sentence_start,
+                True,  # a book title never continues a previous sentence
+                work_contents_data,
+                inherent_states,
             )
 
         type_counters = {}
 
         for poem in work.findall('.//tei:div[@subtype="poem"]', namespaces):
             poem_id = poem.get('n')
-            poem_name = poem.find('tei:head', namespaces).text if poem.find('tei:head',
-                                                                            namespaces) is not None else None
+            poem_head_el = poem.find('tei:head', namespaces)
+            poem_name = poem_head_el.text if poem_head_el is not None else None
             poem_node = generate_uuid()
             # noinspection SpellCheckingInspection
-            typ = {"epilogus": "EPIL", "prologus": "PROL"}.get(poem_id, 'POEM' if str(poem_id).isdigit() else poem_id)
+            typ = {"epilogus": "EPIL", "prologus": "PROL"}.get(poem_id or '', 'POEM' if (poem_id or '').isdigit() else poem_id)
 
             if typ not in type_counters:
                 type_counters[typ] = 0
@@ -486,6 +733,8 @@ def process_verse(xml_string, output_dir):
             work_content_subdivisions_data.append(poem_sub)
             print(f'Subdivision: {poem_sub}')
 
+            is_first_line_of_poem = True
+
             for line in poem_lines:
 
                 is_next_word_sentence_start = True
@@ -494,7 +743,11 @@ def process_verse(xml_string, output_dir):
                 line_tag = line.tag.split('}')[-1]
                 if line_tag == 'l':
                     typ = 'VERS'
-                    poem_line_seq = int(line.get('n')) - 1
+                    n_attr = line.get('n')
+                    if n_attr:
+                        poem_line_seq = int(n_attr) - 1
+                    else:
+                        raise ValueError(f"<l> missing required @n attribute at fragment {fragment_index}")
                 elif line_tag == 'p':
                     typ = 'PARA'
                     poem_line_seq = 0
@@ -510,14 +763,14 @@ def process_verse(xml_string, output_dir):
                 line_text = line_text.replace('UNIQUE_STRING_FOR_GAP_LOST', '').strip() if line.text else ''
 
                 # Add to work_content_supplementary_data if <del> tag was found
-                if 'UNIQUE_STRING_FOR_DEL_START' in line.text and 'UNIQUE_STRING_FOR_DEL_END' in line.text:
+                if line.text and 'UNIQUE_STRING_FOR_DEL_START' in line.text and 'UNIQUE_STRING_FOR_DEL_END' in line.text:
                     work_content_supplementary_data.append(
                         [work_id, "NOTE", supplementary_index["NOTE"], fragment_index,
                          fragment_index + len(split_text_into_segments(line_text)) - 1,
                          'marked for deletion'])
                     supplementary_index["NOTE"] += 1
 
-                if 'UNIQUE_STRING_FOR_GAP_LOST' in line.text:
+                if line.text and 'UNIQUE_STRING_FOR_GAP_LOST' in line.text:
                     work_content_supplementary_data.append([work_id, "GAP", supplementary_index["GAP"], fragment_index,
                                                             fragment_index + len(split_text_into_segments(line_text)),
                                                             'lost'])
@@ -534,9 +787,25 @@ def process_verse(xml_string, output_dir):
                 line_str_for_api = ' '.join(s for s in line_segments if s)
                 lines_for_macronizer.append(line_str_for_api)
 
-                fragment_index, is_next_word_sentence_start = _process_text_segments(
-                    line_segments, work_id, fragment_index, is_next_word_sentence_start, work_contents_data, inherent_states
-                )
+                book_n = work.get('n', '?')
+                if typ == 'TITL':
+                    source_ref = _make_source_ref(book_n, poem_id)
+                else:
+                    source_ref = _make_source_ref(book_n, poem_id, line.get('n'))
+
+                fragment_index, sentence_idx, word_idx, is_next_word_sentence_start, starts_new_sentence = _process_text_segments(
+                    line_segments,
+                    work_id,
+                    fragment_index,
+                    sentence_idx,
+                    word_idx,
+                    source_ref,
+                    is_next_word_sentence_start,
+                    starts_new_sentence or is_first_line_of_poem,
+                    work_contents_data,
+                    inherent_states,
+                    )
+                is_first_line_of_poem = False
 
         for note in work.findall('.//tei:note', namespaces):
             note_id = note.get('n')
@@ -545,11 +814,12 @@ def process_verse(xml_string, output_dir):
             to_index = fragment_index + len(note_text.split()) - 1
             work_content_supplementary_data.append(
                 [work_id, "NOTE", supplementary_index["NOTE"], from_index, to_index, note_text])
-            print(f'Note: {note_id}, {from_index}, {to_index}, {note_text}')
+            print(f'Note: {note_id if note_id is not None else "None"}, {from_index}, {to_index}, {note_text}')
             supplementary_index["NOTE"] += 1
             fragment_index = to_index + 1
 
-        book_seq = int(work.get('n')) - 1 if is_numeric(work.get('n')) else None
+        book_n = work.get('n')
+        book_seq = int(book_n) - 1 if is_numeric(book_n) else None
         if book_seq is None:
             # Find the maximum book_seq in the current work_content_subdivisions_data
             existing_book_seqs = [x[3] for x in work_content_subdivisions_data if x[2] == 'BOOK']
@@ -562,8 +832,9 @@ def process_verse(xml_string, output_dir):
 
     works_df = pd.DataFrame(works_data, columns=['id', 'name', 'about'])
     work_contents_df = pd.DataFrame(work_contents_data,
-                                    columns=['workId', 'idx', 'word', 'sourceReference', 'properNounState']).astype(
-        {'properNounState': 'Int64'})
+                                    columns=['workId', 'idx', 'word', 'sourceReference', 'properNounState', 'tokenType',
+                                             'sentenceIdx', 'wordIdx', 'enclitic', 'expansion']).astype(
+        {'properNounState': 'Int64', 'wordIdx': 'Int64'})
     work_content_subdivisions_df = pd.DataFrame(work_content_subdivisions_data,
                                                 columns=['workId', 'node', 'typ', 'cnt', 'name', 'parent', 'fromIndex',
                                                          'toIndex'])
@@ -578,12 +849,12 @@ def process_verse(xml_string, output_dir):
     unambiguous_macronizations_dict = {}
 
     if not work_contents_df.empty:
-        
+
         # 1. Identify which word types have an INHERENT state of 2.
         words_with_inherent_state_2 = {word for word, state in inherent_states.items() if state == 2}
-        
+
         # 2. Of those candidates, find which ones ACTUALLY have different macrons.
-        uncertain_depending_on_proper_noun_state = _different_macronizations_depending_on_status(words_with_inherent_state_2)
+        uncertain_depending_on_proper_noun_state, cap_form_unknown = _different_macronizations_depending_on_status(words_with_inherent_state_2)
 
         # 3. Get contextual macronization for the entire work.
         full_text = '\n'.join(lines_for_macronizer)
@@ -598,8 +869,12 @@ def process_verse(xml_string, output_dir):
             logging.info("Mapping macronization results and sorting into ambiguous/unambiguous tables...")
             while df_cursor < len(work_contents_df) and api_cursor < len(api_tokens):
                 original_row = work_contents_df.iloc[df_cursor]
-                original_word = original_row['word']
-                word_idx = original_row['idx']
+                raw_word = original_row['word']
+                if not isinstance(raw_word, str):
+                    df_cursor += 1
+                    continue
+                original_word = raw_word
+                content_idx = original_row['idx']
 
                 # Skip processing for None
                 if not original_word:
@@ -607,49 +882,49 @@ def process_verse(xml_string, output_dir):
                     continue
 
                 # Reassemble clitics by greedily consuming API tokens
-                reconstructed_word, combined_macronized, combined_mask = "", "", 0
+                combined_macronized, combined_mask, api_cursor = _consume_clitic_tokens(
+                    original_word, api_tokens, api_cursor
+                )
 
-                while api_cursor < len(api_tokens) and len(reconstructed_word) < len(original_word):
-                    current_api_token = api_tokens[api_cursor]
-                    reconstructed_word += current_api_token['word']
-                    combined_macronized += current_api_token['macronized']
-                    combined_mask |= current_api_token['uncertainty_mask']
-                    api_cursor += 1
-
-                if reconstructed_word != original_word:
-                    logging.critical(
-                        "Token synchronization failed at index %s. Expected '%s', reconstructed '%s'.",
-                        word_idx,
-                        original_word,
-                        reconstructed_word
-                    )
-                    break # Stop processing to avoid cascading errors
-
-                # 4. Decision logic: store in work-specific or global table
-                lower_word = original_word.lower()
-                is_macron_uncertain_by_pn_state = lower_word in uncertain_depending_on_proper_noun_state
-                is_macron_uncertain_always = combined_mask != 0
-
-                if is_macron_uncertain_always:
-                    work_macronizations_data.append([work_id, word_idx, combined_macronized, combined_mask])
-                elif is_macron_uncertain_by_pn_state:
-                    logging.warning("'%s' at '%s' has different macrons depending on whether it's a proper noun or not", original_word, word_idx)
-                    work_macronizations_data.append([work_id, word_idx, combined_macronized, combined_mask])
+                # 4a. Non-word tokens should be stored exactly as they appear (this includes punctuation, abbreviations, etc.)
+                if int(original_row['tokenType']) > 1:
+                    unambiguous_macronizations_dict[original_word] = combined_macronized
                 else:
-                    # The macrons are stable. It's safe for the global unambiguous table.
-                    # Get the inherent state to decide HOW to save it
-                    inherent_state = inherent_states.get(lower_word, 0)
+                    # 4b. Decision logic: store in work-specific or global table
+                    lower_word = original_word.lower()
+                    #context_state = original_row['properNounState']
+                    is_macron_uncertain_by_pn_state = (
+                            lower_word in uncertain_depending_on_proper_noun_state
+                            and original_word[0].isupper()
+                    )
+                    is_macron_uncertain_always = combined_mask != 0
 
-                    if inherent_state == 0: # Common noun -> lowercase
-                        unambiguous_macronizations_dict[original_word.lower()] = combined_macronized.lower()
-                    elif inherent_state == 1: # Proper noun -> capitalized
-                        unambiguous_macronizations_dict[original_word.capitalize()] = combined_macronized.capitalize()
-                    elif inherent_state == 2: # Ambiguous, but only one possible macronization for each lemma -> store both
-                        unambiguous_macronizations_dict[original_word.lower()] = combined_macronized.lower()
-                        unambiguous_macronizations_dict[original_word.capitalize()] = combined_macronized.capitalize()
-                    else: # None: don't store as unambiguous as it is technically an unknown word
-                        logging.warning("'%s' is morphologically un-analyzable but has a certain macronization. Storing as-is.", original_word)
-                        work_macronizations_data.append([work_id, word_idx, combined_macronized, combined_mask])
+                    if is_macron_uncertain_always:
+                        work_macronizations_data.append([work_id, content_idx, combined_macronized, combined_mask])
+                    elif is_macron_uncertain_by_pn_state:
+                        logging.warning("'%s' at '%s' has different macrons depending on whether it's a proper noun or not", original_word, content_idx)
+                        work_macronizations_data.append([work_id, content_idx, combined_macronized, combined_mask])
+                    else:
+                        # The macrons are stable. It's safe for the global unambiguous table.
+                        # Get the inherent state to decide HOW to save it
+                        inherent_state = inherent_states.get(lower_word) # default to None
+
+                        if inherent_state == 0: # Common noun -> lowercase
+                            unambiguous_macronizations_dict[original_word.lower()] = combined_macronized.lower()
+                        elif inherent_state == 1: # Proper noun -> capitalized
+                            unambiguous_macronizations_dict[original_word.capitalize()] = combined_macronized.capitalize()
+                        elif inherent_state == 2:
+                            if lower_word in uncertain_depending_on_proper_noun_state or lower_word in cap_form_unknown:
+                                # Only lowercase is globally safe — capitalized instances
+                                # are always routed to WorkMacronizations above.
+                                unambiguous_macronizations_dict[original_word.lower()] = combined_macronized.lower()
+                            else:
+                                # Both known, same macrons → store both
+                                unambiguous_macronizations_dict[original_word.lower()] = combined_macronized.lower()
+                                unambiguous_macronizations_dict[original_word.capitalize()] = combined_macronized.capitalize()
+                        else: # None: don't store as unambiguous as it is technically an unknown word
+                            logging.warning("'%s' is morphologically un-analyzable but has a certain macronization. Storing as-is.", original_word)
+                            work_macronizations_data.append([work_id, content_idx, combined_macronized, combined_mask])
 
                 df_cursor += 1
 
@@ -657,7 +932,7 @@ def process_verse(xml_string, output_dir):
     unambiguous_macronizations_data = list(unambiguous_macronizations_dict.items())
     work_macronizations_df = pd.DataFrame(
         work_macronizations_data,
-        columns=['workId', 'wordIdx', 'macronizedWord', 'uncertaintyBitMask']
+        columns=['workId', 'idx', 'macronizedWord', 'uncertaintyBitMask']
     )
     unambiguous_macronizations_df = pd.DataFrame(
         unambiguous_macronizations_data,
@@ -723,6 +998,8 @@ def validate_csv_files(xml_string, output_dir):
     validate_p_tags(errors, xml_string, work_content_subdivisions_df.to_dict('records'))
     check_proper_noun_completeness(errors, work_contents_df)
     check_macronization_coverage(errors, work_contents_df, work_macronizations_df, unambiguous_macronizations_df)
+    check_expansion_completeness(errors, work_contents_df)
+    check_sentence_and_word_idx(errors, work_contents_df)
 
     if errors:
         logging.error("Validation errors found:")
@@ -735,6 +1012,11 @@ def validate_csv_files(xml_string, output_dir):
 def check_seq_unique_ints_from_0(errors, df, f_name, column_name, group_columns=None):
     def check_sequence_and_uniqueness(series):
         expected_values = pd.Series(range(0, len(series)))
+        # Ensure matching dtype before comparison
+        try:
+            series = series.astype('int64')
+        except (ValueError, TypeError):
+            return False  # contains NaN or non-integer → fail
         is_sequential = series.equals(expected_values)
         is_unique = series.nunique() == len(series)
         return is_sequential and is_unique
@@ -746,11 +1028,9 @@ def check_seq_unique_ints_from_0(errors, df, f_name, column_name, group_columns=
             if not check_sequence_and_uniqueness(sorted_values):
                 group_name = ', '.join([f"{col}={val}" for col, val in zip(group_columns, name)])
                 if sorted_values.nunique() != len(sorted_values):
-                    errors.append(f"For {f_name}, column '{column_name}' in group ({group_name}) contains duplicate "
-                                  f"values.")
+                    errors.append(f"For {f_name}, column '{column_name}' in group ({group_name}) contains duplicate values.")
                 else:
-                    errors.append(f"For {f_name}, column '{column_name}' in group ({group_name}) does not contain "
-                                  f"sequential integers starting from 0.")
+                    errors.append(f"For {f_name}, column '{column_name}' in group ({group_name}) does not contain sequential integers starting from 0.")
     else:
         sorted_values = df[column_name].sort_values().reset_index(drop=True)
         if not check_sequence_and_uniqueness(sorted_values):
@@ -933,55 +1213,69 @@ def validate_p_tags(errors, xml_string, subdivisions):
 
 
 def check_proper_noun_completeness(errors, work_contents_df):
-    """Checks that every alphabetic word has a proper noun state."""
-    # Filter for rows that should be words (alphabetic strings)
-    word_df = work_contents_df[work_contents_df['word'].fillna('').str.isalpha()]
+    """Every word/abbreviation/numeral must have a properNounState; everything else must not."""
+    words = work_contents_df[work_contents_df['tokenType'] <= 3]
+    missing = words[words['properNounState'].isnull()]
+    if not missing.empty:
+        examples = missing.head(50).apply(lambda row: f"'{row['word']}' at index {row['idx']}", axis=1).tolist()
+        errors.append(
+            f"Found {len(missing)} word tokens with a missing 'properNounState'. "
+            f"Examples: {', '.join(examples)}"
+        )
 
-    # Find words where the proper noun state is missing (null/NaN)
-    missing_state = word_df[word_df['properNounState'].isnull()]
-
-    if not missing_state.empty:
-        # Report the first 5 problematic words for brevity
-        examples = missing_state.head(50).apply(lambda row: f"'{row['word']}' at index {row['idx']}", axis=1).tolist()
-        error_msg = (f"Found {len(missing_state)} words with a missing 'properNounState'. "
-                     f"Examples: {', '.join(examples)}")
-        errors.append(error_msg)
+    non_words = work_contents_df[work_contents_df['tokenType'] > 3]
+    bad = non_words[non_words['properNounState'].notnull()]
+    if not bad.empty:
+        errors.append(
+            f"Found {len(bad)} non-word tokens with a properNounState that should be NULL."
+        )
 
 
 def check_macronization_coverage(errors, work_contents_df, work_macronizations_df, unambiguous_macronizations_df):
     """
-    Checks that every word has a single, valid macronization source.
-    - A word TYPE must not exist in both the stable and work-specific tables.
+    Checks that every word has a valid macronization source.
+    - Same-case overlaps between the stable and work-specific tables are errors.
+    - Cross-case overlaps (e.g. 'aliis' stable vs 'Aliis' work-specific) are
+      expected for state-2 words and logged as warnings, not errors.
     - Every word INSTANCE must have a source in one of the tables.
     """
-    # 1. Check any word TYPE appearing in both tables.
-    # Get all unique word types (case-insensitive) from the stable, global table.
-    stable_types = set(unambiguous_macronizations_df['word'].str.lower())
+    # 1. Check for word types appearing in both tables.
+    stable_word_forms = set(unambiguous_macronizations_df['word'])
 
-    # Get all unique word types (case-insensitive) from the work-specific table.
-    # This requires merging with work_contents to get the actual word from the index.
     if not work_macronizations_df.empty:
-        work_specific_merged = pd.merge(work_macronizations_df, work_contents_df, left_on='wordIdx', right_on='idx')
-        work_specific_types = set(work_specific_merged['word'].str.lower())
+        work_specific_merged = pd.merge(work_macronizations_df, work_contents_df, on='idx') # no workId is safe, each script is for 1 work only
+        work_specific_forms = set(work_specific_merged['word'])
 
-        # Find the intersection of the two sets. Any overlap is a potential error.
-        # This often happens when the script finds a normal use of a word AND a capitalized instance
-        # that is not usually capitalized mid-sentence, in which cases the macronizer returns an unknown mask
-        duplicate_types = stable_types.intersection(work_specific_types)
-        if duplicate_types:
-            examples = sorted(list(duplicate_types))[:50]
+        # Exact-case duplicates are real errors (same form stored twice).
+        exact_duplicates = stable_word_forms.intersection(work_specific_forms)
+        if exact_duplicates:
+            examples = sorted(list(exact_duplicates))[:50]
             error_msg = (
-                f"Found {len(duplicate_types)} word types defined in BOTH the stable and work-specific "
-                f"macronization tables. "
+                f"Found {len(exact_duplicates)} word types defined in BOTH the stable and work-specific "
+                f"macronization tables with the SAME case. "
                 f"Examples: {', '.join(examples)}"
             )
             errors.append(error_msg)
-            # This is a fatal error; further checks for missing words are misleading.
             return
 
-    # 2. If no types are duplicated, check that every individual word INSTANCE is covered.
-    stable_word_forms = set(unambiguous_macronizations_df['word'])
-    work_specific_indices = set(work_macronizations_df['wordIdx'])
+        # Cross-case overlaps are expected (e.g. lowercase in stable, capitalized in work-specific).
+        # Log them as warnings for visibility, but don't treat as errors.
+        stable_types_lower = {w.lower() for w in stable_word_forms}
+        work_specific_types_lower = {w.lower() for w in work_specific_forms}
+        cross_case_overlaps = stable_types_lower.intersection(work_specific_types_lower) - {
+            w.lower() for w in exact_duplicates
+        } if exact_duplicates else stable_types_lower.intersection(work_specific_types_lower)
+        if cross_case_overlaps:
+            examples = sorted(list(cross_case_overlaps))[:50]
+            logging.warning(
+                "Found %s word types in both tables with different case (expected for proper-noun "
+                "ambiguity). Examples: %s",
+                len(cross_case_overlaps),
+                ', '.join(examples)
+            )
+
+    # 2. Check that every individual word INSTANCE is covered.
+    work_specific_indices = set(work_macronizations_df['idx'])
     missing_instances = []
 
     # Filter for actual alphabetic words that need checking.
@@ -996,9 +1290,9 @@ def check_macronization_coverage(errors, work_contents_df, work_macronizations_d
         # We also check case variations for the stable table as a fallback,
         # though ideally the stored form should match exactly.
         is_in_stable_table = (
-            word in stable_word_forms or
-            word.lower() in stable_word_forms or
-            word.capitalize() in stable_word_forms
+                word in stable_word_forms or
+                word.lower() in stable_word_forms or
+                word.capitalize() in stable_word_forms
         )
         is_in_work_specific_table = idx in work_specific_indices
 
@@ -1011,6 +1305,37 @@ def check_macronization_coverage(errors, work_contents_df, work_macronizations_d
             f"Examples: {', '.join(missing_instances[:50])}"
         )
         errors.append(error_msg)
+
+
+
+def check_expansion_completeness(errors, work_contents_df):
+    """Every abbreviation/numeral token must have a supplied expansion."""
+    needs_expansion = work_contents_df[
+        work_contents_df['tokenType'].isin([int(TokenType.ABBREVIATION), int(TokenType.NUMERAL)])
+    ]
+    missing = needs_expansion[needs_expansion['expansion'].isnull() | (needs_expansion['expansion'] == '')]
+    if not missing.empty:
+        examples = missing.head(50).apply(lambda row: f"'{row['word']}' at idx {row['idx']}", axis=1).tolist()
+        errors.append(
+            f"Found {len(missing)} abbreviation/numeral tokens missing an 'expansion'. "
+            f"Add entries to WORK_SPECIFIC_EXPANSIONS for: {', '.join(examples)}"
+        )
+
+
+def check_sentence_and_word_idx(errors, work_contents_df):
+    """sentenceIdx: sequential unique ints from 0 per workId.
+    wordIdx: sequential unique ints from 0 per (workId, sentenceIdx), tokenType<=3 only;
+    must be null everywhere else."""
+    check_seq_unique_ints_from_0(
+        errors, work_contents_df.drop_duplicates(['workId', 'sentenceIdx']),
+        'sentence indices', 'sentenceIdx', ['workId']
+    )
+    word_rows = work_contents_df[work_contents_df['tokenType'] <= 3]
+    check_seq_unique_ints_from_0(errors, word_rows, 'word indices', 'wordIdx', ['workId', 'sentenceIdx'])
+    non_word_rows = work_contents_df[work_contents_df['tokenType'] > 3]
+    bad = non_word_rows[non_word_rows['wordIdx'].notnull()]
+    if not bad.empty:
+        errors.append(f"Found {len(bad)} punctuation/editorial tokens with a non-null wordIdx.")
 
 
 if __name__ == "__main__":
