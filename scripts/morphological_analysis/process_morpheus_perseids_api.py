@@ -580,6 +580,8 @@ def part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, gramm_case, de
                 return "adverb"
             elif degree in ["comparative", "superlative"]:
                 return "adjective"
+            elif pos_infl == "noun":
+                return "noun"
             else:
                 return "new combination, check"
         else:
