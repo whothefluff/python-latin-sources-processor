@@ -1259,20 +1259,40 @@ def check_macronization_coverage(errors, work_contents_df, work_macronizations_d
             return
 
         # Cross-case overlaps are expected (e.g. lowercase in stable, capitalized in work-specific).
-        # Log them as warnings for visibility, but don't treat as errors.
         stable_types_lower = {w.lower() for w in stable_word_forms}
         work_specific_types_lower = {w.lower() for w in work_specific_forms}
-        cross_case_overlaps = stable_types_lower.intersection(work_specific_types_lower) - {
-            w.lower() for w in exact_duplicates
-        } if exact_duplicates else stable_types_lower.intersection(work_specific_types_lower)
+        cross_case_overlaps = stable_types_lower.intersection(work_specific_types_lower)
+
         if cross_case_overlaps:
-            examples = sorted(list(cross_case_overlaps))[:50]
-            logging.warning(
-                "Found %s word types in both tables with different case (expected for proper-noun "
-                "ambiguity). Examples: %s",
-                len(cross_case_overlaps),
-                ', '.join(examples)
-            )
+            stable_macron_by_lower = {
+                w.lower(): m for w, m in
+                zip(unambiguous_macronizations_df['word'], unambiguous_macronizations_df['macronizedWord'])
+            }
+            work_macron_by_lower: Dict[str, Set[str]] = {}
+            for w, m in zip(work_specific_merged['word'], work_specific_merged['macronizedWord']):
+                work_macron_by_lower.setdefault(w.lower(), set()).add(m)
+
+            genuinely_ambiguous, case_only = set(), set()
+            for w in cross_case_overlaps:
+                stable_norm = strip_macrons(stable_macron_by_lower.get(w, '')).lower()
+                work_norms = {strip_macrons(m).lower() for m in work_macron_by_lower.get(w, set())}
+                if work_norms and work_norms == {stable_norm}:
+                    case_only.add(w)
+                else:
+                    genuinely_ambiguous.add(w)
+
+            if genuinely_ambiguous:
+                logging.warning(
+                    "Found %s word types with different macrons depending on case "
+                    "(expected for proper-noun ambiguity). Examples: %s",
+                    len(genuinely_ambiguous), ', '.join(sorted(genuinely_ambiguous)[:50])
+                )
+            if case_only:
+                logging.warning(
+                    "Found %s word types stored under both cases with IDENTICAL macrons"
+                    "because of potential stylisic capitalization. Examples: %s",
+                    len(case_only), ', '.join(sorted(case_only)[:50])
+                )
 
     # 2. Check that every individual word INSTANCE is covered.
     work_specific_indices = set(work_macronizations_df['idx'])
