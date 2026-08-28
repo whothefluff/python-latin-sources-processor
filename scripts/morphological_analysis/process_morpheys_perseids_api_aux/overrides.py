@@ -125,7 +125,19 @@ NOT_WANTED_INFLECTIONS = {
 
 # Whitelist (many errors in morpheus with fake adverbs)
 TRUE_ADVERB_FORMS = {
+    "brevi",
+    "dubium",
+    "falso",
+    "multo",
+    "multum",
+    "occulto",
     "paululum",
     "penitus",
+    "plurimum",
+    "plus",
+    "primo",
+    "recta",
+    "solidum",
+    "tacito",
     "tuto"
 }
