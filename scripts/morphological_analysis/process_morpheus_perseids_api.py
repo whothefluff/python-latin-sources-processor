@@ -143,7 +143,7 @@ class MorphologicalAnalyzer:
             raise e
 
     @staticmethod
-    def process_analysis(word: str, analysis: Dict) -> tuple[List[Dict], List[Dict]]:
+    def process_analysis(word: str, analysis: Dict, stripped_enclitic: str | None = None) -> tuple[List[Dict], List[Dict]]:
         """Process the analysis JSON and return details and inflections"""
         details = []
         inflections = []
@@ -248,7 +248,13 @@ class MorphologicalAnalyzer:
                 # headword happens to reference a proper noun (e.g. "hercle" -> "Hercules")
                 # is not itself proper — headword casing is meaningless outside pos "noun".
                 is_proper = bool(headword) and headword[0].isupper() and "noun" in computed_pos_seen
-                contract_form = apply_contract_casing(word, is_proper)
+
+                if stripped_enclitic and len(word) > len(stripped_enclitic) and word.lower().endswith(stripped_enclitic):
+                    output_word = word[:-len(stripped_enclitic)]
+                else:
+                    output_word = word
+
+                contract_form = apply_contract_casing(output_word, is_proper)
 
                 detail = {"form": contract_form, "item": item, "dictionaryRef": headword}
                 details.append(detail)
@@ -408,7 +414,7 @@ class MorphologicalAnalyzer:
 
                             retry_analysis = self._query_merged(base_word)
                             # Pass the original `word` to keep it as the `form` in the output.
-                            retry_details, retry_inflections = self.process_analysis(word, retry_analysis)
+                            retry_details, retry_inflections = self.process_analysis(word, retry_analysis, stripped_enclitic=enclitic)
 
                             if retry_inflections:
                                 details = retry_details
