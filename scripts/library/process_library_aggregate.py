@@ -1,10 +1,18 @@
-import os
-import pandas as pd
-from pathlib import Path
-from tqdm import tqdm
-import tkinter as tk
-from tkinter import filedialog
 import logging
+import os
+import tkinter as tk
+from pathlib import Path
+from tkinter import filedialog
+
+import pandas as pd
+from tqdm import tqdm
+
+TYPE_BY_FILE_AND_COLUMN = {
+    'work_contents.csv': {
+        'properNounState': 'Int64',
+        'wordIdx': 'Int64'
+    },
+}
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -109,7 +117,7 @@ def aggregate_csv_files():
         output_path = output_dir / file_name
         if output_path.exists():
             try:
-                existing_df = pd.read_csv(output_path)
+                existing_df = pd.read_csv(output_path, dtype=TYPE_BY_FILE_AND_COLUMN.get(file_name))
                 existing_dfs[file_name] = existing_df.copy()
                 aggregated_dfs[file_name] = existing_df.copy()
                 logging.info(f"Loaded existing aggregated file: {output_path} with {len(existing_df)} rows.")
@@ -130,7 +138,7 @@ def aggregate_csv_files():
             if file_path.exists():
                 try:
                     # Read the current CSV file
-                    df = pd.read_csv(file_path)
+                    df = pd.read_csv(file_path, dtype=TYPE_BY_FILE_AND_COLUMN.get(file_name))
 
                     # Store original DataFrame for validation
                     if file_name not in original_dfs:
