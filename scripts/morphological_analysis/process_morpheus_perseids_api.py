@@ -426,7 +426,7 @@ class MorphologicalAnalyzer:
             details_exists = os.path.exists(self.details_file)
 
             with open(self.details_file, "a", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=details_fieldnames)
+                writer = csv.DictWriter(f, fieldnames=details_fieldnames, lineterminator="\n")
                 if not details_exists:
                     writer.writeheader()
 
@@ -436,7 +436,7 @@ class MorphologicalAnalyzer:
             inflections_exists = os.path.exists(self.inflections_file)
 
             with open(self.inflections_file, "a", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=inflections_fieldnames)
+                writer = csv.DictWriter(f, fieldnames=inflections_fieldnames, lineterminator="\n")
 
                 if not inflections_exists:
                     writer.writeheader()

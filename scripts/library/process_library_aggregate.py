@@ -172,7 +172,7 @@ def aggregate_csv_files():
         )
         if is_valid:
             try:
-                df.to_csv(output_path, index=False)
+                df.to_csv(output_path, index=False, lineterminator="\n")
                 logging.info(f"Successfully saved aggregated file: {output_path}")
             except Exception as e:
                 logging.error(f"Error saving {output_path}: {str(e)}")

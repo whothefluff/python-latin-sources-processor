@@ -439,7 +439,7 @@ def parse_xml_and_write_csv( input_file, output_dir ):
     dictionary_id = str( uuid.uuid4( ) )
 
     with open( dictionaries_file, "w", newline = "", encoding = "utf-8" ) as f:
-        writer = csv.writer( f )
+        writer = csv.writer( f, lineterminator="\n" )
         write_csv_row( writer, ["ID", "name", "language", "publisher", "publicationDate"] )
         write_csv_row( writer, [dictionary_id, "Lewis & Short", "EN", "Harper and Brothers", "1879-07-01 00:00:00.000Z"], )
 
@@ -447,8 +447,8 @@ def parse_xml_and_write_csv( input_file, output_dir ):
           open( senses_file, "w", newline = "", encoding = "utf-8" ) as senses_csv,
           open( quotes_file, "w", newline = "", encoding = "utf-8" )):
 
-        entries_writer = csv.writer( entries_csv )
-        senses_writer = csv.writer( senses_csv )
+        entries_writer = csv.writer( entries_csv, lineterminator="\n" )
+        senses_writer = csv.writer( senses_csv, lineterminator="\n" )
 
         write_csv_row( entries_writer, ["dictionary", "lemma", "partOfSpeech", "inflection", "index"] )
         write_csv_row( senses_writer, ["dictionary", "lemma", "level", "prettyLevel", "content"] )
