@@ -16,6 +16,9 @@ import pandas as pd
 
 import requests
 from scripts.library.util.nomina import NOMINA
+from scripts.library.util.proper_noun import (
+    is_proper_noun_lemma, compute_inherent_state, compute_context_aware_state, ProperNounState,
+)
 from scripts.library.util.text_normalization import normalize_digraphs
 from scripts.library.util.token_classification import TokenType, get_token_type
 
@@ -28,7 +31,7 @@ KNOWN_ABBREVIATIONS: set[str] = {
     *NOMINA.keys()
 }
 
-CAPITALIZATION_RESET_PUNCTUATION = ".!?:"
+CAPITALIZATION_RESET_PUNCTUATION = ".!?:—"
 
 # Punctuation that ends a grammatical sentence for sentenceIdx/wordIdx purposes.
 # Deliberately narrower than the CAPITALIZATION_RESET_PUNCTUATION set: a colon
@@ -43,6 +46,23 @@ WORK_SPECIFIC_TOKEN_OVERRIDES: Dict[int, "TokenType"] = {
 WORK_SPECIFIC_EXPANSIONS: Dict[int, str] = {
     # 42: "Gāiō", # "C." used in a dative context at fragment 42
     # 107: "ūnum", # "I" used as an accusative numeral at fragment 107
+}
+
+WORK_SPECIFIC_PROPER_NOUN_OVERRIDES: Dict[int, ProperNounState | None] = {
+    646: ProperNounState.NO, # 'Sol' for 'sol'
+    2236: ProperNounState.NO, # 'Religioni' for 'religioni'
+    6731: ProperNounState.NO, # 'Particulonem' for 'particulonem'
+    6798: ProperNounState.NO, # 'Particulo' for 'Particulo'
+    8016: ProperNounState.NO, # 'Religio' for 'religio'
+    9659: ProperNounState.NO, # 'Particulonem' for 'particulonem'
+    10829: ProperNounState.NO, # 'Temporis' for 'temporis'
+    11224: ProperNounState.NO, # 'Dolus' for 'dolus'
+    11238: ProperNounState.NO, # 'Veritatem' for 'veritatem'
+    11309: ProperNounState.NO, # 'Dolus' for 'dolus'
+    11345: ProperNounState.NO, # 'Veritas' for 'veritas'
+    11526: ProperNounState.NO, # 'Religio' for 'religio'
+    13903: ProperNounState.NO, # Terraneola is not found in L&S, but it's just from terra + -olus
+    13916: ProperNounState.NO, # terraneolam is not found in L&S, but it's just from terra + -olus
 }
 
 
@@ -198,11 +218,6 @@ def find_enclitic(word_to_analyze: str) -> str | None:
     return _analyze_word_with_clitic(word_to_analyze)[1]
 
 
-def is_proper_noun_lemma(lemma: str) -> bool:
-    """Checks if a lemma from cruncher indicates a proper noun (i.e., is capitalized)."""
-    return bool(lemma) and lemma[0].isupper()
-
-
 def project_display_casing(original: str, macronized: str) -> str:
     """
 
@@ -246,30 +261,26 @@ def strip_macrons(text: str) -> str:
 
 
 @cache
-def determine_proper_noun_state(word_in_text: str, is_sentence_start: bool, prev_word_was_capitalized: bool) -> Tuple[int | None, int | None]:
+def determine_proper_noun_state(word_in_text: str, is_sentence_start: bool, prev_word_was_capitalized: bool) -> Tuple[ProperNounState | None, ProperNounState | None]:
     """
-    Determines both the inherent and context-aware proper noun states for a word.
-    Returns None for non-alphabetic tokens or words that cannot be analyzed at all.
-    - Inherent State: Based only on dictionary lookups (is this word type not clear?).
-    - Context-Aware State: Uses sentence start and capitalization sequences to refine the state for this specific instance.
+    Determines both the inherent (based only on dictionary lookups) and context-aware
+    (using sentence start and capitalization sequences) proper noun states for a word.
 
     It handles consecutive capitalized words as a sequence, aligning with *macronizer* logic.
 
-    Returns: A tuple of (inherent_state, context_aware_state).
-    States: 0 (NO), 1 (YES), 2 (EITHER), or None (UNKNOWN/NA).
+    Returns: A tuple of (inherent_state, context_aware_state) or None for non-alphabetic
+    tokens or words that cannot be analyzed at all
     """
     if not word_in_text or not word_in_text.isalpha():
         return None, None
 
     word_is_capitalized = word_in_text[0].isupper()
 
-    # Step 1-3: Calculate the INHERENT STATE. This logic is PURE and based only on
-    # dictionary lookups of word forms, completely independent of context.
-    # Step 1: Perform dictionary lookups.
+    # Perform dictionary lookups. This part is PURE and based only on
+    # word forms, completely independent of context.
     analyses_lower = find_potential_lemmas(word_in_text.lower())
     analyses_upper = find_potential_lemmas(word_in_text.capitalize())
 
-    # Step 2: Determine if common and proper forms exist.
     # A word has a common form if its lowercase analysis returns anything,
     # OR if its capitalized analysis contains a lowercase lemma.
     # Check analysis for 'hercle' which has lemma Hercules
@@ -278,44 +289,11 @@ def determine_proper_noun_state(word_in_text: str, is_sentence_start: bool, prev
     # A word has a proper form if its capitalized analysis contains a capitalized lemma.
     has_proper_noun_analysis = any(is_proper_noun_lemma(lemma) for lemma in analyses_upper)
 
-    # Step 3: Determine Inherent State (Context-Independent)
-    inherent_state: int | None
-    if has_proper_noun_analysis and has_common_word_analysis:
-        inherent_state = 2  # Inherently doubtful (e.g., "Venere", "Hercle")
-    elif has_proper_noun_analysis:
-        inherent_state = 1  # Inherently proper noun (e.g., "Caesar")
-    elif has_common_word_analysis:
-        inherent_state = 0
-    else:
-        inherent_state = None
-
-    # Step 4: Determine Context-Aware State
-    context_aware_state: int | None
+    inherent_state = compute_inherent_state(has_common_word_analysis, has_proper_noun_analysis)
 
     # Capitalization is "forgivable" if it's at the start of a sentence OR part of a capitalized sequence.
     is_forgivable_context = is_sentence_start or prev_word_was_capitalized
-
-    if word_is_capitalized:
-        if inherent_state == 0: # Common word like "Fabula"
-            # Titles and such are editorial choice; otherwise typo or similar
-            context_aware_state = 0 if is_forgivable_context else None
-        elif inherent_state == 1: # Proper word like "Caesar"
-            context_aware_state = 1
-        elif inherent_state == 2: # Dubious word like "Venere"
-            # Capitalized mid-sentence is a proper noun; at start it's uncertain.
-            context_aware_state = 2 if is_forgivable_context else 1
-        else: # Word is unknown
-            context_aware_state = None
-    else: # word is lowercase
-        if inherent_state == 0: # "fabula"
-            context_aware_state = 0
-        elif inherent_state == 1: # "caesar"
-            # Probably a typo or similar
-            context_aware_state = None
-        elif inherent_state == 2: # "venere"
-            context_aware_state = 0
-        else:
-            context_aware_state = None
+    context_aware_state = compute_context_aware_state(inherent_state, word_is_capitalized, is_forgivable_context)
 
     return inherent_state, context_aware_state
 
@@ -361,7 +339,7 @@ def _process_text_segments(
         is_capitalization_forgivable: bool,
         starts_new_sentence: bool,
         work_contents_data: List,
-        inherent_states_map: Dict[str, int | None],
+        inherent_states_map: Dict[str, ProperNounState | None],
 ) -> Tuple[int, int, int, bool, bool]:
     """
     Two independent context flags are threaded through, on purpose:
@@ -390,9 +368,11 @@ def _process_text_segments(
         t_type = WORK_SPECIFIC_TOKEN_OVERRIDES.get(fragment_index, t_type)
 
         if t_type == TokenType.ABBREVIATION:
-            context_dependent_state = 1
+            context_dependent_state = ProperNounState.YES
         elif t_type == TokenType.NUMERAL:
-            context_dependent_state = 0
+            context_dependent_state = ProperNounState.NO
+
+        context_dependent_state = WORK_SPECIFIC_PROPER_NOUN_OVERRIDES.get(fragment_index, context_dependent_state)
 
         current_word_idx = None
         if t_type <= 3:
@@ -669,7 +649,7 @@ def process_verse(xml_string, output_dir):
     is_next_word_sentence_start = True
     starts_new_sentence = True
 
-    inherent_states: Dict[str, int | None] = {}
+    inherent_states: Dict[str, ProperNounState | None] = {}
 
     for work in root.findall('.//tei:div[@subtype="book"]', namespaces):
         book_node = generate_uuid()
