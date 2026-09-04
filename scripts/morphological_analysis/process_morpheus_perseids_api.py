@@ -1,7 +1,8 @@
 import csv
 import logging
 import os
-from typing import Dict, List, Set, TextIO, Any, Tuple, Callable
+from itertools import product
+from typing import Dict, List, Set, Any, Tuple, Callable
 
 import requests
 from scripts.library.util.casing import apply_contract_casing
@@ -100,10 +101,8 @@ class MorphologicalAnalyzer:
                 with open(self.details_file, "r", encoding="utf-8") as f:
                     reader = csv.DictReader(f)
                     # Normalize to lowercase to match the lowercase keys in unique_words
-                    self.processed_forms = {row["form"].lower() for row in reader}
-                logging.info(
-                    f"Loaded {len(self.processed_forms)} existing processed forms"
-                )
+                    self.processed_forms = {row["form"].casefold() for row in reader if row.get("form")}
+                logging.info(f"Loaded {len(self.processed_forms)} existing processed forms")
             except Exception as e:
                 logging.error(f"Error loading existing forms: {str(e)}")
                 raise
@@ -195,6 +194,12 @@ class MorphologicalAnalyzer:
 
                 pos_dict = dict_info.get("pofs", {}).get("$")
 
+                # Strip a stripped enclitic before using the word for pos-of-speech heuristics
+                if stripped_enclitic and len(word) > len(stripped_enclitic) and word.lower().endswith(stripped_enclitic):
+                    lookup_word = word[:-len(stripped_enclitic)]
+                else:
+                    lookup_word = word
+
                 item_inflections = []
                 computed_pos_seen = []
 
@@ -209,7 +214,7 @@ class MorphologicalAnalyzer:
                     decl = infl.get("decl", {}).get("$")
                     stem_type = infl.get("stemtype", {}).get("$")
                     degree = infl.get("comp", {}).get("$")
-                    computed_pos = part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, gramm_case, degree, word)
+                    computed_pos = part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, gramm_case, degree, lookup_word)
                     computed_pos_seen.append(computed_pos)
                     tense = infl.get("tense", {}).get("$")
                     inflection = {
@@ -219,7 +224,7 @@ class MorphologicalAnalyzer:
                         "partOfSpeech": computed_pos,
                         "stem": MorphologicalAnalyzer.macronize(term.get("stem", {}).get("$")).replace(":", "-").replace("^", ""),
                         "suffix": suffix,
-                        "segmentsInfo": segments_info(computed_pos, verb_form, tense, stem_type, suffix),
+                        "segmentsInfo": segments_info(computed_pos, verb_form, tense, stem_type, suffix, lookup_word),
                         "gender": None if gender == "adverbial" else "neuter" if verb_form == "infinitive" else "masculine/feminine/neuter" if gender is None and decl == "3rd" else gender,
                         "number": "singular" if verb_form == "infinitive" else infl.get("num", {}).get("$"),
                         "declension": declension(computed_pos, decl, suffix, verb_form, tense),
@@ -237,10 +242,37 @@ class MorphologicalAnalyzer:
                     }
 
                     key = f"{word}_{item}_{cnt}"
-                    if key in FORMS:
-                        inflection.update(FORMS[key])
+
                     if key in NOT_WANTED_INFLECTIONS:
                         continue
+
+                    if key in FORMS:
+                        override = FORMS[key]
+
+                        # A list means that this field has multiple possible values.
+                        # Expand the single Morpheus inflection into one inflection per
+                        # combination of list-valued fields.
+                        list_fields = {
+                            field: values
+                            for field, values in override.items()
+                            if isinstance(values, list)
+                        }
+
+                        if list_fields:
+                            scalar_overrides = {
+                                field: value
+                                for field, value in override.items()
+                                if field not in list_fields
+                            }
+
+                            for values in product(*list_fields.values()):
+                                expanded = inflection.copy()
+                                expanded.update(scalar_overrides)
+                                expanded.update(dict(zip(list_fields, values)))
+                                item_inflections.append(expanded)
+                        else:
+                            inflection.update(override)
+                            item_inflections.append(inflection)
                     else:
                         item_inflections.append(inflection)
 
@@ -249,12 +281,7 @@ class MorphologicalAnalyzer:
                 # is not itself proper — headword casing is meaningless outside pos "noun".
                 is_proper = bool(headword) and headword[0].isupper() and "noun" in computed_pos_seen
 
-                if stripped_enclitic and len(word) > len(stripped_enclitic) and word.lower().endswith(stripped_enclitic):
-                    output_word = word[:-len(stripped_enclitic)]
-                else:
-                    output_word = word
-
-                contract_form = apply_contract_casing(output_word, is_proper)
+                contract_form = apply_contract_casing(word, is_proper)
 
                 detail = {"form": contract_form, "item": item, "dictionaryRef": headword}
                 details.append(detail)
@@ -269,25 +296,26 @@ class MorphologicalAnalyzer:
                 continue
 
         # De-duplication and re-indexing
+        # The API sometimes returns the same grammatical inflection twice
+        # with different stem notation. Collapse those (preferring the
+        # hyphenated stem) then repack 'cnt' with no gaps
         if not inflections:
             return details, inflections
 
-        final_inflections = []
-        inflections_by_item = {}
+        final_inflections: List[Dict] = []
+        inflections_by_item: Dict[int, List[Dict]] = {}
+
         # Group all generated inflections by their 'item' number
         for infl in inflections:
-            item_key = infl['item']
-            inflections_by_item.setdefault(item_key, []).append(infl)
+            inflections_by_item.setdefault(infl['item'], []).append(infl)
 
-        sorted_items = sorted(inflections_by_item.keys())
-        for item_key in sorted_items:
+        for item_key in sorted(inflections_by_item.keys()):
             # This list contains all inflections for a given 'item', in their original order
             item_inflections = inflections_by_item[item_key]
-
             # Store unique inflections for this item, preserving the original relative order
             ordered_unique_inflections: List[Dict] = []
             # Map a signature to its index in the ordered_unique_inflections list to find it quickly
-            signature_to_index = {}
+            signature_to_index: Dict[frozenset, int] = {}
 
             for infl in item_inflections:
                 # Create a signature for the inflection, excluding fields that vary for duplicates
@@ -305,11 +333,8 @@ class MorphologicalAnalyzer:
                     # We've seen this signature before. Check if this new version has a better stem.
                     existing_index = signature_to_index[signature]
                     existing_infl = ordered_unique_inflections[existing_index]
-                    assert isinstance(existing_infl, dict)
-
                     current_stem = infl.get('stem', '') or ''
                     existing_stem = existing_infl.get('stem', '') or ''
-
                     # Rule: Prefer the stem with a hyphen.
                     if '-' in current_stem and '-' not in existing_stem:
                         # Replace the old inflection in-place with this new, preferred one.
@@ -324,11 +349,56 @@ class MorphologicalAnalyzer:
 
         return details, final_inflections
 
+    def write_results(self, source_word: str, details: List[Dict], inflections: List[Dict]):
+        """Write one result batch for a source word."""
 
-    def write_results(self, details: List[Dict], inflections: List[Dict]):
-        """Write results to CSV files"""
+        source_key = source_word.casefold()
+
+        detail_keys = [
+            (
+                (detail.get("form") or "").casefold(),
+                detail.get("item"),
+                detail.get("dictionaryRef"),
+            )
+            for detail in details
+        ]
+
+        # Detect duplicate generation before anything reaches the CSV.
+        if len(detail_keys) != len(set(detail_keys)):
+            raise RuntimeError(
+                f"Duplicate details were generated before writing: {detail_keys}"
+            )
+
+        # Re-read the actual file immediately before appending.
+        # Catches stale in-memory state or another writer modifying the file.
+        if os.path.exists(self.details_file):
+            with open(self.details_file, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+
+                if any(
+                        (row.get("form") or "").casefold() == source_key
+                        for row in reader
+                ):
+                    raise RuntimeError(
+                        f"Refusing to append '{source_word}': it is already "
+                        f"present on disk in {os.path.abspath(self.details_file)}"
+                    )
+
+
+        logging.info(
+            "Writing '%s': %d details, %d inflections",
+            source_word,
+            len(details),
+            len(inflections),
+        )
+
         try:
-            details_fieldnames = ["form", "item", "dictionaryRef"]
+            details_fieldnames = [
+                "form",
+                "item",
+                "dictionaryRef",
+            ]
+
             inflections_fieldnames = [
                 "form",
                 "item",
@@ -354,24 +424,32 @@ class MorphologicalAnalyzer:
 
             # Write details
             details_exists = os.path.exists(self.details_file)
+
             with open(self.details_file, "a", newline="", encoding="utf-8") as f:
-                # noinspection PyTypeChecker
-                writer = csv.DictWriter[TextIO](f, fieldnames=details_fieldnames)
+                writer = csv.DictWriter(f, fieldnames=details_fieldnames)
                 if not details_exists:
                     writer.writeheader()
+
                 writer.writerows(details)
 
             # Write inflections
             inflections_exists = os.path.exists(self.inflections_file)
+
             with open(self.inflections_file, "a", newline="", encoding="utf-8") as f:
-                # noinspection PyTypeChecker
                 writer = csv.DictWriter(f, fieldnames=inflections_fieldnames)
+
                 if not inflections_exists:
                     writer.writeheader()
+
                 writer.writerows(inflections)
 
-        except Exception as e:
-            logging.error(f"Error writing results: {str(e)}")
+            self.processed_forms.add(source_key)
+
+        except Exception:
+            logging.exception(
+                "Failed while writing results for '%s'",
+                source_word,
+            )
             raise
 
     def process_words(self):
@@ -388,8 +466,7 @@ class MorphologicalAnalyzer:
             if word in FULL_OVERRIDES: # Some words might not be found or be complete wack, these are overridden
                 logging.info(f"Using full override for '{word}'")
                 details, inflections = FULL_OVERRIDES[word]
-                self.write_results(details, inflections)
-                self.processed_forms.add(word)
+                self.write_results(word, details, inflections)
                 continue  # Already processed, skip to next word
 
             try:
@@ -423,8 +500,7 @@ class MorphologicalAnalyzer:
 
                 # After all attempts, write the result (success, retry-success, or failure)
                 if details:
-                    self.write_results(details, inflections)
-                    self.processed_forms.add(word)
+                    self.write_results(word, details, inflections)
                     if inflections:
                         logging.info(f"Successfully processed word: {word}")
                     else:
@@ -471,8 +547,18 @@ def part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, gramm_case, de
     :return: a normalized part of speech
     """
 
+    def _strip_known_enclitic(raw_form: str) -> str:
+        """If `raw_form` has no enclitic, this either finds no match
+        or strips something harmless for the suffix check and adverb whitelist"""
+        for enclitic in MorphologicalAnalyzer.ENCLITICS:
+            if raw_form.endswith(enclitic) and len(raw_form) > len(enclitic):
+                return raw_form[:-len(enclitic)]
+        return raw_form
+
+    stripped_form = _strip_known_enclitic(form)
+
     # trust pos_infl == 'adverb' only if confirmed manually
-    if pos_infl == "adverb" and form in TRUE_ADVERB_FORMS:
+    if pos_infl == "adverb" and (form in TRUE_ADVERB_FORMS or stripped_form in TRUE_ADVERB_FORMS):
         return "adverb"
 
     # adjective first
@@ -480,6 +566,7 @@ def part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, gramm_case, de
         if gramm_case is None and (gender == "adverbial"
                                    or suffix in ["ē", "ius", "ter", "issimē"]
                                    or form.endswith(("e", "ius", "ter", "issime"))):
+                                   # or stripped_form.endswith(("e", "ius", "ter", "issime"))): might be necessary eventually
             return "adverb"
         else:
             if pos_infl in ["adjective", "numeral", "verb", "verb participle"]:
@@ -661,7 +748,14 @@ def calc_tense(verb_form: str | None, original_t: str | None) -> str | None:
     return new_t
 
 
-def segments_info( computed_pos: str, verb_form: str, verb_tense: str, stemtype_tag: str, suffix: str | None ) -> str | None:
+def segments_info(
+    computed_pos: str,
+    verb_form: str,
+    verb_tense: str,
+    stemtype_tag: str,
+    suffix: str | None,
+    lookup_word: str
+) -> str | None:
 
     def remove_adj_suffix( text:str ) -> str:
         suffixes = ['_adj', '_adj1', '_adj2', '_adj3', '_comp']
@@ -744,6 +838,9 @@ def segments_info( computed_pos: str, verb_form: str, verb_tense: str, stemtype_
             if stemtype_tag in verb_inflections:
                 return verb_inflections[stemtype_tag]
 
+        elif lookup_word == "aliquot":
+            return "indeclinable"
+
         elif computed_pos == "new combination, check":
             return "new combination, check"
 
@@ -754,8 +851,6 @@ class MorphologicalDataValidator:
     """
     Validates the generated morphological inflections CSV against a set of grammatical rules for Classical Latin.
     """
-    # --- Rule Definitions ---
-    ADJECTIVE_EXCEPTIONS = {'satis'}
     ADJECTIVE_ALLOWED_VERB_FORMS = {None, 'gerundive', 'participle'}
     ADJECTIVE_VERB_COMBOS = {
         # (verbForm, tense, voice)
@@ -765,11 +860,10 @@ class MorphologicalDataValidator:
         ('participle', 'present', 'active'),
         ('participle', 'perfect', 'passive'),
     }
-    PRONOUN_EXCEPTIONS = {'aliquot'}
-    UNINFLECTED_POS = {'adverb', 'conjunction', 'interjection', 'preposition'}
 
-    def __init__(self, inflections_file_path: str):
+    def __init__(self, inflections_file_path: str, details_file_path: str):
         self.file_path = inflections_file_path
+        self.details_path = details_file_path
         self.warning_count = 0
 
     @staticmethod
@@ -790,25 +884,42 @@ class MorphologicalDataValidator:
             return
 
         self._validate_casing_pos_gate()
+        self._validate_no_duplicate_details()
+        self._validate_no_duplicate_inflections()
+        self._validate_dictionary_ref_consistency()
 
         with open(self.file_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for i, row in enumerate(reader):
-                line_num = i + 2  # +1 for zero-index, +1 for header
+                line_num = i + 2 # +1 for zero-index, +1 for header
                 pos = row.get('partOfSpeech', '')
+                form = row.get('form', '')
+
+                if self._is_empty(pos):
+                    self._log_warning(line_num, '???', form, "partOfSpeech is null.")
+                    continue
+                if pos == 'new combination, check':
+                    self._log_warning(line_num, pos, form, "partOfSpeech is 'new combination, check'.")
+                    continue
 
                 dispatch: Dict[str, Callable[[Dict[str, str], int], None]] = {
                     'adjective': self._validate_adjective,
+                    'adverb': self._validate_adverb,
+                    'conjunction': self._validate_uninflected_particle,
+                    'interjection': self._validate_uninflected_particle,
+                    'preposition': self._validate_uninflected_particle,
+                    'irregular': self._validate_irregular,
                     'noun': self._validate_noun,
-                    'verb': self._validate_verb,
-                    'pronoun': self._validate_pronoun,
                     'numeral': self._validate_numeral,
+                    'pronoun': self._validate_pronoun,
+                    'verb': self._validate_verb,
                 }
 
-                if pos in dispatch:
-                    dispatch[pos](row, line_num)
-                elif pos in self.UNINFLECTED_POS:
-                    self._validate_uninflected(row, line_num)
+                handler = dispatch.get(pos)
+                if handler:
+                    handler(row, line_num)
+                else:
+                    self._log_warning(line_num, pos, form, f"Unknown partOfSpeech '{pos}'.")
 
         if self.warning_count == 0:
             logging.info("Validation complete. No issues found.")
@@ -817,13 +928,14 @@ class MorphologicalDataValidator:
 
     def _validate_adjective(self, row: Dict[str, str], line_num: int):
         form = row['form']
-        if form in self.ADJECTIVE_EXCEPTIONS:
-            return
+        segm_info = row.get('segmentsInfo', '')
+        is_indeclinable = (not self._is_empty(segm_info) and segm_info == 'indeclinable')
 
         # Required fields
-        for field in ['gender', 'number', 'declension', 'case']:
-            if self._is_empty(row.get(field)):
-                self._log_warning(line_num, 'adjective', form, f"Required field '{field}' is empty.")
+        if not is_indeclinable:
+            for field in ['gender', 'number', 'declension', 'case']:
+                if self._is_empty(row.get(field)):
+                    self._log_warning(line_num, 'adjective', form, f"Required field '{field}' is empty.")
 
         # Forbidden fields
         if not self._is_empty(row.get('person')):
@@ -843,60 +955,81 @@ class MorphologicalDataValidator:
         if combo not in self.ADJECTIVE_VERB_COMBOS:
             self._log_warning(line_num, 'adjective', form, f"Invalid verbForm-tense-voice combination: {combo}.")
 
+    def _validate_adverb(self, row: Dict[str, str], line_num: int):
+        form = row['form']
+
+        # Forbidden fields
+        for field in ['segmentsInfo', 'gender', 'number', 'case', 'verbForm', 'tense', 'voice', 'person']:
+            if not self._is_empty(row.get(field)):
+                self._log_warning(line_num, 'adverb', form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
+
+        declension_val = row.get('declension', '')
+        suffix_val = row.get('suffix', '')
+        if not self._is_empty(declension_val) and self._is_empty(suffix_val):
+            self._log_warning(line_num, 'adverb', form, f"declension is '{declension_val}' but suffix is null (derived adverbs must have a suffix).")
+
+    def _validate_uninflected_particle(self, row: Dict[str, str], line_num: int):
+        pos = row['partOfSpeech']
+        form = row['form']
+
+        # Forbidden fields
+        for field in ['segmentsInfo', 'suffix', 'gender', 'number', 'declension', 'case', 'verbForm', 'tense', 'voice', 'person']:
+            if not self._is_empty(row.get(field)):
+                self._log_warning(line_num, pos, form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
+
+        # Required fields
+        if self._is_empty(row.get('stem')):
+            self._log_warning(line_num, pos, form, "Field 'stem' must not be empty.")
+
+    def _validate_irregular(self, row: Dict[str, str], line_num: int):
+        form = row['form']
+        segm_info = row.get('segmentsInfo', '')
+        if self._is_empty(segm_info) or segm_info != 'indeclinable':
+            self._log_warning(line_num, 'irregular', form, f"segmentsInfo must be 'indeclinable', but is '{segm_info}'.")
+
     def _validate_noun(self, row: Dict[str, str], line_num: int):
         form = row['form']
-        verb_form = row.get('verbForm')
 
-        if verb_form == 'infinitive':
-            if not self._is_empty(row.get('case')):
-                self._log_warning(line_num, 'noun (infinitive)', form, f"Case should be null, but is '{row.get('case')}'.")
-            if not self._is_empty(row.get('declension')):
-                self._log_warning(line_num, 'noun (infinitive)', form, f"Declension should be null, but is '{row.get('declension')}'.")
-            if self._is_empty(row.get('tense')):
-                self._log_warning(line_num, 'noun (infinitive)', form, "Tense must not be empty.")
-            if self._is_empty(row.get('voice')):
-                self._log_warning(line_num, 'noun (infinitive)', form, "Voice must not be empty.")
+        if self._is_empty(row.get('gender')):
+            self._log_warning(line_num, 'noun', form, "Required field 'gender' is empty.")
+        if self._is_empty(row.get('number')):
+            self._log_warning(line_num, 'noun', form, "Required field 'number' is empty.")
+        if not self._is_empty(row.get('person')):
+            self._log_warning(line_num, 'noun', form, f"Field 'person' must be empty, but is '{row.get('person')}'.")
+
+        has_declension = not self._is_empty(row.get('declension'))
+        verb_form = row.get('verbForm') if not self._is_empty(row.get('verbForm')) else None
+        segments_info_val = row.get('segmentsInfo', '')
+        is_indeclinable = (not self._is_empty(segments_info_val) and segments_info_val == 'indeclinable')
+
+        if is_indeclinable:
+            # Indeclinable nouns (e.g. fas, nefas): no declension paradigm, no verbal properties
+            if has_declension:
+                self._log_warning(line_num, 'noun (indeclinable)', form, f"Declension must be empty, but is '{row.get('declension')}'.")
+            for field in ['verbForm', 'tense', 'voice']:
+                if not self._is_empty(row.get(field)):
+                    self._log_warning(line_num, 'noun (indeclinable)', form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
         elif verb_form == 'supine':
-            if row.get('case') not in ['ablative', 'accusative']:
-                self._log_warning(line_num, 'noun (supine)', form, f"Case must be 'ablative' or 'accusative', but is '{row.get('case')}'.")
             if row.get('declension') != '4th':
                 self._log_warning(line_num, 'noun (supine)', form, f"Declension must be '4th', but is '{row.get('declension')}'.")
-            if not self._is_empty(row.get('tense')):
-                self._log_warning(line_num, 'noun (supine)', form, f"Tense must be empty, but is '{row.get('tense')}'.")
-            if not self._is_empty(row.get('voice')):
-                self._log_warning(line_num, 'noun (supine)', form, f"Voice must be empty, but is '{row.get('voice')}'.")
-        else: # Regular noun
-            if self._is_empty(row.get('gender')):
-                self._log_warning(line_num, 'noun', form, "Required field 'gender' is empty.")
-            if self._is_empty(row.get('number')):
-                self._log_warning(line_num, 'noun', form, "Required field 'number' is empty.")
-            if not self._is_empty(row.get('person')):
-                self._log_warning(line_num, 'noun', form, f"Field 'person' must be empty, but is '{row.get('person')}'.")
-
-    def _validate_verb(self, row: Dict[str, str], line_num: int):
-        form = row['form']
-        # Required fields
-        for field in ['number', 'verbForm', 'tense', 'voice', 'person']:
-            if self._is_empty(row.get(field)):
-                self._log_warning(line_num, 'verb', form, f"Required field '{field}' is empty.")
-        # Forbidden fields
-        for field in ['gender', 'declension', 'case']:
-            if not self._is_empty(row.get(field)):
-                self._log_warning(line_num, 'verb', form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
-
-    def _validate_pronoun(self, row: Dict[str, str], line_num: int):
-        form = row['form']
-        if form in self.PRONOUN_EXCEPTIONS:
-            return
-
-        # Required fields
-        for field in ['gender', 'number', 'case']:
-            if self._is_empty(row.get(field)):
-                self._log_warning(line_num, 'pronoun', form, f"Required field '{field}' is empty.")
-        # Forbidden fields
-        for field in ['verbForm', 'tense', 'voice', 'person']:
-            if not self._is_empty(row.get(field)):
-                self._log_warning(line_num, 'pronoun', form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
+            if row.get('case') not in ('accusative', 'ablative'):
+                self._log_warning(line_num, 'noun (supine)', form, f"Case must be 'accusative' or 'ablative', but is '{row.get('case')}'.")
+            for field in ['tense', 'voice']:
+                if not self._is_empty(row.get(field)):
+                    self._log_warning(line_num, 'noun (supine)', form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
+        elif has_declension:
+            if self._is_empty(row.get('case')):
+                self._log_warning(line_num, 'noun', form, "Has declension but 'case' is empty.")
+            for field in ['verbForm', 'tense', 'voice']:
+                if not self._is_empty(row.get(field)):
+                    self._log_warning(line_num, 'noun', form, f"Has declension but '{field}' is '{row.get(field)}' (must be empty).")
+        else:
+            if verb_form != 'infinitive':
+                self._log_warning(line_num, 'noun', form, f"No declension: verbForm must be 'infinitive', but is '{verb_form}'.")
+            if self._is_empty(row.get('tense')):
+                self._log_warning(line_num, 'noun', form, "No declension (infinitive): tense must not be empty.")
+            if self._is_empty(row.get('voice')):
+                self._log_warning(line_num, 'noun', form, "No declension (infinitive): voice must not be empty.")
 
     def _validate_numeral(self, row: Dict[str, str], line_num: int):
         form = row['form']
@@ -905,19 +1038,43 @@ class MorphologicalDataValidator:
             if not self._is_empty(row.get(field)):
                 self._log_warning(line_num, 'numeral', form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
 
-    def _validate_uninflected(self, row: Dict[str, str], line_num: int):
-        pos = row['partOfSpeech']
+    def _validate_pronoun(self, row: Dict[str, str], line_num: int):
         form = row['form']
-        # Forbidden fields
-        for field in ['gender', 'number', 'case', 'verbForm', 'tense', 'voice', 'person']:
+        segm_info = row.get('segmentsInfo', '')
+        is_indeclinable = (not self._is_empty(segm_info) and segm_info == 'indeclinable')
+
+        if is_indeclinable:
+            # Forbidden fields
+            for field in ['gender', 'number', 'case']:
+                if not self._is_empty(row.get(field)):
+                    self._log_warning(line_num, 'pronoun', form, f"segmentsInfo is 'indeclinable' but '{field}' is '{row.get(field)}' (must be empty).")
+        else:
+            # Required fields
+            for field in ['gender', 'number', 'case']:
+                if self._is_empty(row.get(field)):
+                    self._log_warning(line_num, 'pronoun', form, f"Required field '{field}' is empty.")
+
+        # Always forbidden
+        for field in ['verbForm', 'tense', 'voice', 'person']:
             if not self._is_empty(row.get(field)):
-                self._log_warning(line_num, pos, form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
+                self._log_warning(line_num, 'pronoun', form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
+
+    def _validate_verb(self, row: Dict[str, str], line_num: int):
+        form = row['form']
+        # Required fields
+        for field in ['number', 'verbForm', 'tense', 'voice', 'person']:
+            if self._is_empty(row.get(field)):
+                self._log_warning(line_num, 'verb', form, f"Required field '{field}' is empty.")
+
+        # Forbidden fields
+        for field in ['gender', 'declension', 'case']:
+            if not self._is_empty(row.get(field)):
+                self._log_warning(line_num, 'verb', form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
 
     def _validate_casing_pos_gate(self):
         """If one inflection or more have partOfSpeech 'noun', then we are allowed to
         have capitalized 'form' values. Catches cases like 'Hercle' (interjection,
         headword references Hercules but the word itself isn't a proper noun)."""
-
         groups: Dict[Tuple[str, str], List[str | None]] = {}
 
         with open(self.file_path, 'r', encoding='utf-8') as f:
@@ -930,6 +1087,56 @@ class MorphologicalDataValidator:
                 self._log_warning(0, 'casing', form,
                                   f"item {item}: capitalized but no inflection is 'noun' (pos: {pos_list}).")
 
+    def _validate_no_duplicate_details(self):
+        """MorphologicalDetails rows must be unique on (form, item)."""
+        counts: Dict[Tuple[str, str], int] = {}
+        with open(self.details_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                key = (row.get('form', ''), row.get('item', ''))
+                counts[key] = counts.get(key, 0) + 1
+        for (form, item), count in counts.items():
+            if count > 1:
+                self._log_warning(0, 'details-dup', form,
+                                  f"item {item}: appears {count}x in MorphologicalDetails.")
+
+    def _validate_no_duplicate_inflections(self):
+        """MorphologicalDetailInflections rows must be unique on (form, item, cnt)."""
+        counts: Dict[Tuple[str, str, str], int] = {}
+        with open(self.file_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                key = (row.get('form', ''), row.get('item', ''), row.get('cnt', ''))
+                counts[key] = counts.get(key, 0) + 1
+        for (form, item, cnt), count in counts.items():
+            if count > 1:
+                self._log_warning(0, 'inflections-dup', form,
+                                  f"item {item}, cnt {cnt}: appears {count}x in MorphologicalDetailInflections.")
+
+    def _validate_dictionary_ref_consistency(self):
+        """A details row with a dictionaryRef must have at least one inflection row.
+        A details row without one must have none."""
+        ref_by_key: Dict[Tuple[str, str], str | None] = {}
+        with open(self.details_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                ref_by_key[(row.get('form', ''), row.get('item', ''))] = row.get('dictionaryRef')
+
+        infl_keys: Set[Tuple[str, str]] = set()
+        with open(self.file_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                infl_keys.add((row.get('form', ''), row.get('item', '')))
+
+        for (form, item), ref in ref_by_key.items():
+            has_inflections = (form, item) in infl_keys
+            if not self._is_empty(ref) and not has_inflections:
+                self._log_warning(0, 'ref-consistency', form,
+                                  f"item {item}: dictionaryRef='{ref}' but has no inflections.")
+            elif self._is_empty(ref) and has_inflections:
+                self._log_warning(0, 'ref-consistency', form,
+                                  f"item {item}: dictionaryRef is null but has inflections.")
+
 def main():
     try:
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -937,7 +1144,7 @@ def main():
         analyzer.process_words()
         logging.info("Morphological analysis processing complete.")
 
-        validator = MorphologicalDataValidator(analyzer.inflections_file)
+        validator = MorphologicalDataValidator(analyzer.inflections_file, analyzer.details_file)
         validator.validate()
 
     except Exception as e:

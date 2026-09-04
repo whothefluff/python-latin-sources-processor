@@ -22,19 +22,29 @@ FORMS = {
         "partOfSpeech": "noun",
         "gender": "neuter",
         "number": "singular",
-        "case": "nominative/accusative",
+        "case": ["nominative", "accusative"],
     },
     "circumeunti_0_0": {
-        "gender": "masculine/feminine/neuter",
+        "gender": ["masculine", "feminine", "neuter"],
     },
     "eunti_0_0": {
-        "gender": "masculine/feminine/neuter",
+        "gender": ["masculine", "feminine", "neuter"],
     },
     "altiore_1_0": {
-        "gender": "masculine/feminine/neuter",
+        "gender": ["masculine", "feminine", "neuter"],
+        "declension": "3rd",
     },
     "altiore_0_0": {
-        "gender": "masculine/feminine/neuter",
+        "gender": ["masculine", "feminine", "neuter"],
+        "declension": "3rd",
+    },
+    "doctiorem_0_0": {
+        "gender": ["masculine", "feminine"],
+        "declension": "3rd",
+    },
+    "doctiorem_0_1": {
+        "gender": ["masculine", "feminine"],
+        "declension": "3rd",
     },
     "plus_0_0": {
         "gender": "neuter",
@@ -120,7 +130,6 @@ FORMS = {
 
 NOT_WANTED_INFLECTIONS = {
     # keep exclusively to the last index just in case
-    "deflesset_0_1",
 }
 
 # Whitelist (many errors in morpheus with fake adverbs)
@@ -128,6 +137,7 @@ TRUE_ADVERB_FORMS = {
     "brevi",
     "dubium",
     "falso",
+    "insueta",
     "multo",
     "multum",
     "occulto",
