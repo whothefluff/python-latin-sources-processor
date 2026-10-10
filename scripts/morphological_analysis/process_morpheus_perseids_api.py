@@ -5,6 +5,7 @@ from itertools import product
 from typing import Dict, List, Set, Any, Tuple, Callable
 
 import requests
+from scripts.common.macrons import strip_macrons
 from scripts.library.util.casing import apply_contract_casing
 from scripts.morphological_analysis.process_morpheys_perseids_api_aux.overrides import (
     FORMS, NOT_WANTED_INFLECTIONS, FULL_OVERRIDES, ANALYSIS_ALIASES, FORMS_TO_IGNORE, IGNORED_DICT_REFS,
@@ -108,16 +109,19 @@ class MorphologicalAnalyzer:
                 raise
 
     def collect_unique_words(self):
-        """Collect unique words from the input file"""
+        """Collect unique lowercase words and macron-stripped expansions."""
         try:
             with open(self.input_file, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
-                # A single input like "Veneris" can produce outputs for common
-                # words like 'venio' or proper nounds like 'Venus'
-                # Since the script handles both we can flatten it to skip them
-                self.unique_words = {row["word"].lower() for row in reader}
-                # Filter out nulls
-                self.unique_words.discard("")
+                words = set()
+                for row in reader:
+                    word = row.get("word")
+                    if word:
+                        words.add(word.lower())
+                    expansion = row.get("expansion")
+                    if expansion:
+                        words.add(strip_macrons(expansion).lower())
+                self.unique_words = words
             logging.info(f"Collected {len(self.unique_words)} unique words from source")
         except Exception as e:
             logging.error(f"Error collecting unique words: {str(e)}")
