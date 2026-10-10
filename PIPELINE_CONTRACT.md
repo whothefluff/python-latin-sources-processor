@@ -29,6 +29,7 @@ In `work_contents.csv`:
 
 * **Expansion Format:** The `expansion` column is exported display-cased and macronized (e.g., `Mārcus`, not `marcus`).
 * **Mutual Exclusivity:** A single token will *never* have both an `expansion` and an `enclitic`.
+* **Which Enclitics:** Only the endings listed in [`ENCLITICS.md`](ENCLITICS.md) are split off.
 
 ## 4. Token & Sentence Tracking
 
