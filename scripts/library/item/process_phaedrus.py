@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Set, Tuple, TypedDict, TypeGuard
 import pandas as pd
 
 import requests
+from scripts.common.macrons import strip_macrons
 from scripts.library.util.nomina import NOMINA
 from scripts.library.util.proper_noun import (
     is_proper_noun_lemma, compute_inherent_state, compute_context_aware_state, ProperNounState,
@@ -252,12 +253,6 @@ def apply_norm_casing(text: str, proper_noun_state) -> str:
     if proper_noun_state in (1, 2):
         return text[0].upper() + text[1:].lower()
     return text.lower()
-
-
-_MACRON_STRIP = str.maketrans('āēīōūȳĀĒĪŌŪȲ', 'aeiouyAEIOUY')
-
-def strip_macrons(text: str) -> str:
-    return text.translate(_MACRON_STRIP)
 
 
 @cache
