@@ -25,8 +25,8 @@ from scripts.library.util.token_classification import TokenType, get_token_type
 
 # noinspection HttpUrlsUsage
 TEI_NAMESPACE = 'http://www.tei-c.org/ns/1.0'
-# Defines the clitics that are commented out in Morpheus 'checkstring.c' (and make sense)
-COMMENTED_OUT_CLITICS: list[str] = ["que", "ne", "ve", "ue", "dum"]
+# Enclitics split off into the `enclitic` column; deliberately a subset of Morpheus' LatinSuff
+SPLIT_ENCLITICS: list[str] = ["que", "ne", "ve", "ue", "dum"]
 
 KNOWN_ABBREVIATIONS: set[str] = {
     *NOMINA.keys()
@@ -162,7 +162,7 @@ def _analyze_word_with_clitic(word_to_analyze: str) -> Tuple[List[str], str | No
             if surfaces and word_lower not in surfaces:
                 # Morpheus recognized it, but nothing covers the full word:
                 # it stripped an enclitic internally. Figure out which one.
-                for clitic in COMMENTED_OUT_CLITICS:
+                for clitic in SPLIT_ENCLITICS:
                     if word_lower.endswith(clitic) and word_lower[:-len(clitic)] in surfaces:
                         if clitic == "dum" and not _is_valid_dum_stem(response.text):
                             lemmas = []   # reject the bogus stem analysis, fall through
@@ -170,9 +170,10 @@ def _analyze_word_with_clitic(word_to_analyze: str) -> Tuple[List[str], str | No
                         enclitic_found = clitic
                         break
 
-        # 2. Fallback Logic (if primary call returned nothing)
+        # 2. Fallback Logic (if primary call returned nothing).
+        # For Morpheus builds that don't strip enclitics themselves, e.g. with a4d8f61 applied
         if not lemmas:
-            for clitic in COMMENTED_OUT_CLITICS:
+            for clitic in SPLIT_ENCLITICS:
                 # Check if the word ends with one of the special clitics
                 if word_to_analyze.endswith(clitic):
                     stem = word_to_analyze[:-len(clitic)]
