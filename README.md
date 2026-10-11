@@ -36,6 +36,8 @@ morphological analysis.
 - Analyzes unique (case-insensitive) word formations from the aggregated library files
 - Creates entries in CSV files under `output/morphological_analysis/`
 - Never overwrites - only adds new word formations
+- Drops the inflections spelled with v where the form has u, j where it has i, or the reverse, such as volvo's `volv-it`
+  for `voluit`, and drops an analysis left without inflections
 - **Deleting** the output files is necessary if full reprocessing is needed
 - Refuses to run if `morphological_details.csv` has forms that `work_contents.csv` doesn't have anymore (`iam` after the text
   changed it to `jam`). It means the output files were made from an older text: delete them and run again

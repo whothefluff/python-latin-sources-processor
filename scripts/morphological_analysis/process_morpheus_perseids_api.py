@@ -58,6 +58,11 @@ class MorphologicalAnalyzer:
         "que", "ne", "ve", "ue", "vis", "piam", "dem", "dum",
     ], key=len, reverse=True)
 
+    # Endings that an analysis can leave out of the form, such as que in jubetque or cumque in qualecumque
+    OMITTED_TAILS = (*ENCLITICS, "cumque")
+
+    _PLAIN_LETTERS = str.maketrans("", "", "_^:-*")
+
 
     def __init__(self, project_root: str):
         self.project_root = project_root
@@ -164,10 +169,31 @@ class MorphologicalAnalyzer:
             raise e
 
     @staticmethod
-    def process_analysis(word: str, analysis: Dict, stripped_enclitic: str | None = None) -> tuple[List[Dict], List[Dict]]:
-        """Process the analysis JSON and return details and inflections"""
+    def _spelling_of(infl: Dict) -> str:
+        """Returns the inflection's stem and suffix, lowercase and without macrons."""
+        term = infl.get("term", {})
+        spelling = (term.get("stem", {}).get("$") or "") + (term.get("suff", {}).get("$") or "")
+        return spelling.translate(MorphologicalAnalyzer._PLAIN_LETTERS).lower()
+
+    @staticmethod
+    def _spelled_like(form: str, spelling: str) -> bool | None:
+        """Returns False when the spelling has v where the form has u, j where it has i, or the reverse, and True
+        otherwise. When the spelling is shorter, it's compared with the form without an ending in OMITTED_TAILS.
+        Returns None when neither has the spelling's length."""
+        hosts = [form] + [form[:-len(tail)] for tail in MorphologicalAnalyzer.OMITTED_TAILS
+                          if form.endswith(tail) and len(form) > len(tail)]
+        host = next((host for host in hosts if len(host) == len(spelling)), None)
+        return None if host is None else not any({letter, other} in ({"u", "v"}, {"i", "j"})
+                                                 for letter, other in zip(host, spelling))
+
+    @staticmethod
+    def process_analysis(word: str, analysis: Dict, stripped_enclitic: str | None = None,
+                         analyzed_as: str | None = None) -> tuple[List[Dict], List[Dict]]:
+        """Process the analysis JSON and return details and inflections.
+        analyzed_as is the word that Morpheus was asked for, when it isn't word."""
         details = []
         inflections = []
+        spellings_not_compared = set()
 
         # Handle unknown words (no Body object)
         if (
@@ -214,6 +240,17 @@ class MorphologicalAnalyzer:
                 if not isinstance(infl_list, list):
                     infl_list = [infl_list]
 
+                # Inflections spelled with other letters are skipped below, such as volvo's volv-it for voluit.
+                # cnt keeps Morpheus's numbering, because FORMS keys use it
+                spelled_like = {cnt: MorphologicalAnalyzer._spelled_like((analyzed_as or word).lower(),
+                                                                          MorphologicalAnalyzer._spelling_of(infl))
+                                for cnt, infl in enumerate(infl_list)}
+                spellings_not_compared.update(MorphologicalAnalyzer._spelling_of(infl_list[cnt])
+                                              for cnt, kept in spelled_like.items() if kept is None)
+                if infl_list and not any(kept is not False for kept in spelled_like.values()):
+                    logging.info(f"Ignoring '{headword}' for '{word}': every inflection is spelled with other letters")
+                    continue
+
                 pos_dict = dict_info.get("pofs", {}).get("$")
 
                 # Strip a stripped enclitic before using the word for pos-of-speech heuristics
@@ -226,6 +263,9 @@ class MorphologicalAnalyzer:
                 computed_pos_seen = []
 
                 for cnt, infl in enumerate(infl_list):
+                    if spelled_like[cnt] is False:
+                        logging.info(f"Ignoring inflection {cnt} of '{headword}' for '{word}': spelled with other letters")
+                        continue
                     term = infl.get("term", {})
                     gender = infl.get("gend", {}).get("$")
                     pos_infl = infl.get("pofs", {}).get("$")
@@ -316,6 +356,9 @@ class MorphologicalAnalyzer:
             except KeyError as e:
                 logging.error(f"Error processing analysis for word '{word}': {str(e)}")
                 continue
+
+        if spellings_not_compared:
+            logging.warning(f"'{word}' kept analyses whose letters weren't compared, review them: {sorted(spellings_not_compared)}")
 
         # De-duplication and re-indexing
         # The API sometimes returns the same grammatical inflection twice
@@ -498,7 +541,7 @@ class MorphologicalAnalyzer:
                     logging.info(f"'{word}' analyzed as '{word_for_analysis }'")
 
                 analysis = self._query_merged(word_for_analysis)
-                details, inflections = self.process_analysis(word, analysis)
+                details, inflections = self.process_analysis(word, analysis, analyzed_as=word_for_analysis)
 
                 # If the initial analysis found no inflections, try stripping enclitics.
                 if not inflections:
@@ -513,7 +556,8 @@ class MorphologicalAnalyzer:
 
                             retry_analysis = self._query_merged(base_word)
                             # Pass the original `word` to keep it as the `form` in the output.
-                            retry_details, retry_inflections = self.process_analysis(word, retry_analysis, stripped_enclitic=enclitic)
+                            retry_details, retry_inflections = self.process_analysis(word, retry_analysis, stripped_enclitic=enclitic,
+                                                                                     analyzed_as=word_for_analysis)
 
                             if retry_inflections:
                                 details = retry_details
