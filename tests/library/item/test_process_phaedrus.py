@@ -32,13 +32,19 @@ class _Response:
         pass
 
 
+def _morpheus_xml(surfaces):
+    """Returns a Morpheus answer with one inflection per surface. A surface is a stem, or a stem and a suffix as
+    Morpheus writes them, such as ('ob:jurg', 'a_bat')."""
+    terms = ''.join(f'<infl><term><stem>{stem}</stem>{f"<suff>{suffix}</suff>" if suffix else ""}</term></infl>'
+                    for stem, suffix in ((surface, None) if isinstance(surface, str) else surface
+                                         for surface in surfaces))
+    return f'<words><word><entry><dict><hdwd>x</hdwd></dict>{terms}</entry></word></words>' if terms else '<words/>'
+
+
 def _surfaces(monkeypatch, surfaces_by_word):
     """Makes Morpheus answer each word in surfaces_by_word with those surfaces, and any other word with no analysis."""
     def get(url, params, headers, timeout):
-        terms = ''.join(f'<infl><term><stem>{surface}</stem></term></infl>'
-                        for surface in surfaces_by_word.get(params['word'], []))
-        return _Response(f'<words><word><entry><dict><hdwd>x</hdwd></dict>{terms}</entry></word></words>'
-                         if terms else '<words/>')
+        return _Response(_morpheus_xml(surfaces_by_word.get(params['word'], [])))
 
     process_phaedrus._analyze_word_with_clitic.cache_clear()
     monkeypatch.setattr(process_phaedrus.requests, "get", get)
@@ -55,3 +61,24 @@ def test_a_host_that_morpheus_spells_with_j_gets_its_enclitic(monkeypatch):
     _surfaces(monkeypatch, {"iamque": ["jam"]})
 
     assert (process_phaedrus.find_enclitic("Iamque"), process_phaedrus.spelled_with_morpheus_letters("Iamque")) == ("que", "Jamque")
+
+
+@pytest.mark.parametrize("stem, suffix, expected", [("ob:jurg", "a_bat", "objurgabat"), ("vi^r", "*", "vir")])
+def test_surface_forms_leave_out_the_prefix_and_empty_suffix_marks(stem, suffix, expected):
+    assert process_phaedrus._surface_forms(_morpheus_xml([(stem, suffix)])) == {expected}
+
+
+@pytest.mark.parametrize("word, expected", [("obiurgabat", "objurgabat"), ("Obiurgabat", "Objurgabat")])
+def test_a_compound_that_morpheus_spells_with_j_gets_it(monkeypatch, word, expected):
+    _surfaces(monkeypatch, {"obiurgabat": [("ob:jurg", "a_bat")]})
+
+    assert process_phaedrus.spelled_with_morpheus_letters(word) == expected
+
+
+@pytest.mark.parametrize("word, host, expected", [("obiurgatque", ("ob:jurg", "at"), "objurgatque"),
+                                                  ("virque", ("vi^r", "*"), "virque")])
+def test_a_compound_host_or_a_host_without_a_suffix_gets_its_enclitic(monkeypatch, word, host, expected):
+    _surfaces(monkeypatch, {word: [host]})
+
+    assert process_phaedrus.find_enclitic(word) == "que"
+    assert process_phaedrus.spelled_with_morpheus_letters(word) == expected

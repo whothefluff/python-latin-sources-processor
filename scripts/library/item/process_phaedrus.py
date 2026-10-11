@@ -123,14 +123,15 @@ def _is_valid_dum_stem(xml_string: str) -> bool:
 
 
 def _surface_forms(xml_string: str) -> Set[str]:
-    """De-macronized surface forms (stem+suffix) from a Morpheus XML response."""
+    """Returns each inflection's stem and suffix as one spelling, lowercase and without Morpheus's marks: _ and ^ for
+    vowel length, : after a compound's prefix (ob:jurg) and * for an empty suffix (vir)."""
     surfaces = set()
     try:
         root = ET.fromstring(xml_string)
         for term in root.findall('.//term'):
             stem = term.findtext('stem') or ''
             suff = term.findtext('suff') or ''
-            surface = re.sub(r'[_^\-]', '', (stem + suff)).lower()
+            surface = re.sub(r'[_^:*\-]', '', (stem + suff)).lower()
             if surface:
                 surfaces.add(surface)
     except ET.ParseError:
