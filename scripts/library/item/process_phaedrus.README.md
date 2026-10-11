@@ -19,14 +19,16 @@ The script performs the following key functions:
     -   **Unambiguous Macronizations**: Words with stable vowel lengths are stored in a global, reusable CSV. For state-2 words (proper-or-common), both capitalized and lowercase forms are stored only when the macronizer knows both and they agree; when the capitalized form is unknown to the macronizer, only the lowercase form is stored.
     -   **Work-Specific Macronizations**: Words whose macronization is uncertain (nonzero uncertainty mask), unknown, context-dependent (different macrons depending on proper noun status), or morphologically unanalyzable are stored in a work-specific CSV.
     -   Non-word tokens (punctuation, abbreviations, numerals, etc.) are stored in the unambiguous table as-is.
-11. **Generates CSVs**: It outputs a comprehensive set of structured data files ready for aggregation and use in the final application.
-12. **Validates Output**: After generation, it runs a series of internal checks to ensure the result makes sense, including:
+11. **Spells Consonants as `j` and `v`**: Where the edition prints one letter for two sounds, as this edition prints `i` for both `i` and `j`, each word gets the letter that Morpheus's analyses of the word have, so `iam` becomes `jam`. When Morpheus splits off an enclitic, the analyses of the host decide. Letters that the edition tells apart, `u` and `v` here, stay as printed. Words are respelled only when the CSVs are written, because the steps before look words up as the source prints them. `works.csv` records the letters that the edition prints (`PIPELINE_CONTRACT.md`, section 5).
+12. **Generates CSVs**: It outputs a comprehensive set of structured data files ready for aggregation and use in the final application.
+13. **Validates Output**: After generation, it runs a series of internal checks to ensure the result makes sense, including:
     -   Sequential index integrity for contents, subdivisions, and supplementary data.
     -   Subdivision parent-child range containment.
     -   Proper noun state completeness for all alphabetic words.
     -   Macronization coverage (every word instance has a source in exactly one table; no same-case duplicates across tables).
     -   Expansion completeness (every abbreviation/numeral token has a supplied expansion).
     -   Sentence and word index correctness (sequential per scope, `wordIdx` null iff `tokenType` ≥ 4).
+    -   Letters checked against Morpheus. Every word must have Morpheus's letter where the edition prints one letter for two. The check also logs, for review, the words that Morpheus spells with both letters of a pair that the edition tells apart, and the words that keep the edition's letters because no analysis has the same letters.
 
     It may require small manual adjustments.
 ## Prerequisites
@@ -53,7 +55,7 @@ The script generates the following files in `output/library/item/phaedrus/`:
 
 | File | Description |
 |------|-------------|
-| `works.csv` | Work metadata (id, name, about) |
+| `works.csv` | Work metadata (id, name, about) and the edition's letters (`uvLowercase`, `uvCapitals`, `ijLowercase`, `ijCapitals`) |
 | `authors.csv` | Author metadata (id, name, about, image) |
 | `work_contents.csv` | Tokenized text with columns: `workId`, `idx`, `word`, `sourceReference`, `properNounState`, `tokenType`, `sentenceIdx`, `wordIdx`, `enclitic`, `expansion` |
 | `work_content_subdivisions.csv` | Hierarchical structure (books, poems, verses, titles, etc.) |

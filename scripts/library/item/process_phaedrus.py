@@ -10,7 +10,7 @@ import uuid
 # noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
 from functools import cache
-from typing import Dict, List, Optional, Set, Tuple, TypedDict, TypeGuard
+from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple, TypedDict, TypeGuard
 
 import pandas as pd
 
@@ -20,6 +20,9 @@ from scripts.library.util.nomina import NOMINA
 from scripts.library.util.proper_noun import (
     is_proper_noun_lemma, compute_inherent_state, compute_context_aware_state, ProperNounState,
 )
+from scripts.library.util.spelling import (
+    LetterConvention, differs_in_told_apart_letters, respell, respell_macronized, spellings_of, token_spellings_of,
+)
 from scripts.library.util.text_normalization import normalize_digraphs
 from scripts.library.util.token_classification import TokenType, get_token_type
 
@@ -27,6 +30,8 @@ from scripts.library.util.token_classification import TokenType, get_token_type
 TEI_NAMESPACE = 'http://www.tei-c.org/ns/1.0'
 # Enclitics split off into the `enclitic` column; deliberately a subset of Morpheus' LatinSuff
 SPLIT_ENCLITICS: list[str] = ["que", "ne", "ve", "ue", "dum"]
+
+LETTER_CONVENTION = LetterConvention(uv_lowercase="uv", uv_capitals="UV", ij_lowercase="i", ij_capitals="I")
 
 KNOWN_ABBREVIATIONS: set[str] = {
     *NOMINA.keys()
@@ -133,16 +138,26 @@ def _surface_forms(xml_string: str) -> Set[str]:
     return surfaces
 
 
+class MorpheusAnswer(NamedTuple):
+    lemmas: List[str]
+    enclitic: str | None
+    #: The analyzed forms, lowercase and without macrons. They leave out the enclitic when Morpheus splits one off.
+    surfaces: FrozenSet[str]
+
+
+def _any_surface_spells(word: str, surfaces: Set[str]) -> bool:
+    return bool(spellings_of(word, surfaces, LETTER_CONVENTION))
+
+
 @cache
-def _analyze_word_with_clitic(word_to_analyze: str) -> Tuple[List[str], str | None]:
+def _analyze_word_with_clitic(word_to_analyze: str) -> MorpheusAnswer:
     """
     Calls the local morpheus/cruncher endpoint. If the primary analysis is empty,
     attempts to strip a known enclitic and re-query with the stem.
-    Returns (lemmas, enclitic_used) — enclitic_used is set only when the lemmas
-    actually came from the stem-fallback path, not from a direct hit.
+    The enclitic is set only when the lemmas came from the host.
     """
     if not word_to_analyze or not word_to_analyze.isalpha():
-        return [], None
+        return MorpheusAnswer([], None, frozenset())
 
     url = "http://localhost:1500/analysis/word"
     headers = {"Accept": "application/xml"}
@@ -155,15 +170,16 @@ def _analyze_word_with_clitic(word_to_analyze: str) -> Tuple[List[str], str | No
         # inside _analyze_word_with_clitic, after the primary call:
         lemmas = _extract_lemmas_from_morpheus_xml(response.text)
         enclitic_found: Optional[str] = None
+        surfaces: Set[str] = set()
 
         if lemmas:
             surfaces = _surface_forms(response.text)
             word_lower = word_to_analyze.lower()
-            if surfaces and word_lower not in surfaces:
+            if surfaces and not _any_surface_spells(word_lower, surfaces):
                 # Morpheus recognized it, but nothing covers the full word:
                 # it stripped an enclitic internally. Figure out which one.
                 for clitic in SPLIT_ENCLITICS:
-                    if word_lower.endswith(clitic) and word_lower[:-len(clitic)] in surfaces:
+                    if word_lower.endswith(clitic) and _any_surface_spells(word_lower[:-len(clitic)], surfaces):
                         if clitic == "dum" and not _is_valid_dum_stem(response.text):
                             lemmas = []   # reject the bogus stem analysis, fall through
                             break  # fall through to the manual-stripping fallback (re-queries with stem alone)
@@ -199,20 +215,21 @@ def _analyze_word_with_clitic(word_to_analyze: str) -> Tuple[List[str], str | No
                         if lemmas:
                             logging.warning("'%s'-'%s' found", stem, clitic)
                             enclitic_found = clitic
+                            surfaces = _surface_forms(stem_xml)
 
                     # Once we've found a matching clitic and tried again, stop the loop.
                     break
 
-        return lemmas, enclitic_found
+        return MorpheusAnswer(lemmas, enclitic_found, frozenset(surfaces) if lemmas else frozenset())
 
     except requests.exceptions.RequestException:
         logging.exception("Error calling morpheus API for word '%s'", word_to_analyze)
-        return [], None
+        return MorpheusAnswer([], None, frozenset())
 
 
 def find_potential_lemmas(word_to_analyze: str) -> List[str]:
     """Same public signature as before — just delegates to the cached core."""
-    return _analyze_word_with_clitic(word_to_analyze)[0]
+    return _analyze_word_with_clitic(word_to_analyze).lemmas
 
 
 def find_enclitic(word_to_analyze: str) -> str | None:
@@ -220,7 +237,27 @@ def find_enclitic(word_to_analyze: str) -> str | None:
     only when that finds no enclitic. Morpheus is queried with strictCase, so a capitalized word gets no analysis when
     all its forms are lowercase."""
     lower = word_to_analyze.lower()
-    return _analyze_word_with_clitic(lower)[1] or _analyze_word_with_clitic(lower.capitalize())[1]
+    return _analyze_word_with_clitic(lower).enclitic or _analyze_word_with_clitic(lower.capitalize()).enclitic
+
+
+def morpheus_surfaces(word: str) -> FrozenSet[str]:
+    """Returns Morpheus's spellings of the word (stem and suffix, lowercase, without macrons)"""
+    lower = word.lower()
+    return _analyze_word_with_clitic(lower).surfaces | _analyze_word_with_clitic(lower.capitalize()).surfaces
+
+
+def spelled_with_morpheus_letters(word: str) -> str:
+    return respell(word, find_enclitic(word), morpheus_surfaces(word), LETTER_CONVENTION)
+
+
+def _title_spelled_like_its_tokens(title: str, tokens: List[list]) -> str:
+    spellings: Dict[str, str] = {token[2]: spelled_with_morpheus_letters(token[2])
+                                 for token in tokens if token[5] == TokenType.WORD}
+
+    def spelled_like_its_token(word: re.Match[str]) -> str:
+        return spellings.get(word[0], word[0])
+
+    return re.sub(r'\w+', spelled_like_its_token, title)
 
 
 def project_display_casing(original: str, macronized: str) -> str:
@@ -809,7 +846,15 @@ def process_verse(xml_string, output_dir):
         work_content_subdivisions_data.append(
             [work_id, book_node, 'BOOK', book_seq, book_name, None, book_from_index, book_to_index])
 
-    works_df = pd.DataFrame(works_data, columns=['id', 'name', 'about'])
+    # Titles repeat their tokens' text
+    tokens_by_idx = {token[1]: token for token in work_contents_data}
+    for subdivision in work_content_subdivisions_data:
+        if subdivision[2] == 'TITL':
+            title_tokens = [tokens_by_idx[idx] for idx in range(subdivision[6], subdivision[7] + 1) if idx in tokens_by_idx]
+            subdivision[4] = _title_spelled_like_its_tokens(subdivision[4], title_tokens)
+
+    works_df = pd.DataFrame(works_data, columns=['id', 'name', 'about', 'uvLowercase', 'uvCapitals', 'ijLowercase',
+                                                 'ijCapitals'])
     work_contents_df = pd.DataFrame(work_contents_data,
                                     columns=['workId', 'idx', 'word', 'sourceReference', 'properNounState', 'tokenType',
                                              'sentenceIdx', 'wordIdx', 'enclitic', 'expansion']).astype(
@@ -871,6 +916,9 @@ def process_verse(xml_string, output_dir):
                 else:
                     # 4b. Decision logic: store in work-specific or global table
                     lower_word = original_word.lower()
+
+                    respelled_word = spelled_with_morpheus_letters(original_word)
+                    respelled_macronized = respell_macronized(original_word, respelled_word, combined_macronized)
                     #context_state = original_row['properNounState']
                     is_macron_uncertain_by_pn_state = (
                             lower_word in uncertain_depending_on_proper_noun_state
@@ -879,33 +927,38 @@ def process_verse(xml_string, output_dir):
                     is_macron_uncertain_always = combined_mask != 0
 
                     if is_macron_uncertain_always:
-                        work_macronizations_data.append([work_id, content_idx, combined_macronized, combined_mask])
+                        work_macronizations_data.append([work_id, content_idx, respelled_macronized , combined_mask])
                     elif is_macron_uncertain_by_pn_state:
                         logging.warning("'%s' at '%s' has different macrons depending on whether it's a proper noun or not", original_word, content_idx)
-                        work_macronizations_data.append([work_id, content_idx, combined_macronized, combined_mask])
+                        work_macronizations_data.append([work_id, content_idx, respelled_macronized , combined_mask])
                     else:
                         # The macrons are stable. It's safe for the global unambiguous table.
                         # Get the inherent state to decide HOW to save it
                         inherent_state = inherent_states.get(lower_word) # default to None
 
                         if inherent_state == 0: # Common noun -> lowercase
-                            unambiguous_macronizations_dict[original_word.lower()] = combined_macronized.lower()
+                            unambiguous_macronizations_dict[respelled_word.lower()] = respelled_macronized .lower()
                         elif inherent_state == 1: # Proper noun -> capitalized
-                            unambiguous_macronizations_dict[original_word.capitalize()] = combined_macronized.capitalize()
+                            unambiguous_macronizations_dict[respelled_word.capitalize()] = respelled_macronized .capitalize()
                         elif inherent_state == 2:
                             if lower_word in uncertain_depending_on_proper_noun_state or lower_word in cap_form_unknown:
                                 # Only lowercase is globally safe — capitalized instances
                                 # are always routed to WorkMacronizations above.
-                                unambiguous_macronizations_dict[original_word.lower()] = combined_macronized.lower()
+                                unambiguous_macronizations_dict[respelled_word.lower()] = respelled_macronized .lower()
                             else:
                                 # Both known, same macrons → store both
-                                unambiguous_macronizations_dict[original_word.lower()] = combined_macronized.lower()
-                                unambiguous_macronizations_dict[original_word.capitalize()] = combined_macronized.capitalize()
+                                unambiguous_macronizations_dict[respelled_word.lower()] = respelled_macronized .lower()
+                                unambiguous_macronizations_dict[respelled_word.capitalize()] = respelled_macronized .capitalize()
                         else: # None: don't store as unambiguous as it is technically an unknown word
                             logging.warning("'%s' is morphologically un-analyzable but has a certain macronization. Storing as-is.", original_word)
-                            work_macronizations_data.append([work_id, content_idx, combined_macronized, combined_mask])
+                            work_macronizations_data.append([work_id, content_idx, respelled_macronized , combined_mask])
 
                 df_cursor += 1
+
+    # Respelled only now, because the loop above matches each word with a macronizer token
+    # spelled as the source prints it
+    is_word = work_contents_df['tokenType'] == int(TokenType.WORD)
+    work_contents_df.loc[is_word, 'word'] = work_contents_df.loc[is_word, 'word'].map(spelled_with_morpheus_letters)
 
     # Convert dictionary to list for DataFrame creation
     unambiguous_macronizations_data = list(unambiguous_macronizations_dict.items())
@@ -935,7 +988,7 @@ def get_work_data(work_id, work_name):
     about_file = asset_path('about_phi0975_phi001.txt')
     with open(about_file, 'r', encoding='utf-8') as about:
         about_text = about.read()
-    work_data = [work_id, work_name, about_text]
+    work_data = [work_id, work_name, about_text, *LETTER_CONVENTION]
     return work_data
 
 
@@ -979,6 +1032,7 @@ def validate_csv_files(xml_string, output_dir):
     check_macronization_coverage(errors, work_contents_df, work_macronizations_df, unambiguous_macronizations_df)
     check_expansion_completeness(errors, work_contents_df)
     check_sentence_and_word_idx(errors, work_contents_df)
+    check_letters_against_morpheus(errors, work_contents_df)
 
     if errors:
         logging.error("Validation errors found:")
@@ -1319,6 +1373,38 @@ def check_expansion_completeness(errors, work_contents_df):
             f"Found {len(missing)} abbreviation/numeral tokens missing an 'expansion'. "
             f"Add entries to WORK_SPECIFIC_EXPANSIONS for: {', '.join(examples)}"
         )
+
+
+def check_letters_against_morpheus(errors, work_contents_df):
+    """Checks that every word has Morpheus's letter where the edition prints one letter for two.
+    Logs for review the words that Morpheus also spells with the other letter of a pair that the edition tells apart,
+    and the words that no analysis spells with the same letters.
+    A word with a letter that the source didn't print, such as jam, is a new query to Morpheus."""
+    words = work_contents_df[work_contents_df['tokenType'] == int(TokenType.WORD)]
+    not_respelled, told_apart, unresolved = [], [], []
+    for _, row in words.iterrows():
+        word = row['word']
+        enclitic: str | None = row['enclitic'] if isinstance(row['enclitic'], str) else None
+        surfaces = morpheus_surfaces(word)
+        spellings = token_spellings_of(word, enclitic, surfaces, LETTER_CONVENTION)
+        if len(spellings) == 1 and word not in spellings:
+            not_respelled.append(f"'{word}' (idx {row['idx']}) as '{next(iter(spellings))}'")
+        elif len(spellings) != 1:
+            unresolved.append(f"'{word}' (idx {row['idx']})" + (f" as {sorted(spellings)}" if spellings else ""))
+        hosts = [word] if enclitic is None else [word, word[:-len(enclitic)]]
+        if any(differs_in_told_apart_letters(host, surface, LETTER_CONVENTION) for host in hosts for surface in surfaces):
+            told_apart.append(f"'{word}' (idx {row['idx']})")
+
+    if not_respelled:
+        errors.append(f"Found {len(not_respelled)} words that Morpheus spells with other letters where the edition "
+                      f"prints one for two. Examples: {', '.join(not_respelled[:50])}")
+    if told_apart:
+        logging.warning("Found %s words that Morpheus also spells with the other letter of a pair the edition tells "
+                        "apart, as expected where the edition printed that letter: %s", len(told_apart), ', '.join(told_apart))
+    if unresolved:
+        logging.warning("Found %s words that keep the edition's letters because no analysis spells them with their "
+                        "other letters, or analyses spell them in more than one way: %s",
+                        len(unresolved), ', '.join(unresolved))
 
 
 def check_sentence_and_word_idx(errors, work_contents_df):

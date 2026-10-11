@@ -63,3 +63,17 @@ Valid Roman numerals often collide with valid Latin words (e.g., 'I', 'VI', 'DI'
 classifying these as Words (`tokenType = 1`) if the morphological analyzer finds a lemma. **If this default is
 contextually wrong for a specific text, the work-specific processor MUST explicitly overwrite the `tokenType`
 and `properNounState`.**
+
+## 5. Letters i/j and u/v
+
+Word tokens in `work_contents.csv`, their macronizations and the `TITL` names in `work_content_subdivisions.csv`
+write consonants as `j` and `v` and vowels as `i` and `u`, as Morpheus spells them, so they compare directly with the
+morphology forms:
+
+* **Edition First:** Where the edition tells the two letters apart (u and v in the bundled Phaedrus), its letter stays.
+* **Morpheus Fills In:** Where it prints one letter for both (i), Morpheus's spelling of the word decides. A word that
+  no analysis spells with its other letters, or that analyses spell in more than one way, keeps the edition's letter.
+* **Edition Letters:** `works.csv` records what the edition printed, so the reader can show it: `uvLowercase` (`uv`,
+  `u` or `v`), `uvCapitals` (`UV`, `U` or `V`), `ijLowercase` (`ij`, `i` or `j`) and `ijCapitals` (`IJ`, `I` or
+  `J`). Two letters mean the edition tells them apart; one letter stands for both.
+* **Hand-Written Data:** Expansions and override analyses are written the same way by hand.

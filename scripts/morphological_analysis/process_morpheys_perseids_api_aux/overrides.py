@@ -128,12 +128,12 @@ FORMS = {
         "partOfSpeech": "adjective",
         "segmentsInfo": "ior, -ius",
     },
-    "iactantiorem_0_0": {
+    "jactantiorem_0_0": {
         "declension": "3rd",
         "partOfSpeech": "adjective",
         "segmentsInfo": "ior, -ius",
     },
-    "iactantiorem_0_1": {
+    "jactantiorem_0_1": {
         "declension": "3rd",
         "partOfSpeech": "adjective",
         "segmentsInfo": "ior, -ius",
