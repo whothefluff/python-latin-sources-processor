@@ -216,8 +216,11 @@ def find_potential_lemmas(word_to_analyze: str) -> List[str]:
 
 
 def find_enclitic(word_to_analyze: str) -> str | None:
-    """The clitic detected for this exact word form, if any."""
-    return _analyze_word_with_clitic(word_to_analyze)[1]
+    """Returns the enclitic that Morpheus splits off the word, looking the word up in lowercase first and capitalized
+    only when that finds no enclitic. Morpheus is queried with strictCase, so a capitalized word gets no analysis when
+    all its forms are lowercase."""
+    lower = word_to_analyze.lower()
+    return _analyze_word_with_clitic(lower)[1] or _analyze_word_with_clitic(lower.capitalize())[1]
 
 
 def project_display_casing(original: str, macronized: str) -> str:
