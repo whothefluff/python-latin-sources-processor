@@ -927,31 +927,31 @@ def process_verse(xml_string, output_dir):
                     is_macron_uncertain_always = combined_mask != 0
 
                     if is_macron_uncertain_always:
-                        work_macronizations_data.append([work_id, content_idx, respelled_macronized , combined_mask])
+                        work_macronizations_data.append([work_id, content_idx, respelled_macronized, combined_mask])
                     elif is_macron_uncertain_by_pn_state:
                         logging.warning("'%s' at '%s' has different macrons depending on whether it's a proper noun or not", original_word, content_idx)
-                        work_macronizations_data.append([work_id, content_idx, respelled_macronized , combined_mask])
+                        work_macronizations_data.append([work_id, content_idx, respelled_macronized, combined_mask])
                     else:
                         # The macrons are stable. It's safe for the global unambiguous table.
                         # Get the inherent state to decide HOW to save it
                         inherent_state = inherent_states.get(lower_word) # default to None
 
                         if inherent_state == 0: # Common noun -> lowercase
-                            unambiguous_macronizations_dict[respelled_word.lower()] = respelled_macronized .lower()
+                            unambiguous_macronizations_dict[respelled_word.lower()] = respelled_macronized.lower()
                         elif inherent_state == 1: # Proper noun -> capitalized
-                            unambiguous_macronizations_dict[respelled_word.capitalize()] = respelled_macronized .capitalize()
+                            unambiguous_macronizations_dict[respelled_word.capitalize()] = respelled_macronized.capitalize()
                         elif inherent_state == 2:
                             if lower_word in uncertain_depending_on_proper_noun_state or lower_word in cap_form_unknown:
                                 # Only lowercase is globally safe — capitalized instances
                                 # are always routed to WorkMacronizations above.
-                                unambiguous_macronizations_dict[respelled_word.lower()] = respelled_macronized .lower()
+                                unambiguous_macronizations_dict[respelled_word.lower()] = respelled_macronized.lower()
                             else:
                                 # Both known, same macrons → store both
-                                unambiguous_macronizations_dict[respelled_word.lower()] = respelled_macronized .lower()
-                                unambiguous_macronizations_dict[respelled_word.capitalize()] = respelled_macronized .capitalize()
+                                unambiguous_macronizations_dict[respelled_word.lower()] = respelled_macronized.lower()
+                                unambiguous_macronizations_dict[respelled_word.capitalize()] = respelled_macronized.capitalize()
                         else: # None: don't store as unambiguous as it is technically an unknown word
                             logging.warning("'%s' is morphologically un-analyzable but has a certain macronization. Storing as-is.", original_word)
-                            work_macronizations_data.append([work_id, content_idx, respelled_macronized , combined_mask])
+                            work_macronizations_data.append([work_id, content_idx, respelled_macronized, combined_mask])
 
                 df_cursor += 1
 

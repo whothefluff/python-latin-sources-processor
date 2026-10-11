@@ -26,7 +26,7 @@ def _stands_for(letter: str, convention: LetterConvention) -> str:
 
 
 def _respelled_as(word: str, surface: str, convention: LetterConvention) -> str | None:
-    """Returns the word with the surface's letters where the edition prints one letter for two,, in the word's case.
+    """Returns the word with the surface's letters where the edition prints one letter for two, in the word's case.
     Returns None when the surface has a different letter anywhere else"""
     if len(word) != len(surface):
         return None

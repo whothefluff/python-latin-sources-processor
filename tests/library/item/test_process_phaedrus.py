@@ -55,5 +55,3 @@ def test_a_host_that_morpheus_spells_with_j_gets_its_enclitic(monkeypatch):
     _surfaces(monkeypatch, {"iamque": ["jam"]})
 
     assert (process_phaedrus.find_enclitic("Iamque"), process_phaedrus.spelled_with_morpheus_letters("Iamque")) == ("que", "Jamque")
-
-    assert process_phaedrus.spelled_with_morpheus_letters("Iamque") == "Jamque"
