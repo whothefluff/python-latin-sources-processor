@@ -84,6 +84,17 @@ class MorphologicalAnalyzer:
         self.load_existing_forms()
         # Collect unique words from source
         self.collect_unique_words()
+        self.check_outputs_match_source()
+
+    def check_outputs_match_source(self):
+        """Raise if morphological_details.csv has forms that work_contents.csv doesn't have anymore.
+        Since this script only adds missing forms, the old analyses would stay."""
+        stale_forms = sorted(self.processed_forms - self.unique_words)
+        if stale_forms:
+            raise ValueError(
+                f"morphological_details.csv has {len(stale_forms)} forms that work_contents.csv doesn't have "
+                f"anymore, such as {stale_forms[:10]}. Delete the CSVs in {self.output_dir} and run again"
+            )
 
     @staticmethod
     def macronize(text: str) -> str:

@@ -37,6 +37,8 @@ morphological analysis.
 - Creates entries in CSV files under `output/morphological_analysis/`
 - Never overwrites - only adds new word formations
 - **Deleting** the output files is necessary if full reprocessing is needed
+- Refuses to run if `morphological_details.csv` has forms that `work_contents.csv` doesn't have anymore (`iam` after the text
+  changed it to `jam`). It means the output files were made from an older text: delete them and run again
 
 Theoretically you can create multiple scripts that use different services for morphological analysis,
 but only one version will be used with the current db schema
