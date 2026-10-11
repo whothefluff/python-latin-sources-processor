@@ -1,6 +1,7 @@
 import pytest
 
 from scripts.library.item import process_phaedrus
+from scripts.library.util.proper_noun import ProperNounState
 
 
 def _answers(monkeypatch, enclitics):
@@ -82,3 +83,27 @@ def test_a_compound_host_or_a_host_without_a_suffix_gets_its_enclitic(monkeypatc
 
     assert process_phaedrus.find_enclitic(word) == "que"
     assert process_phaedrus.spelled_with_morpheus_letters(word) == expected
+
+
+def _morpheus(monkeypatch, answers):
+    """Makes Morpheus give each word in answers that answer, and any other word no analysis."""
+    monkeypatch.setattr(process_phaedrus, "_analyze_word_with_clitic",
+                        lambda word: answers.get(word, process_phaedrus.MorpheusAnswer([], None, frozenset())))
+
+
+_IOVE = {"iove": process_phaedrus.MorpheusAnswer(["io"], "ve", frozenset({"io"})),
+         "Iove": process_phaedrus.MorpheusAnswer(["Juppiter"], None, frozenset({"jove"}))}
+
+
+def test_a_word_that_morpheus_knows_whole_in_one_case_has_no_enclitic(monkeypatch):
+    _morpheus(monkeypatch, _IOVE)
+
+    assert process_phaedrus.find_enclitic("Iove") is None
+    assert process_phaedrus.spelled_with_morpheus_letters("Iove") == "Jove"
+
+
+def test_a_word_that_morpheus_knows_whole_only_as_a_name_is_a_name(monkeypatch):
+    _morpheus(monkeypatch, _IOVE)
+
+    assert process_phaedrus.determine_proper_noun_state("Iove", True, False) == (ProperNounState.YES,
+                                                                                ProperNounState.YES)

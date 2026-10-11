@@ -228,23 +228,34 @@ def _analyze_word_with_clitic(word_to_analyze: str) -> MorpheusAnswer:
         return MorpheusAnswer([], None, frozenset())
 
 
-def find_potential_lemmas(word_to_analyze: str) -> List[str]:
-    """Same public signature as before — just delegates to the cached core."""
-    return _analyze_word_with_clitic(word_to_analyze).lemmas
+_NO_ANSWER = MorpheusAnswer([], None, frozenset())
+
+
+def _answers_in_both_cases(word: str) -> Tuple[MorpheusAnswer, MorpheusAnswer]:
+    """Returns Morpheus's answers for the word in lowercase and capitalized. Morpheus is queried with strictCase, so a
+    capitalized word gets no analysis when all its forms are lowercase, and the other way round.
+    When one answer analyzes the whole word, an answer that only analyzes it without an enclitic is dropped: Iove is
+    Juppiter, not io and ve."""
+    lower = word.lower()
+    lowercase, capitalized = _analyze_word_with_clitic(lower), _analyze_word_with_clitic(lower.capitalize())
+    if any(answer.lemmas and answer.enclitic is None for answer in (lowercase, capitalized)):
+        if lowercase.enclitic is not None:
+            lowercase = _NO_ANSWER
+        if capitalized.enclitic is not None:
+            capitalized = _NO_ANSWER
+    return lowercase, capitalized
 
 
 def find_enclitic(word_to_analyze: str) -> str | None:
-    """Returns the enclitic that Morpheus splits off the word, looking the word up in lowercase first and capitalized
-    only when that finds no enclitic. Morpheus is queried with strictCase, so a capitalized word gets no analysis when
-    all its forms are lowercase."""
-    lower = word_to_analyze.lower()
-    return _analyze_word_with_clitic(lower).enclitic or _analyze_word_with_clitic(lower.capitalize()).enclitic
+    """Returns the enclitic that Morpheus splits off the word, from the lowercase answer first"""
+    lowercase, capitalized = _answers_in_both_cases(word_to_analyze)
+    return lowercase.enclitic or capitalized.enclitic
 
 
 def morpheus_surfaces(word: str) -> FrozenSet[str]:
     """Returns Morpheus's spellings of the word (stem and suffix, lowercase, without macrons)"""
-    lower = word.lower()
-    return _analyze_word_with_clitic(lower).surfaces | _analyze_word_with_clitic(lower.capitalize()).surfaces
+    lowercase, capitalized = _answers_in_both_cases(word)
+    return lowercase.surfaces | capitalized.surfaces
 
 
 def spelled_with_morpheus_letters(word: str) -> str:
@@ -315,8 +326,9 @@ def determine_proper_noun_state(word_in_text: str, is_sentence_start: bool, prev
 
     # Perform dictionary lookups. This part is PURE and based only on
     # word forms, completely independent of context.
-    analyses_lower = find_potential_lemmas(word_in_text.lower())
-    analyses_upper = find_potential_lemmas(word_in_text.capitalize())
+    lowercase, capitalized = _answers_in_both_cases(word_in_text)
+    analyses_lower = lowercase.lemmas
+    analyses_upper = capitalized.lemmas
 
     # A word has a common form if its lowercase analysis returns anything,
     # OR if its capitalized analysis contains a lowercase lemma.
