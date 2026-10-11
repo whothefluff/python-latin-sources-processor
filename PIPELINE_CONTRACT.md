@@ -23,6 +23,9 @@ will *never* export separate duplicate rows for surface casing variations (e.g.,
 reader handles surface-casing searches dynamically, so duplicate morph entries provide no benefit and violate the data
 model.
 
+**Detached Enclitics:** An enclitic split off in `work_contents.csv` has its analyses under its own `form`, with a
+hyphen in front: the *ne* of *tune* is `-ne`, apart from the word `ne`.
+
 ## 3. Expansions and Enclitics
 
 In `work_contents.csv`:

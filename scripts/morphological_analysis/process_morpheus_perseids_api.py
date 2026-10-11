@@ -109,7 +109,8 @@ class MorphologicalAnalyzer:
                 raise
 
     def collect_unique_words(self):
-        """Collect unique lowercase words and macron-stripped expansions."""
+        """Collect unique lowercase words, macron-stripped expansions and detached enclitics.
+        A detached enclitic gets a hyphen in front: the *ne* of *tune* is '-ne', apart from the word 'ne'."""
         try:
             with open(self.input_file, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
@@ -121,6 +122,12 @@ class MorphologicalAnalyzer:
                     expansion = row.get("expansion")
                     if expansion:
                         words.add(strip_macrons(expansion).lower())
+                    enclitic = row.get("enclitic")
+                    if enclitic:
+                        enclitic_form = f"-{enclitic.lower()}"
+                        if enclitic_form not in FULL_OVERRIDES:
+                            raise ValueError(f"FULL_OVERRIDES has no analysis for the detached enclitic '{enclitic_form}'")
+                        words.add(enclitic_form)
                 self.unique_words = words
             logging.info(f"Collected {len(self.unique_words)} unique words from source")
         except Exception as e:
