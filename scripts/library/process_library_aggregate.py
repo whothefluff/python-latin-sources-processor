@@ -58,6 +58,26 @@ def find_valid_work_dirs(base_dir):
     return valid_work_dirs
 
 
+def works_of(works_df, authors_df, authors_and_works_df):
+    """Return each work as (its author names, its name).
+    ID not used because it changes on every run."""
+    author_names = dict(zip(authors_df['id'], authors_df['name']))
+    authors_by_work = {}
+    for author_id, work_id in zip(authors_and_works_df['authorId'], authors_and_works_df['workId']):
+        authors_by_work.setdefault(work_id, []).append(author_names.get(author_id, ''))
+    return [(', '.join(sorted(authors_by_work.get(work_id, []))), name)
+            for work_id, name in zip(works_df['id'], works_df['name'])]
+
+
+def find_repeated_works(dfs_by_source):
+    """Return the works found more than once across the library files"""
+    file_names = ('works.csv', 'authors.csv', 'authors_and_works.csv')
+    works = [work
+             for dfs in dfs_by_source if all(f in dfs for f in file_names)
+             for work in works_of(*(dfs[f] for f in file_names))]
+    return sorted({work for work in works if works.count(work) > 1})
+
+
 def validate_aggregation(existing_df, original_dfs, aggregated_df, file_name):
     """
     Validates the aggregation process for a specific file type.
@@ -128,9 +148,13 @@ def aggregate_csv_files():
             aggregated_dfs[file_name] = pd.DataFrame()
             logging.info(f"Initialized new aggregated file: {output_path}")
 
+    # Library files by source, to find works aggregated twice
+    dfs_by_source = [existing_dfs]
+
     # Process each valid work directory
     for work_dir in tqdm(valid_work_dirs, desc="Processing directories"):
         logging.info(f"Processing directory: {work_dir}")
+        dfs_by_source.append({})
 
         for file_name in template_files:
             file_path = work_dir / file_name
@@ -139,6 +163,7 @@ def aggregate_csv_files():
                 try:
                     # Read the current CSV file
                     df = pd.read_csv(file_path, dtype=TYPE_BY_FILE_AND_COLUMN.get(file_name))
+                    dfs_by_source[-1][file_name] = df
 
                     # Store original DataFrame for validation
                     if file_name not in original_dfs:
@@ -159,6 +184,13 @@ def aggregate_csv_files():
                     logging.error(f"Error processing {file_path}: {str(e)}")
 
         logging.info(f"Finished processing directory: {work_dir}")
+
+    # check necessary because every run of a work script creates new ids
+    repeated_works = find_repeated_works(dfs_by_source)
+    if repeated_works:
+        logging.error(f"Works found more than once: {repeated_works}. Nothing was saved. To process a work again, "
+                      f"delete the aggregate files in {output_dir} and aggregate every work")
+        return
 
     # Save all aggregated files with validation
     for file_name, df in aggregated_dfs.items():
