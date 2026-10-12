@@ -681,10 +681,12 @@ def process_verse(xml_string, output_dir):
     authors_data.append(author_data)
     print(f'Author: {author_id}, {author_name}')
 
-    # Adding standard abbreviation for the author
+    # Adding standard abbreviations for the author
     # noinspection SpellCheckingInspection
-    author_abbreviation = 'Phdr.'
-    author_abbreviations_data.append([author_id, 0, author_abbreviation])
+    author_abbreviations_data.extend([
+        [author_id, 0, 'Phaedr.'],
+        [author_id, 1, 'Phaed.'],
+    ])
 
     # Linking author to work
     authors_and_works_data.append([author_id, work_id])

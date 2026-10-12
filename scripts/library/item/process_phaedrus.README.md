@@ -60,8 +60,8 @@ The script generates the following files in `output/library/item/phaedrus/`:
 | `work_contents.csv` | Tokenized text with columns: `workId`, `idx`, `word`, `sourceReference`, `properNounState`, `tokenType`, `sentenceIdx`, `wordIdx`, `enclitic`, `expansion` |
 | `work_content_subdivisions.csv` | Hierarchical structure (books, poems, verses, titles, etc.) |
 | `work_content_supplementary.csv` | Notes, gaps, and other editorial annotations |
-| `author_abbreviations.csv` | Standard abbreviations for the author |
-| `work_abbreviations.csv` | Standard abbreviations for the work |
+| `author_abbreviations.csv` | Standard abbreviations for the author (sources: [`ABBREVIATIONS.md`](../../../ABBREVIATIONS.md)) |
+| `work_abbreviations.csv` | Standard abbreviations for the work (sources: [`ABBREVIATIONS.md`](../../../ABBREVIATIONS.md)) |
 | `authors_and_works.csv` | Author-to-work relationships |
 | `work_macronizations.csv` | Per-instance macronizations with uncertainty masks (`workId`, `idx`, `macronizedWord`, `uncertaintyBitMask`) |
 | `unambiguous_macronizations.csv` | Global stable macronizations (`word`, `macronizedWord`) |
