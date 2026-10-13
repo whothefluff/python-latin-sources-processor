@@ -1,8 +1,5 @@
 import logging
-import os
-import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog
 
 import pandas as pd
 from tqdm import tqdm
@@ -14,6 +11,9 @@ TYPE_BY_FILE_AND_COLUMN = {
     },
 }
 
+#: Where the aggregate files go, whatever directory the script runs from
+OUTPUT_DIR = Path(__file__).resolve().parents[2] / "output" / "library"
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -23,6 +23,10 @@ def select_directory():
     Opens a dialog for the user to select a directory.
     Returns a Path object of the selected directory.
     """
+    # Imported here so that the rest of the module works without a display (tests, CI)
+    import tkinter as tk
+    from tkinter import filedialog
+
     root = tk.Tk()
     root.withdraw()  # Hide the main window
 
@@ -30,7 +34,7 @@ def select_directory():
     logging.info("The script will search through all subdirectories.")
 
     # Open directory selection dialog
-    initial_dir = os.path.join(os.getcwd(), "output", "library")
+    initial_dir = OUTPUT_DIR
     directory = filedialog.askdirectory(
         title="Select directory to process",
         mustexist=True,
@@ -103,14 +107,9 @@ def validate_aggregation(existing_df, original_dfs, aggregated_df, file_name):
     return True, ""
 
 
-def aggregate_csv_files():
-    output_dir = Path("../../output/library")
+def aggregate(base_dir: Path, output_dir: Path = OUTPUT_DIR):
+    """Adds every work found under base_dir to the aggregate files in output_dir"""
     output_dir.mkdir(parents=True, exist_ok=True)  # Ensure output directory exists
-
-    base_dir = select_directory()
-    if not base_dir:
-        logging.warning("No directory selected. Exiting...")
-        return
 
     valid_work_dirs = find_valid_work_dirs(base_dir)
     if not valid_work_dirs:
@@ -213,4 +212,8 @@ def aggregate_csv_files():
 
 
 if __name__ == "__main__":
-    aggregate_csv_files()
+    selected_dir = select_directory()
+    if selected_dir:
+        aggregate(selected_dir)
+    else:
+        logging.warning("No directory selected. Exiting...")
