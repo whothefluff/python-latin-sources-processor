@@ -1,6 +1,39 @@
-import pandas as pd
+from pathlib import Path
 
-from scripts.library.process_library_aggregate import find_repeated_works
+import pandas as pd
+import pytest
+
+from scripts.library.process_library_aggregate import aggregate, find_repeated_works
+
+TWO_WORKS_BY_ONE_AUTHOR = Path(__file__).parent / 'fixtures' / 'two_works_by_one_author'
+CARMINA_PRIMA_ID = '00000000-0000-4000-8000-000000000010'
+CARMINA_ALTERA_ID = '00000000-0000-4000-8000-000000000020'
+
+READER_PRIMARY_KEYS = {
+    'works.csv': ['id'],
+    'authors.csv': ['id'],
+    'authors_and_works.csv': ['authorId', 'workId'],
+    'author_abbreviations.csv': ['authorId', 'id'],
+    'work_abbreviations.csv': ['workId', 'id'],
+    'work_contents.csv': ['workId', 'idx'],
+    'work_content_subdivisions.csv': ['workId', 'node'],
+    'work_content_supplementary.csv': ['workId', 'typ', 'cnt'],
+    'work_macronizations.csv': ['workId', 'idx'],
+    'unambiguous_macronizations.csv': ['word'],
+}
+
+AGREED_UNAMBIGUOUS_MACRONIZATIONS = {
+    'ad': 'ad', 'amicum': 'amīcum', 'et': 'et', 'Roma': 'Rōma', 'est': 'est', 'aura': 'aura', '.': '.',
+    'de': 'dē', 'speculo': 'speculō', 'speculum': 'speculum',
+}
+# levis is lĕvis wherever Carmina Prima is certain of it, and lēvis wherever Carmina Altera is
+CERTAIN_MACRONIZATIONS_OF_LEVIS = {
+    (CARMINA_PRIMA_ID, '2', 'Levis', '0'),
+    (CARMINA_PRIMA_ID, '8', 'levis', '0'),
+    (CARMINA_ALTERA_ID, '2', 'lēvis', '0'),
+}
+
+_AGGREGATE_CONCATENATES = 'the aggregate concatenates the works\' unambiguous macronizations and authors'
 
 
 def _library(work_id, work_name, *author_names):
@@ -29,3 +62,74 @@ def test_works_with_the_same_name_by_other_authors_are_not_repeated():
 
 def test_nothing_is_repeated_without_existing_aggregate_files():
     assert find_repeated_works([{}, _library('a', 'Fabulae Aesopiae', 'Phaedrus')]) == []
+
+
+def _read(directory: Path, file_name: str) -> pd.DataFrame:
+    return pd.read_csv(directory / file_name, dtype=str, keep_default_na=False)
+
+
+def _rows(data_frame: pd.DataFrame) -> list:
+    return sorted(map(tuple, data_frame.values))
+
+
+def _rows_of_both_works(file_name: str) -> list:
+    return _rows(pd.concat([_read(work_dir, file_name)
+                            for work_dir in TWO_WORKS_BY_ONE_AUTHOR.iterdir() if work_dir.is_dir()]))
+
+
+@pytest.fixture
+def aggregated(tmp_path):
+    aggregate(TWO_WORKS_BY_ONE_AUTHOR, tmp_path)
+    return tmp_path
+
+
+@pytest.mark.parametrize('file_name', ['works.csv', 'work_contents.csv', 'work_content_subdivisions.csv'])
+def test_both_works_keep_their_rows(aggregated, file_name):
+    assert _rows(_read(aggregated, file_name)) == _rows_of_both_works(file_name)
+
+
+def test_both_works_keep_their_own_macronizations(aggregated):
+    assert set(_rows_of_both_works('work_macronizations.csv')) <= set(
+        _rows(_read(aggregated, 'work_macronizations.csv')))
+
+
+def test_aggregating_the_same_works_again_saves_nothing(aggregated):
+    before = {path.name: path.read_bytes() for path in aggregated.glob('*.csv')}
+
+    aggregate(TWO_WORKS_BY_ONE_AUTHOR, aggregated)
+
+    assert {path.name: path.read_bytes() for path in aggregated.glob('*.csv')} == before
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_AGGREGATE_CONCATENATES)
+def test_the_aggregate_keeps_the_reader_primary_keys_unique(aggregated):
+    repeated = {file_name: _read(aggregated, file_name)[key].duplicated().sum()
+                for file_name, key in READER_PRIMARY_KEYS.items()}
+
+    assert {file_name: count for file_name, count in repeated.items() if count} == {}
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_AGGREGATE_CONCATENATES)
+def test_only_the_macronizations_that_both_works_agree_on_are_unambiguous(aggregated):
+    assert _rows(_read(aggregated, 'unambiguous_macronizations.csv')) == sorted(
+        AGREED_UNAMBIGUOUS_MACRONIZATIONS.items())
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_AGGREGATE_CONCATENATES)
+def test_each_certain_occurrence_of_a_word_that_the_works_disagree_on_gets_its_own_macronization(aggregated):
+    added = set(_rows(_read(aggregated, 'work_macronizations.csv'))) - set(
+        _rows_of_both_works('work_macronizations.csv'))
+
+    assert added == CERTAIN_MACRONIZATIONS_OF_LEVIS
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_AGGREGATE_CONCATENATES)
+def test_the_author_of_both_works_is_one_author(aggregated):
+    authors = _read(aggregated, 'authors.csv')
+    authorships = _read(aggregated, 'authors_and_works.csv')
+    abbreviations = _read(aggregated, 'author_abbreviations.csv')
+
+    assert list(authors['name']) == ['Fictor']
+    assert set(authorships['authorId']) == set(authors['id'])
+    assert len(authorships) == 2
+    assert list(abbreviations['val']) == ['Fict.']
