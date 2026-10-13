@@ -65,6 +65,21 @@ in `PIPELINE_CONTRACT.md`).*
     - Run `process_morpheus_perseids_api.py` (if you have the endpoint running locally) for morphological analysis of
       the aggregated library data
 
+### Checking regenerated data
+
+`tools/compare_reader_databases.py` compares two databases built by the reader's importer (the `data.db` its CI
+uploads as `latin-reader-database-<run number>`): the reader's `main` before the new CSVs, and a branch with them.
+It reports, per work and token, what the reader would show differently: text and reading order, macrons and masks,
+proper-noun states, enclitics, expansions, sentences and word indices, candidate lemmas, and subdivisions. Works are
+paired by their authors and name, or with `--same-work`, one to one. Adding a work must leave the others without
+differences:
+
+```bash
+python -m scripts.tools.compare_reader_databases old.db new.db --allow-added-works
+```
+
+It exits with 0 when nothing differs, 1 when something does, and 2 when the databases can't be compared.
+
 ### Morpheus flow
 
 In general, we seek improvements to original API, without introducing new mistakes.  
