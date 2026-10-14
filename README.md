@@ -3,6 +3,16 @@
 This project processes Latin source texts and dictionaries, converting XML files into structured CSV data and performing
 morphological analysis.
 
+## Setup
+
+Python 3.11 or later. `process_library_aggregate.py` and `compare_csv.py` use tkinter, which Debian and Ubuntu install
+separately (`apt install python3-tk`).
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
 ## Core Scripts
 
 ### Dictionary Processing
