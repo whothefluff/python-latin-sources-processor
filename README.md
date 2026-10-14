@@ -13,6 +13,9 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
+The scripts reach Morpheus (port 1500) and the macronizer (port 8001) on `localhost`, or on the host named in
+`SERVICES_HOST`.
+
 ## Core Scripts
 
 ### Dictionary Processing

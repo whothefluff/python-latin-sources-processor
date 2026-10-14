@@ -6,6 +6,7 @@ from typing import Dict, List, Set, Any, Tuple, Callable
 
 import requests
 from scripts.common.macrons import strip_macrons
+from scripts.common.services import MORPHEUS_URL
 from scripts.library.util.casing import apply_contract_casing
 from scripts.morphological_analysis.process_morpheus_perseids_api_aux.overrides import (
     FORMS, NOT_WANTED_INFLECTIONS, FULL_OVERRIDES, ANALYSIS_ALIASES, FORMS_TO_IGNORE, IGNORED_DICT_REFS,
@@ -154,9 +155,8 @@ class MorphologicalAnalyzer:
     def analyze_word(word: str) -> Dict:
         """Query the local API for word analysis"""
         try:
-            url = f"http://localhost:1500/analysis/word"
             params = {"lang": "lat", "engine": "morpheuslat", "word": word}
-            response = requests.get(url, params=params)
+            response = requests.get(MORPHEUS_URL, params=params)
             if response.status_code == 201:
                 return response.json()
             else:

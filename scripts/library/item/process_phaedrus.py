@@ -17,6 +17,7 @@ import pandas as pd
 
 import requests
 from scripts.common.macrons import strip_macrons
+from scripts.common.services import MACRONIZER_URL, MORPHEUS_URL
 from scripts.library.util.nomina import NOMINA
 from scripts.library.util.proper_noun import (
     is_proper_noun_lemma, compute_inherent_state, compute_context_aware_state, ProperNounState,
@@ -164,13 +165,12 @@ def _analyze_word_with_clitic(word_to_analyze: str) -> MorpheusAnswer:
     if not word_to_analyze or not word_to_analyze.isalpha():
         return MorpheusAnswer([], None, frozenset())
 
-    url = "http://localhost:1500/analysis/word"
     headers = {"Accept": "application/xml"}
 
     try:
         # 1. Primary API Call (with the full word)
         params = {"lang": "lat", "engine": "morpheuslat", "word": word_to_analyze, "strictCase": str(int(True))}
-        response = requests.get(url, params=params, headers=headers, timeout=10)
+        response = requests.get(MORPHEUS_URL, params=params, headers=headers, timeout=10)
         response.raise_for_status()
         # inside _analyze_word_with_clitic, after the primary call:
         lemmas = _extract_lemmas_from_morpheus_xml(response.text)
@@ -205,7 +205,7 @@ def _analyze_word_with_clitic(word_to_analyze: str) -> MorpheusAnswer:
 
                         # 3. Secondary API Call (with the stripped stem)
                         params['word'] = stem
-                        response_stem = requests.get(url, params=params, headers=headers, timeout=10)
+                        response_stem = requests.get(MORPHEUS_URL, params=params, headers=headers, timeout=10)
                         response_stem.raise_for_status()
                         stem_xml = response_stem.text
 
@@ -363,12 +363,11 @@ def macronize_text(text: str) -> List[TokenResult] | None:
     """
     Calls the local macronization API to get macronization data for a given text.
     """
-    url = "http://localhost:8001/macronize-text"
     payload = {"text": text, "clean": False}
     headers = {"Content-Type": "application/json"}
     try:
         # Set a generous timeout as macronizing a large text can take time
-        response = requests.post(url, data=json.dumps(payload), headers=headers, timeout=300)
+        response = requests.post(MACRONIZER_URL, data=json.dumps(payload), headers=headers, timeout=300)
         response.raise_for_status()
         results = response.json().get('results', [])
         for res in results:
