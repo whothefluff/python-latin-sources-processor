@@ -37,7 +37,8 @@ The scripts reach Morpheus (port 1500) and the macronizer (port 8001) on `localh
 #### `library/process_library_aggregate.py`
 
 - Combines CSV files from `output/library/` into single aggregated files
-- Asks for the directory to search, and writes to the project's `output/library/` from any working directory.
+- Searches the directory given as an argument, or one picked in a dialog, and writes to the project's `output/library/`
+  from any working directory: `python -m scripts.library.process_library_aggregate output/library/item`
 - Additive process - new data is appended to existing files (useful when adding new works)
 - **Deleting** the aggregate files is necessary for reprocessing old entries without adding duplicates
 - Refuses to save when a work is found twice (already aggregated, or in two directories), since every run of a work's

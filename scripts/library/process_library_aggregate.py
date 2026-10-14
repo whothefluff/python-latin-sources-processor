@@ -1,3 +1,4 @@
+import argparse
 import logging
 from collections import defaultdict
 from pathlib import Path
@@ -302,7 +303,9 @@ def aggregate(base_dir: Path, output_dir: Path = OUTPUT_DIR):
 
 
 if __name__ == "__main__":
-    selected_dir = select_directory()
+    parser = argparse.ArgumentParser(description="Combines the works' CSV files into the project's output/library/.")
+    parser.add_argument("directory", nargs="?", type=Path, help="where to look for works; a dialog asks if left out")
+    selected_dir = parser.parse_args().directory or select_directory()
     if selected_dir:
         aggregate(selected_dir)
     else:
