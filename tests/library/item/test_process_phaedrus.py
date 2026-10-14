@@ -116,17 +116,19 @@ _CARMEN = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
   <text><body><div type="textpart" subtype="book" n="1"><div type="textpart" subtype="poem" n="1">
     <l n="1">Levis et levis est.</l>
     <l n="2">Est levis, levis.</l>
-    <l n="3">iacere et iacere.</l>
+    <l n="3">iacere et iacere iam.</l>
   </div></div></body></text>
 </TEI>"""
 _CARMEN_ANALYSES = {word: process_phaedrus.MorpheusAnswer(lemmas, None, frozenset({surface}))
                     for word, lemmas, surface in [("levis", ["levis"], "levis"), ("et", ["et"], "et"),
-                                                  ("est", ["sum"], "est"), ("iacere", ["jaceo", "jacio"], "jacere")]}
-# Certain of levis as lĕvis in the first verse and as lēvis in the second, except for the last levis, and of iacere as
-# jacēre and as jacere
+                                                  ("est", ["sum"], "est"), ("iacere", ["jaceo", "jacio"], "jacere"),
+                                                  ("iam", ["jam"], "jam")]}
+# Certain of levis as lĕvis in the first verse and as lēvis in the second, except for the last levis, of iacere as
+# jacēre and as jacere, and of iam
 _CARMEN_MACRONIZED = [("Levis", "Levis", 0), ("et", "et", 0), ("levis", "levis", 0), ("est", "est", 0), (".", ".", 0),
                       ("Est", "Est", 0), ("levis", "lēvis", 0), (",", ",", 0), ("levis", "levis", 2), (".", ".", 0),
-                      ("iacere", "iacēre", 0), ("et", "et", 0), ("iacere", "iacere", 0), (".", ".", 0)]
+                      ("iacere", "iacēre", 0), ("et", "et", 0), ("iacere", "iacere", 0), ("iam", "iam", 0),
+                      (".", ".", 0)]
 
 
 @pytest.fixture
@@ -151,4 +153,5 @@ def test_each_certain_occurrence_of_a_word_that_the_work_macronizes_in_two_ways_
 
 
 def test_only_the_macronizations_that_the_certain_occurrences_agree_on_are_unambiguous(carmen):
-    assert _rows(carmen / "unambiguous_macronizations.csv") == [(",", ","), (".", "."), ("est", "est"), ("et", "et")]
+    assert _rows(carmen / "unambiguous_macronizations.csv") == [
+        (",", ","), (".", "."), ("est", "est"), ("et", "et"), ("jam", "jam")]

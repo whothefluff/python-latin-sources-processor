@@ -27,7 +27,7 @@ from scripts.library.util.spelling import (
 from scripts.library.util.text_normalization import normalize_digraphs
 from scripts.library.util.token_classification import TokenType, get_token_type
 from scripts.library.util.unambiguous_macronizations import (
-    CertainToken, WorkMacronization, agreed_macronizations, work_macronizations_where_keys_disagree,
+    CertainToken, WorkMacronization, agreed_macronizations, work_macronizations_where_lookup_differs,
 )
 
 # noinspection HttpUrlsUsage
@@ -990,7 +990,7 @@ def process_verse(xml_string, output_dir):
 
     unambiguous_macronizations_dict = agreed_macronizations(certain_macronizations_by_key)
     work_macronizations_data.extend(
-        work_macronizations_where_keys_disagree(certain_macronizations_by_key, certain_tokens))
+        work_macronizations_where_lookup_differs(certain_macronizations_by_key, certain_tokens))
 
     # Respelled only now, because the loop above matches each word with a macronizer token
     # spelled as the source prints it

@@ -38,13 +38,14 @@ def agreed_macronizations(certain_macronizations_by_key: Dict[str, Set[str]]) ->
             for key, macronizations in certain_macronizations_by_key.items() if len(macronizations) == 1}
 
 
-def work_macronizations_where_keys_disagree(certain_macronizations_by_key: Dict[str, Set[str]],
-                                            certain_tokens: Iterable[CertainToken]) -> List[WorkMacronization]:
+def work_macronizations_where_lookup_differs(certain_macronizations_by_key: Dict[str, Set[str]],
+                                             certain_tokens: Iterable[CertainToken]) -> List[WorkMacronization]:
     """Returns a work macronization with its own macronization for each certain token that the reader would look up by
-    a key whose certain macronizations differ."""
+    a key with another macronization, or with several, case aside."""
     work_macronizations = []
     for token in certain_tokens:
         key = lookup_key(token.word, token.token_type, token.proper_noun_state, certain_macronizations_by_key)
-        if key is not None and len(certain_macronizations_by_key[key]) > 1:
+        looked_up = certain_macronizations_by_key[key] if key is not None else set()
+        if {macronized.lower() for macronized in looked_up} != {token.macronized_word.lower()}:
             work_macronizations.append(WorkMacronization(token.work_id, token.idx, token.macronized_word, 0))
     return work_macronizations

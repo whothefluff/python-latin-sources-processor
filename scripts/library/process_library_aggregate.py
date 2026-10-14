@@ -1,8 +1,14 @@
 import logging
+from collections import defaultdict
 from pathlib import Path
+from typing import Dict, List, Set, Tuple, cast
 
 import pandas as pd
 from tqdm import tqdm
+
+from scripts.library.util.unambiguous_macronizations import (
+    CertainToken, agreed_macronizations, lookup_key, work_macronizations_where_lookup_differs,
+)
 
 TYPE_BY_FILE_AND_COLUMN = {
     'work_contents.csv': {
@@ -82,6 +88,75 @@ def find_repeated_works(dfs_by_source):
     return sorted({work for work in works if works.count(work) > 1})
 
 
+def merge_authors(authors: pd.DataFrame, authors_and_works: pd.DataFrame,
+                  author_abbreviations: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Returns the three files with every author of one name under the id of its first row, and identical rows once"""
+    merged_ids = dict(zip(authors['id'], authors.groupby('name', sort=False)['id'].transform('first')))
+    return (authors.assign(id=authors['id'].map(merged_ids)).drop_duplicates(),
+            authors_and_works.assign(authorId=authors_and_works['authorId'].map(merged_ids)).drop_duplicates(),
+            author_abbreviations.assign(authorId=author_abbreviations['authorId'].map(merged_ids)).drop_duplicates())
+
+
+def _authors_with_their_abbreviations(authors: pd.DataFrame, author_abbreviations: pd.DataFrame) -> pd.DataFrame:
+    abbreviations_by_author_id = {cast(str, author_id): frozenset(zip(abbreviations['id'], abbreviations['val']))
+                                  for author_id, abbreviations in author_abbreviations.groupby('authorId')}
+    abbreviations = pd.Series([abbreviations_by_author_id.get(author_id, frozenset()) for author_id in authors['id']],
+                              index=authors.index)
+    return authors.assign(abbreviations=abbreviations)
+
+
+def find_authors_that_differ(dfs_by_source: List[Dict[str, pd.DataFrame]]) -> List[str]:
+    """Returns the names of the authors that the sources give a different about, image or abbreviations"""
+    file_names = ('authors.csv', 'author_abbreviations.csv')
+    authors = pd.concat([_authors_with_their_abbreviations(dfs['authors.csv'], dfs['author_abbreviations.csv'])
+                         for dfs in dfs_by_source if all(f in dfs for f in file_names)])
+    names = authors.drop(columns='id').drop_duplicates()['name']
+    return sorted(set(names[names.duplicated()]))
+
+
+def _in_case_of(word: str, macronized: str) -> str:
+    return ''.join(letter.upper() if original.isupper() else letter.lower()
+                   for original, letter in zip(word, macronized, strict=True))
+
+
+def _certain_tokens_of(dfs: Dict[str, pd.DataFrame], unambiguous_macronizations: Dict[str, str]) -> List[CertainToken]:
+    """Returns the tokens of one source that have no work macronization and that its unambiguous macronizations
+    cover"""
+    work_macronizations = dfs['work_macronizations.csv']
+    with_work_macronization = set(zip(work_macronizations['workId'], work_macronizations['idx']))
+    contents = dfs['work_contents.csv']
+    certain_tokens = []
+    for work_id, idx, word, token_type, state in zip(contents['workId'], contents['idx'], contents['word'],
+                                                     contents['tokenType'], contents['properNounState']):
+        proper_noun_state = None if pd.isna(state) else int(state)
+        key = lookup_key(word, token_type, proper_noun_state, unambiguous_macronizations)
+        if key is not None and (work_id, idx) not in with_work_macronization:
+            certain_tokens.append(CertainToken(work_id, idx, word, token_type, proper_noun_state,
+                                               _in_case_of(word, unambiguous_macronizations[key])))
+    return certain_tokens
+
+
+def merge_macronizations(dfs_by_source: List[Dict[str, pd.DataFrame]],
+                         work_macronizations: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Returns the unambiguous macronizations that the sources agree on, and the work macronizations with one more for
+    each certain token whose key they disagree on"""
+    file_names = ('work_contents.csv', 'work_macronizations.csv', 'unambiguous_macronizations.csv')
+    sources = [dfs for dfs in dfs_by_source if all(f in dfs for f in file_names)]
+    unambiguous_by_source = [dict(zip(dfs['unambiguous_macronizations.csv']['word'],
+                                      dfs['unambiguous_macronizations.csv']['macronizedWord'])) for dfs in sources]
+    certain_macronizations_by_key: Dict[str, Set[str]] = defaultdict(set)
+    for unambiguous_macronizations in unambiguous_by_source:
+        for key, macronized in unambiguous_macronizations.items():
+            certain_macronizations_by_key[key].add(macronized)
+    certain_tokens = [token for dfs, unambiguous_macronizations in zip(sources, unambiguous_by_source)
+                      for token in _certain_tokens_of(dfs, unambiguous_macronizations)]
+    added = work_macronizations_where_lookup_differs(certain_macronizations_by_key, certain_tokens)
+    return (pd.DataFrame(list(agreed_macronizations(certain_macronizations_by_key).items()),
+                         columns=['word', 'macronizedWord']),
+            pd.concat([work_macronizations, pd.DataFrame(added, columns=work_macronizations.columns)],
+                      ignore_index=True))
+
+
 def validate_aggregation(existing_df, original_dfs, aggregated_df, file_name):
     """
     Validates the aggregation process for a specific file type.
@@ -119,7 +194,7 @@ def aggregate(base_dir: Path, output_dir: Path = OUTPUT_DIR):
     # Dictionary to store original DataFrames for validation
     original_dfs = {}
     # Dictionary to store aggregated DataFrames
-    aggregated_dfs = {}
+    aggregated_dfs: Dict[str, pd.DataFrame] = {}
     # Dictionary to store existing DataFrames
     existing_dfs = {}
 
@@ -191,6 +266,21 @@ def aggregate(base_dir: Path, output_dir: Path = OUTPUT_DIR):
                       f"delete the aggregate files in {output_dir} and aggregate every work")
         return
 
+    authors_that_differ = find_authors_that_differ(dfs_by_source)
+    if authors_that_differ:
+        logging.error(f"Authors whose rows differ from one work to another: {authors_that_differ}. Nothing was saved. "
+                      f"Give each of them the same about, image and abbreviations in every work")
+        return
+    authors, authors_and_works, author_abbreviations = merge_authors(aggregated_dfs['authors.csv'],
+                                                                     aggregated_dfs['authors_and_works.csv'],
+                                                                     aggregated_dfs['author_abbreviations.csv'])
+    unambiguous_macronizations, work_macronizations = merge_macronizations(
+        dfs_by_source, aggregated_dfs['work_macronizations.csv'])
+    merged_dfs = {'authors.csv': authors, 'authors_and_works.csv': authors_and_works,
+                  'author_abbreviations.csv': author_abbreviations,
+                  'unambiguous_macronizations.csv': unambiguous_macronizations,
+                  'work_macronizations.csv': work_macronizations}
+
     # Save all aggregated files with validation
     for file_name, df in aggregated_dfs.items():
         output_path = output_dir / file_name
@@ -203,7 +293,7 @@ def aggregate(base_dir: Path, output_dir: Path = OUTPUT_DIR):
         )
         if is_valid:
             try:
-                df.to_csv(output_path, index=False, lineterminator="\n")
+                merged_dfs.get(file_name, df).to_csv(output_path, index=False, lineterminator="\n")
                 logging.info(f"Successfully saved aggregated file: {output_path}")
             except Exception as e:
                 logging.error(f"Error saving {output_path}: {str(e)}")

@@ -1,4 +1,6 @@
+import shutil
 from pathlib import Path
+from typing import List
 
 import pandas as pd
 import pytest
@@ -8,6 +10,8 @@ from scripts.library.process_library_aggregate import aggregate, find_repeated_w
 TWO_WORKS_BY_ONE_AUTHOR = Path(__file__).parent / 'fixtures' / 'two_works_by_one_author'
 CARMINA_PRIMA_ID = '00000000-0000-4000-8000-000000000010'
 CARMINA_ALTERA_ID = '00000000-0000-4000-8000-000000000020'
+CARMINA_PRIMA_AUTHOR_ID = '00000000-0000-4000-8000-000000000011'
+CARMINA_ALTERA_AUTHOR_ID = '00000000-0000-4000-8000-000000000021'
 
 READER_PRIMARY_KEYS = {
     'works.csv': ['id'],
@@ -32,8 +36,8 @@ CERTAIN_MACRONIZATIONS_OF_LEVIS = {
     (CARMINA_PRIMA_ID, '8', 'levis', '0'),
     (CARMINA_ALTERA_ID, '2', 'lēvis', '0'),
 }
-
-_AGGREGATE_CONCATENATES = 'the aggregate concatenates the works\' unambiguous macronizations and authors'
+# The directories of the two works to aggregate, one run each
+AGGREGATION_RUNS = {'both works at once': ['.'], 'one work after the other': ['carmina_prima', 'carmina_altera']}
 
 
 def _library(work_id, work_name, *author_names):
@@ -77,9 +81,14 @@ def _rows_of_both_works(file_name: str) -> list:
                             for work_dir in TWO_WORKS_BY_ONE_AUTHOR.iterdir() if work_dir.is_dir()]))
 
 
-@pytest.fixture
-def aggregated(tmp_path):
-    aggregate(TWO_WORKS_BY_ONE_AUTHOR, tmp_path)
+def _aggregate_in_turn(works: Path, runs: List[str], output_dir: Path):
+    for directory in runs:
+        aggregate(works / directory, output_dir)
+
+
+@pytest.fixture(params=list(AGGREGATION_RUNS.values()), ids=list(AGGREGATION_RUNS))
+def aggregated(request, tmp_path):
+    _aggregate_in_turn(TWO_WORKS_BY_ONE_AUTHOR, request.param, tmp_path)
     return tmp_path
 
 
@@ -101,7 +110,6 @@ def test_aggregating_the_same_works_again_saves_nothing(aggregated):
     assert {path.name: path.read_bytes() for path in aggregated.glob('*.csv')} == before
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_AGGREGATE_CONCATENATES)
 def test_the_aggregate_keeps_the_reader_primary_keys_unique(aggregated):
     repeated = {file_name: _read(aggregated, file_name)[key].duplicated().sum()
                 for file_name, key in READER_PRIMARY_KEYS.items()}
@@ -109,13 +117,11 @@ def test_the_aggregate_keeps_the_reader_primary_keys_unique(aggregated):
     assert {file_name: count for file_name, count in repeated.items() if count} == {}
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_AGGREGATE_CONCATENATES)
 def test_only_the_macronizations_that_both_works_agree_on_are_unambiguous(aggregated):
     assert _rows(_read(aggregated, 'unambiguous_macronizations.csv')) == sorted(
         AGREED_UNAMBIGUOUS_MACRONIZATIONS.items())
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_AGGREGATE_CONCATENATES)
 def test_each_certain_occurrence_of_a_word_that_the_works_disagree_on_gets_its_own_macronization(aggregated):
     added = set(_rows(_read(aggregated, 'work_macronizations.csv'))) - set(
         _rows_of_both_works('work_macronizations.csv'))
@@ -123,7 +129,6 @@ def test_each_certain_occurrence_of_a_word_that_the_works_disagree_on_gets_its_o
     assert added == CERTAIN_MACRONIZATIONS_OF_LEVIS
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_AGGREGATE_CONCATENATES)
 def test_the_author_of_both_works_is_one_author(aggregated):
     authors = _read(aggregated, 'authors.csv')
     authorships = _read(aggregated, 'authors_and_works.csv')
@@ -133,3 +138,62 @@ def test_the_author_of_both_works_is_one_author(aggregated):
     assert set(authorships['authorId']) == set(authors['id'])
     assert len(authorships) == 2
     assert list(abbreviations['val']) == ['Fict.']
+
+
+def _copy_of_both_works(tmp_path: Path) -> Path:
+    works = tmp_path / 'works'
+    shutil.copytree(TWO_WORKS_BY_ONE_AUTHOR, works)
+    return works
+
+
+def _add_rows(csv_path: Path, rows: list):
+    existing = _read(csv_path.parent, csv_path.name)
+    pd.concat([existing, pd.DataFrame(rows, columns=existing.columns)]).to_csv(csv_path, index=False)
+
+
+def _replace_rows(csv_path: Path, rows: list):
+    pd.DataFrame(rows, columns=_read(csv_path.parent, csv_path.name).columns).to_csv(csv_path, index=False)
+
+
+@pytest.mark.parametrize('runs', list(AGGREGATION_RUNS.values()), ids=list(AGGREGATION_RUNS))
+def test_a_word_that_the_reader_would_look_up_under_a_numeral_gets_its_own_macronization(tmp_path, runs):
+    # Carmina Prima is certain of i as ī ("go!") and has it capitalized mid-sentence, which the reader looks up as I
+    # before i. Carmina Altera has the numeral I, unambiguous as I.
+    works = _copy_of_both_works(tmp_path)
+    _add_rows(works / 'carmina_prima' / 'work_contents.csv', [
+        (CARMINA_PRIMA_ID, 11, 'et', '1.1.3', 0, 1, 3, 0, None, None),
+        (CARMINA_PRIMA_ID, 12, 'I', '1.1.3', None, 1, 3, 1, None, None)])
+    _add_rows(works / 'carmina_prima' / 'unambiguous_macronizations.csv', [('i', 'ī')])
+    _add_rows(works / 'carmina_altera' / 'work_contents.csv', [
+        (CARMINA_ALTERA_ID, 10, 'I', '1.1.3', 0, 3, 3, 0, None, 'ūnus')])
+    _add_rows(works / 'carmina_altera' / 'unambiguous_macronizations.csv', [('I', 'I')])
+
+    _aggregate_in_turn(works, runs, tmp_path / 'aggregate')
+
+    added = set(_rows(_read(tmp_path / 'aggregate', 'work_macronizations.csv'))) - set(
+        _rows_of_both_works('work_macronizations.csv'))
+    assert added == CERTAIN_MACRONIZATIONS_OF_LEVIS | {(CARMINA_PRIMA_ID, '12', 'Ī', '0')}
+
+
+@pytest.mark.parametrize('runs', list(AGGREGATION_RUNS.values()), ids=list(AGGREGATION_RUNS))
+@pytest.mark.parametrize('rows_in_carmina_altera', [
+    {'authors.csv': [(CARMINA_ALTERA_AUTHOR_ID, 'Fictor', 'Another poet.', 'Zml4dHVyZQ==')]},
+    {'author_abbreviations.csv': [(CARMINA_ALTERA_AUTHOR_ID, 0, 'Fic.')]},
+    {'author_abbreviations.csv': [(CARMINA_ALTERA_AUTHOR_ID, 0, 'Fict.'), (CARMINA_ALTERA_AUTHOR_ID, 1, 'Fic.')]},
+    {'author_abbreviations.csv': [(CARMINA_ALTERA_AUTHOR_ID, 1, 'Fict.')]},
+    {'authors.csv': [(CARMINA_PRIMA_AUTHOR_ID, 'Fictor', 'An invented poet.', 'Zml4dHVyZQ==')],
+     'authors_and_works.csv': [(CARMINA_PRIMA_AUTHOR_ID, CARMINA_ALTERA_ID)],
+     'author_abbreviations.csv': [(CARMINA_PRIMA_AUTHOR_ID, 0, 'Fic.')]},
+], ids=['another about', 'another abbreviation', 'one more abbreviation', 'the abbreviation under another id',
+        'another abbreviation under the same author id'])
+def test_nothing_is_saved_when_an_author_differs_from_one_work_to_another(tmp_path, rows_in_carmina_altera, runs):
+    works = _copy_of_both_works(tmp_path)
+    for file_name, rows in rows_in_carmina_altera.items():
+        _replace_rows(works / 'carmina_altera' / file_name, rows)
+    *earlier_runs, last_run = runs
+    _aggregate_in_turn(works, earlier_runs, tmp_path / 'aggregate')
+    before = {path.name: path.read_bytes() for path in (tmp_path / 'aggregate').glob('*.csv')}
+
+    aggregate(works / last_run, tmp_path / 'aggregate')
+
+    assert {path.name: path.read_bytes() for path in (tmp_path / 'aggregate').glob('*.csv')} == before
