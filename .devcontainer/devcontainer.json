@@ -1,0 +1,9 @@
+{
+  "name": "Latin sources processor",
+  "image": "mcr.microsoft.com/devcontainers/python:3.13",
+  "runArgs": ["--add-host=host.docker.internal:host-gateway"],
+  "containerEnv": {
+    "SERVICES_HOST": "host.docker.internal"
+  },
+  "postCreateCommand": "pip install --user -r requirements-dev.txt"
+}

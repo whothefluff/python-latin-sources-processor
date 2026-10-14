@@ -16,6 +16,10 @@ python -m pytest
 The scripts reach Morpheus (port 1500) and the macronizer (port 8001) on `localhost`, or on the host named in
 `SERVICES_HOST`.
 
+The dev container (`.devcontainer/`) installs the requirements and points `SERVICES_HOST` at your machine, where
+Morpheus and the macronizer keep running. It has no display: pass the aggregate script its directory, and run
+`compare_csv.py` outside it.
+
 ## Core Scripts
 
 ### Dictionary Processing
