@@ -1,3 +1,4 @@
+import pandas as pd
 import pytest
 
 from scripts.library.item import process_phaedrus
@@ -107,3 +108,47 @@ def test_a_word_that_morpheus_knows_whole_only_as_a_name_is_a_name(monkeypatch):
 
     assert process_phaedrus.determine_proper_noun_state("Iove", True, False) == (ProperNounState.YES,
                                                                                 ProperNounState.YES)
+
+
+_CARMEN = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Carmen</title><author>Fictor</author></titleStmt></fileDesc>
+  </teiHeader>
+  <text><body><div type="textpart" subtype="book" n="1"><div type="textpart" subtype="poem" n="1">
+    <l n="1">Levis et levis est.</l>
+    <l n="2">Est levis, levis.</l>
+    <l n="3">iacere et iacere.</l>
+  </div></div></body></text>
+</TEI>"""
+_CARMEN_ANALYSES = {word: process_phaedrus.MorpheusAnswer(lemmas, None, frozenset({surface}))
+                    for word, lemmas, surface in [("levis", ["levis"], "levis"), ("et", ["et"], "et"),
+                                                  ("est", ["sum"], "est"), ("iacere", ["jaceo", "jacio"], "jacere")]}
+# Certain of levis as lĕvis in the first verse and as lēvis in the second, except for the last levis, and of iacere as
+# jacēre and as jacere
+_CARMEN_MACRONIZED = [("Levis", "Levis", 0), ("et", "et", 0), ("levis", "levis", 0), ("est", "est", 0), (".", ".", 0),
+                      ("Est", "Est", 0), ("levis", "lēvis", 0), (",", ",", 0), ("levis", "levis", 2), (".", ".", 0),
+                      ("iacere", "iacēre", 0), ("et", "et", 0), ("iacere", "iacere", 0), (".", ".", 0)]
+
+
+@pytest.fixture
+def carmen(monkeypatch, tmp_path):
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    process_phaedrus.determine_proper_noun_state.cache_clear()
+    monkeypatch.setattr(process_phaedrus, "macronize_text", lambda text: [
+        process_phaedrus.TokenResult(word=word, is_word=word.isalpha(), macronized=macronized, uncertainty_mask=mask,
+                                     candidates=[])
+        for word, macronized, mask in _CARMEN_MACRONIZED])
+    process_phaedrus.process_verse(_CARMEN, tmp_path)
+    return tmp_path
+
+
+def _rows(csv_path, *dropped_columns):
+    return sorted(map(tuple, pd.read_csv(csv_path).drop(columns=list(dropped_columns)).values.tolist()))
+
+
+def test_each_certain_occurrence_of_a_word_that_the_work_macronizes_in_two_ways_gets_its_own_macronization(carmen):
+    assert _rows(carmen / "work_macronizations.csv", "workId") == [
+        (0, "Levis", 0), (2, "levis", 0), (6, "lēvis", 0), (8, "levis", 2), (10, "jacēre", 0), (12, "jacere", 0)]
+
+
+def test_only_the_macronizations_that_the_certain_occurrences_agree_on_are_unambiguous(carmen):
+    assert _rows(carmen / "unambiguous_macronizations.csv") == [(",", ","), (".", "."), ("est", "est"), ("et", "et")]

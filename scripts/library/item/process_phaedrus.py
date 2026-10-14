@@ -9,6 +9,7 @@ import re
 import uuid
 # noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
+from collections import defaultdict
 from functools import cache
 from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple, TypedDict, TypeGuard
 
@@ -25,6 +26,9 @@ from scripts.library.util.spelling import (
 )
 from scripts.library.util.text_normalization import normalize_digraphs
 from scripts.library.util.token_classification import TokenType, get_token_type
+from scripts.library.util.unambiguous_macronizations import (
+    CertainToken, WorkMacronization, agreed_macronizations, work_macronizations_where_keys_disagree,
+)
 
 # noinspection HttpUrlsUsage
 TEI_NAMESPACE = 'http://www.tei-c.org/ns/1.0'
@@ -884,8 +888,9 @@ def process_verse(xml_string, output_dir):
     work_content_supplementary_df = pd.DataFrame(work_content_supplementary_data,
                                                  columns=['workId', 'typ', 'cnt', 'fromIndex', 'toIndex', 'val'])
 
-    work_macronizations_data = []
-    unambiguous_macronizations_dict = {}
+    work_macronizations_data: List[WorkMacronization] = []
+    certain_macronizations_by_key: Dict[str, Set[str]] = defaultdict(set)
+    certain_tokens: List[CertainToken] = []
 
     if not work_contents_df.empty:
 
@@ -914,6 +919,9 @@ def process_verse(xml_string, output_dir):
                     continue
                 original_word = raw_word
                 content_idx = original_row['idx']
+                token_type = int(original_row['tokenType'])
+                proper_noun_state = (None if pd.isna(original_row['properNounState'])
+                                     else int(original_row['properNounState']))
 
                 # Skip processing for None
                 if not original_word:
@@ -926,8 +934,10 @@ def process_verse(xml_string, output_dir):
                 )
 
                 # 4a. Non-word tokens should be stored exactly as they appear (this includes punctuation, abbreviations, etc.)
-                if int(original_row['tokenType']) > 1:
-                    unambiguous_macronizations_dict[original_word] = combined_macronized
+                if token_type > 1:
+                    certain_macronizations_by_key[original_word].add(combined_macronized)
+                    certain_tokens.append(CertainToken(work_id, content_idx, original_word, token_type,
+                                                       proper_noun_state, combined_macronized))
                 else:
                     # 4b. Decision logic: store in work-specific or global table
                     lower_word = original_word.lower()
@@ -942,33 +952,45 @@ def process_verse(xml_string, output_dir):
                     is_macron_uncertain_always = combined_mask != 0
 
                     if is_macron_uncertain_always:
-                        work_macronizations_data.append([work_id, content_idx, respelled_macronized, combined_mask])
+                        work_macronizations_data.append(
+                            WorkMacronization(work_id, content_idx, respelled_macronized, combined_mask))
                     elif is_macron_uncertain_by_pn_state:
                         logging.warning("'%s' at '%s' has different macrons depending on whether it's a proper noun or not", original_word, content_idx)
-                        work_macronizations_data.append([work_id, content_idx, respelled_macronized, combined_mask])
+                        work_macronizations_data.append(
+                            WorkMacronization(work_id, content_idx, respelled_macronized, combined_mask))
                     else:
                         # The macrons are stable. It's safe for the global unambiguous table.
                         # Get the inherent state to decide HOW to save it
                         inherent_state = inherent_states.get(lower_word) # default to None
 
                         if inherent_state == 0: # Common noun -> lowercase
-                            unambiguous_macronizations_dict[respelled_word.lower()] = respelled_macronized.lower()
+                            certain_macronizations_by_key[respelled_word.lower()].add(respelled_macronized.lower())
                         elif inherent_state == 1: # Proper noun -> capitalized
-                            unambiguous_macronizations_dict[respelled_word.capitalize()] = respelled_macronized.capitalize()
+                            certain_macronizations_by_key[respelled_word.capitalize()].add(
+                                respelled_macronized.capitalize())
                         elif inherent_state == 2:
                             if lower_word in uncertain_depending_on_proper_noun_state or lower_word in cap_form_unknown:
                                 # Only lowercase is globally safe — capitalized instances
                                 # are always routed to WorkMacronizations above.
-                                unambiguous_macronizations_dict[respelled_word.lower()] = respelled_macronized.lower()
+                                certain_macronizations_by_key[respelled_word.lower()].add(respelled_macronized.lower())
                             else:
                                 # Both known, same macrons → store both
-                                unambiguous_macronizations_dict[respelled_word.lower()] = respelled_macronized.lower()
-                                unambiguous_macronizations_dict[respelled_word.capitalize()] = respelled_macronized.capitalize()
+                                certain_macronizations_by_key[respelled_word.lower()].add(respelled_macronized.lower())
+                                certain_macronizations_by_key[respelled_word.capitalize()].add(
+                                    respelled_macronized.capitalize())
                         else: # None: don't store as unambiguous as it is technically an unknown word
                             logging.warning("'%s' is morphologically un-analyzable but has a certain macronization. Storing as-is.", original_word)
-                            work_macronizations_data.append([work_id, content_idx, respelled_macronized, combined_mask])
+                            work_macronizations_data.append(
+                                WorkMacronization(work_id, content_idx, respelled_macronized, combined_mask))
+                        if inherent_state is not None:
+                            certain_tokens.append(CertainToken(work_id, content_idx, respelled_word, token_type,
+                                                               proper_noun_state, respelled_macronized))
 
                 df_cursor += 1
+
+    unambiguous_macronizations_dict = agreed_macronizations(certain_macronizations_by_key)
+    work_macronizations_data.extend(
+        work_macronizations_where_keys_disagree(certain_macronizations_by_key, certain_tokens))
 
     # Respelled only now, because the loop above matches each word with a macronizer token
     # spelled as the source prints it
