@@ -7,7 +7,7 @@ from typing import Dict, List, Set, Any, Tuple, Callable
 import requests
 from scripts.common.macrons import strip_macrons
 from scripts.library.util.casing import apply_contract_casing
-from scripts.morphological_analysis.process_morpheys_perseids_api_aux.overrides import (
+from scripts.morphological_analysis.process_morpheus_perseids_api_aux.overrides import (
     FORMS, NOT_WANTED_INFLECTIONS, FULL_OVERRIDES, ANALYSIS_ALIASES, FORMS_TO_IGNORE, IGNORED_DICT_REFS,
     DICT_REF_REPLACEMENTS, TRUE_ADVERB_FORMS
 )
