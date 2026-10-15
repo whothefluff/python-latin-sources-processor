@@ -11,7 +11,7 @@ import uuid
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from functools import cache
-from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple, TypedDict, TypeGuard
+from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple, TypedDict, TypeGuard, cast
 
 import pandas as pd
 
@@ -1047,7 +1047,7 @@ def validate_csv_files(xml_string, output_dir):
     unambiguous_macronizations_df = pd.read_csv(os.path.join(output_dir, 'unambiguous_macronizations.csv'))
 
     check_seq_unique_ints_from_0(errors, author_abbreviations_df, 'author abbreviations', 'id', ['authorId'])
-    check_seq_unique_ints_from_0(errors, work_content_subdivisions_df, 'subs', 'cnt', ['workId', 'parent', 'typ'])
+    check_subdivision_numbers(errors, work_content_subdivisions_df)
     check_seq_unique_ints_from_0(errors, work_contents_df, 'contents', 'idx', ['workId'])
     check_seq_unique_ints_from_0(errors, work_content_supplementary_df, 'supplementary', 'cnt', ['workId', 'typ'])
     check_children_within_parent_range(errors, work_content_subdivisions_df)
@@ -1059,7 +1059,7 @@ def validate_csv_files(xml_string, output_dir):
                       work_contents_df.to_dict('records'),
                       work_content_supplementary_df.to_dict('records'))
     validate_p_tags(errors, xml_string, work_content_subdivisions_df.to_dict('records'))
-    check_proper_noun_completeness(errors, work_contents_df)
+    check_proper_noun_states(errors, work_contents_df)
     check_macronization_coverage(errors, work_contents_df, work_macronizations_df, unambiguous_macronizations_df)
     check_expansion_completeness(errors, work_contents_df)
     check_sentence_and_word_idx(errors, work_contents_df)
@@ -1102,6 +1102,37 @@ def check_seq_unique_ints_from_0(errors, df, f_name, column_name, group_columns=
                 errors.append(f"Column '{column_name}' contains duplicate values.")
             else:
                 errors.append(f"Column '{column_name}' does not contain sequential integers starting from 0.")
+
+
+def check_unique_non_negative_ints(errors, df, f_name, column_name, group_columns):
+    for name, group in df.groupby(group_columns, dropna=False):
+        values = cast(pd.Series, pd.to_numeric(group[column_name], errors='coerce'))
+        group_name = ', '.join([f"{col}={val}" for col, val in zip(group_columns, name)])
+        if values.mod(1).ne(0).any() or values.lt(0).any():  # a missing number is NaN, whose remainder isn't 0
+            errors.append(f"For {f_name}, column '{column_name}' in group ({group_name}) contains values that aren't "
+                          f"integers from 0 up.")
+        elif values.duplicated().any():
+            errors.append(f"For {f_name}, column '{column_name}' in group ({group_name}) contains duplicate values.")
+
+
+def check_subdivision_numbers(errors, work_content_subdivisions_df):
+    """Checks each subdivision's cnt as the script numbers it, among its siblings of the same type: verses and books
+    take the edition's number, n - 1, which can skip some (Phaedrus 4.24 has no verse 4), and a book without a number
+    the one after the highest so far, so they only have to be unique; paragraphs and titles are 0, and a subdivision
+    has one title at most, as the reader's unique index requires; and the other types are counted from 0 up."""
+    subdivisions = work_content_subdivisions_df
+    numbered_by_the_edition = subdivisions[subdivisions['typ'].isin(['VERS', 'BOOK'])]
+    paragraphs = subdivisions[subdivisions['typ'] == 'PARA']
+    titles = subdivisions[subdivisions['typ'] == 'TITL']
+    counted = subdivisions[~subdivisions['typ'].isin(['VERS', 'BOOK', 'PARA', 'TITL'])]
+    check_unique_non_negative_ints(errors, numbered_by_the_edition, 'subs', 'cnt', ['workId', 'parent', 'typ'])
+    for node in paragraphs[paragraphs['cnt'] != 0]['node']:
+        errors.append(f"Paragraph {node} isn't numbered 0.")
+    for node in titles[titles['cnt'] != 0]['node']:
+        errors.append(f"Title {node} isn't numbered 0.")
+    for parent in sorted(set(titles[titles.duplicated(['workId', 'parent'])]['parent'])):
+        errors.append(f"Subdivision {parent} has more than one title.")
+    check_seq_unique_ints_from_0(errors, counted, 'subs', 'cnt', ['workId', 'parent', 'typ'])
 
 
 def check_to_index_always_gt_from_index_in_sub(errors, work_content_subdivisions_df):
@@ -1276,16 +1307,24 @@ def validate_p_tags(errors, xml_string, subdivisions):
         errors.append("Mismatch between the number of <p> tags and the number of paragraph subdivisions.")
 
 
-def check_proper_noun_completeness(errors, work_contents_df):
-    """Every word/abbreviation/numeral must have a properNounState; everything else must not."""
-    words = work_contents_df[work_contents_df['tokenType'] <= 3]
-    missing = words[words['properNounState'].isnull()]
-    if not missing.empty:
-        examples = missing.head(50).apply(lambda row: f"'{row['word']}' at index {row['idx']}", axis=1).tolist()
-        errors.append(
-            f"Found {len(missing)} word tokens with a missing 'properNounState'. "
-            f"Examples: {', '.join(examples)}"
-        )
+def check_proper_noun_states(errors, work_contents_df):
+    """Every abbreviation must have the properNounState 1, every numeral 0, and punctuation, editorial marks and other
+    tokens none. A word without one is a word that Morpheus has no analysis for, which the reader looks up in both
+    cases: logged for review."""
+    words = work_contents_df[work_contents_df['tokenType'] == int(TokenType.WORD)]
+    unknown = words[words['properNounState'].isnull()]
+    if not unknown.empty:
+        logging.warning("Found %s words without a properNounState, which Morpheus has no analysis for: %s",
+                        len(unknown),
+                        ', '.join(f"'{word}' at index {idx}" for word, idx in zip(unknown['word'], unknown['idx'])))
+
+    for token_type, state, tokens_name in ((TokenType.ABBREVIATION, ProperNounState.YES, 'abbreviations'),
+                                           (TokenType.NUMERAL, ProperNounState.NO, 'numerals')):
+        tokens = work_contents_df[work_contents_df['tokenType'] == int(token_type)]
+        wrong = tokens[tokens['properNounState'].ne(int(state)).fillna(True).astype(bool)]
+        if not wrong.empty:
+            errors.append(f"Found {len(wrong)} {tokens_name} whose properNounState isn't {int(state)}: "
+                          + ', '.join(f"'{word}' at index {idx}" for word, idx in zip(wrong['word'], wrong['idx'])))
 
     non_words = work_contents_df[work_contents_df['tokenType'] > 3]
     bad = non_words[non_words['properNounState'].notnull()]

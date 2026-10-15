@@ -1,3 +1,5 @@
+import logging
+
 import pandas as pd
 import pytest
 import requests
@@ -303,5 +305,117 @@ def test_a_word_is_covered_by_the_unambiguous_macronization_that_the_reader_look
     process_phaedrus.check_macronization_coverage(
         found, contents, pd.DataFrame(columns=["workId", "idx", "macronizedWord", "uncertaintyBitMask"]),
         pd.DataFrame({"word": keys, "macronizedWord": keys}, dtype=str))
+
+    assert found == errors
+
+
+# The edition skips verse 3, and Morpheus has no analysis for Fictor
+_CARMEN_WITH_A_GAP = _CARMEN.replace('<l n="3">iacere et iacere iam.</l>',
+                                     '<l n="4">iacere et iacere iam.</l>\n    <l n="5">Fictor est.</l>')
+_CARMEN_WITH_A_GAP_MACRONIZED = _CARMEN_MACRONIZED + [("Fictor", "Fictor", 0), ("est", "est", 0), (".", ".", 0)]
+
+
+def test_verses_numbered_by_the_edition_and_a_word_that_morpheus_doesnt_know_pass_validation(monkeypatch, tmp_path,
+                                                                                              caplog):
+    _process_carmen(monkeypatch, tmp_path, xml=_CARMEN_WITH_A_GAP, macronized=_CARMEN_WITH_A_GAP_MACRONIZED)
+
+    process_phaedrus.validate_csv_files(_CARMEN_WITH_A_GAP, tmp_path)
+
+    subdivisions = pd.read_csv(tmp_path / "work_content_subdivisions.csv")
+    assert list(subdivisions[subdivisions["typ"] == "VERS"]["cnt"]) == [0, 1, 3, 4]
+    assert [record.getMessage() for record in caplog.records if record.levelno >= logging.ERROR] == []
+    assert "'Fictor' at index 15" in caplog.text
+
+
+def test_a_word_that_morpheus_cant_be_asked_about_raises_instead_of_getting_no_state(monkeypatch, tmp_path):
+    def get(url, params, headers, timeout):
+        raise requests.exceptions.ConnectionError("No answer from Morpheus")
+
+    process_phaedrus._analyze_word_with_clitic.cache_clear()
+    process_phaedrus.determine_proper_noun_state.cache_clear()
+    monkeypatch.setattr(process_phaedrus.requests, "get", get)
+    _macronizer_answers(monkeypatch, _CARMEN_MACRONIZED)
+
+    with pytest.raises(requests.exceptions.ConnectionError):
+        process_phaedrus.process_verse(_CARMEN, tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+def _subdivisions(*rows):
+    """Returns the subdivisions of one work, each given as (node, typ, cnt, parent)"""
+    return pd.DataFrame([("w", *row) for row in rows], columns=["workId", "node", "typ", "cnt", "parent"])
+
+
+@pytest.mark.parametrize("subdivisions, errors", [
+    (_subdivisions(("v1", "VERS", 0, "p"), ("v3", "VERS", 2, "p")), []),
+    (_subdivisions(("b1", "BOOK", 0, None), ("b3", "BOOK", 2, None)), []),
+    (_subdivisions(("a1", "PARA", 0, "p"), ("a2", "PARA", 0, "p")), []),
+    (_subdivisions(("v1", "VERS", 1, "p"), ("v2", "VERS", 1, "p")),
+     ["For subs, column 'cnt' in group (workId=w, parent=p, typ=VERS) contains duplicate values."]),
+    (_subdivisions(("v1", "VERS", -1, "p")),
+     ["For subs, column 'cnt' in group (workId=w, parent=p, typ=VERS) contains values that aren't integers from 0 "
+      "up."]),
+    (_subdivisions(("v1", "VERS", 0.5, "p")),
+     ["For subs, column 'cnt' in group (workId=w, parent=p, typ=VERS) contains values that aren't integers from 0 "
+      "up."]),
+    (_subdivisions(("v1", "VERS", None, "p")),
+     ["For subs, column 'cnt' in group (workId=w, parent=p, typ=VERS) contains values that aren't integers from 0 "
+      "up."]),
+    (_subdivisions(("b1", "BOOK", 0, None), ("b2", "BOOK", 0, None)),
+     ["For subs, column 'cnt' in group (workId=w, parent=nan, typ=BOOK) contains duplicate values."]),
+    (_subdivisions(("p1", "POEM", 0, "b"), ("p3", "POEM", 2, "b")),
+     ["For subs, column 'cnt' in group (workId=w, parent=b, typ=POEM) does not contain sequential integers starting "
+      "from 0."]),
+    (_subdivisions(("p1", "PROL", 0, "b"), ("p3", "PROL", 2, "b")),
+     ["For subs, column 'cnt' in group (workId=w, parent=b, typ=PROL) does not contain sequential integers starting "
+      "from 0."]),
+    (_subdivisions(("e1", "EPIL", 0, "b"), ("e3", "EPIL", 2, "b")),
+     ["For subs, column 'cnt' in group (workId=w, parent=b, typ=EPIL) does not contain sequential integers starting "
+      "from 0."]),
+    (_subdivisions(("t1", "TITL", 0, "p"), ("t2", "TITL", 0, "p")), ["Subdivision p has more than one title."]),
+    (_subdivisions(("t1", "TITL", 0, "p"), ("t2", "TITL", 1, "p")),
+     ["Title t2 isn't numbered 0.", "Subdivision p has more than one title."]),
+    (_subdivisions(("t1", "TITL", 1, "p")), ["Title t1 isn't numbered 0."]),
+    (_subdivisions(("t1", "TITL", 0, "p1"), ("t2", "TITL", 0, "p2")), []),
+    (_subdivisions(("a1", "PARA", 1, "p")), ["Paragraph a1 isn't numbered 0."]),
+], ids=["verses that skip a number", "books that skip a number", "two paragraphs of a poem", "a verse number twice",
+        "a negative verse number", "a fraction of a verse number", "a verse without a number", "a book number twice",
+        "poems that skip a number", "prologues that skip a number", "epilogues that skip a number",
+        "two titles of a poem", "two titles of a poem numbered 0 and 1", "a title numbered 1",
+        "a title of each poem", "a paragraph numbered 1"])
+def test_subdivisions_are_numbered_by_the_edition_or_counted_as_the_script_numbers_them(subdivisions, errors):
+    found = []
+
+    process_phaedrus.check_subdivision_numbers(found, subdivisions)
+
+    assert found == errors
+
+
+@pytest.mark.parametrize("word, token_type, proper_noun_state, errors", [
+    ("Fictor", TokenType.WORD, None, []),
+    ("C.", TokenType.ABBREVIATION, ProperNounState.YES, []),
+    ("C.", TokenType.ABBREVIATION, None, ["Found 1 abbreviations whose properNounState isn't 1: 'C.' at index 0"]),
+    ("C.", TokenType.ABBREVIATION, ProperNounState.NO,
+     ["Found 1 abbreviations whose properNounState isn't 1: 'C.' at index 0"]),
+    ("XII", TokenType.NUMERAL, ProperNounState.NO, []),
+    ("XII", TokenType.NUMERAL, ProperNounState.YES,
+     ["Found 1 numerals whose properNounState isn't 0: 'XII' at index 0"]),
+    (".", TokenType.PUNCTUATION, None, []),
+    (".", TokenType.PUNCTUATION, ProperNounState.NO,
+     ["Found 1 non-word tokens with a properNounState that should be NULL."]),
+    ("†", TokenType.EDITORIAL, ProperNounState.YES,
+     ["Found 1 non-word tokens with a properNounState that should be NULL."]),
+    ("Sex.", TokenType.OTHER, ProperNounState.YES,
+     ["Found 1 non-word tokens with a properNounState that should be NULL."]),
+], ids=["a word without a state", "an abbreviation", "an abbreviation without a state",
+        "an abbreviation as a common word", "a numeral", "a numeral as a name", "punctuation",
+        "punctuation with a state", "an editorial mark with a state", "another token with a state"])
+def test_abbreviations_numerals_and_other_tokens_have_their_proper_noun_states(word, token_type, proper_noun_state,
+                                                                                errors):
+    contents = pd.DataFrame({"idx": [0], "word": [word], "tokenType": [int(token_type)],
+                             "properNounState": pd.array([proper_noun_state], dtype="Int64")})
+    found = []
+
+    process_phaedrus.check_proper_noun_states(found, contents)
 
     assert found == errors
