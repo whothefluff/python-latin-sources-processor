@@ -6,17 +6,20 @@ import json
 import logging
 import os
 import re
+import tempfile
 import uuid
 # noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from functools import cache
+from pathlib import Path
 from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple, TypedDict, TypeGuard, cast
 
 import pandas as pd
 
 import requests
 from scripts.common.macrons import strip_macrons
+from scripts.common.publishing import publish
 from scripts.common.services import MACRONIZER_URL, MORPHEUS_URL
 from scripts.library.util.nomina import NOMINA
 from scripts.library.util.proper_noun import (
@@ -1035,6 +1038,15 @@ def get_author_data(author_id, author_name):
     return author_data
 
 
+def publish_work(xml_string, output_dir):
+    """Writes the work's files to output_dir when they pass validation. Otherwise raises, and output_dir stays as it
+    was."""
+    with tempfile.TemporaryDirectory() as working_dir:
+        process_verse(xml_string, working_dir)
+        validate_csv_files(xml_string, working_dir)
+        publish(Path(working_dir), Path(output_dir))
+
+
 def validate_csv_files(xml_string, output_dir):
     errors = []
 
@@ -1066,9 +1078,7 @@ def validate_csv_files(xml_string, output_dir):
     check_letters_against_morpheus(errors, work_contents_df)
 
     if errors:
-        logging.error("Validation errors found:")
-        for error in errors:
-            logging.error("    %s", error)
+        raise ValueError("Validation errors found:\n" + "\n".join(f"    {error}" for error in errors))
     else:
         logging.info("All validations passed successfully.")
 
@@ -1481,6 +1491,5 @@ if __name__ == "__main__":
     output_dir_outer = project_root( ) + '/output/library/item/phaedrus/'
     with open(xml_file, 'r', encoding='utf-8') as file:
         xml_string_outer = file.read()  # Parse the XML file as a string
-    process_verse(xml_string_outer, output_dir_outer)
+    publish_work(xml_string_outer, output_dir_outer)
     print(f"Data has been successfully exported to CSV files in {output_dir_outer}.")
-    validate_csv_files(xml_string_outer, output_dir_outer)  # Call the validation function here

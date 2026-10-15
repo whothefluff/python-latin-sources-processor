@@ -419,3 +419,34 @@ def test_abbreviations_numerals_and_other_tokens_have_their_proper_noun_states(w
     process_phaedrus.check_proper_noun_states(found, contents)
 
     assert found == errors
+
+
+def _publish_carmen(monkeypatch, output_dir, xml=_CARMEN, macronized=_CARMEN_MACRONIZED):
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    process_phaedrus.determine_proper_noun_state.cache_clear()
+    _macronizer_answers(monkeypatch, macronized)
+    process_phaedrus.publish_work(xml, output_dir)
+
+
+_WORK_FILES = ["author_abbreviations.csv", "authors.csv", "authors_and_works.csv", "unambiguous_macronizations.csv",
+               "work_abbreviations.csv", "work_content_subdivisions.csv", "work_content_supplementary.csv",
+               "work_contents.csv", "work_macronizations.csv", "works.csv"]
+
+
+def test_a_work_that_passes_validation_is_published(monkeypatch, tmp_path):
+    _publish_carmen(monkeypatch, tmp_path)
+
+    assert sorted(path.name for path in tmp_path.iterdir()) == _WORK_FILES
+    assert _rows(tmp_path / "work_macronizations.csv", "workId") == [
+        (0, "Levis", 0), (2, "levis", 0), (6, "lēvis", 0), (8, "levis", 2), (10, "jacēre", 0), (12, "jacere", 0)]
+
+
+def test_a_work_that_fails_validation_raises_and_leaves_the_published_files_as_they_were(monkeypatch, tmp_path):
+    _publish_carmen(monkeypatch, tmp_path)
+    before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    # The numeral has no expansion
+    monkeypatch.setitem(process_phaedrus.WORK_SPECIFIC_TOKEN_OVERRIDES, 18, TokenType.NUMERAL)
+
+    with pytest.raises(ValueError, match="1 abbreviation/numeral tokens missing an 'expansion'"):
+        _publish_carmen(monkeypatch, tmp_path, xml=_CARMEN_WITH_I, macronized=_CARMEN_WITH_I_MACRONIZED)
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before

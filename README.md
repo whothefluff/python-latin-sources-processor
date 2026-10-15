@@ -36,7 +36,13 @@ Morpheus and the macronizer keep running. It has no display: pass the aggregate 
 
 - Processes related XML source texts
 - Creates CSV files in `output/library/item/XXX/`
-- **Overwrites** existing files in the output path
+- **Overwrites** existing files in the output path, once the new ones pass its validation. When Morpheus or the
+  macronizer fails, or validation finds errors, it raises and leaves them as they were
+- Replaces all of the files or none. While it moves them, `.unfinished-publication.txt` says what it replaces and
+  adds; when it fails and can't undo every step, that file stays, with what's left to undo, and every later run into
+  that directory refuses to start until the files are restored and it's removed. An old file that a finished
+  publication couldn't remove stays as `.<name>.old`, the only copy of that version, and also stops later runs until
+  it's removed. The aggregate and the morphology script publish the same way
 
 #### `library/process_library_aggregate.py`
 
