@@ -11,9 +11,10 @@ import uuid
 # noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
 from collections import defaultdict
+from enum import Enum, auto
 from functools import cache
 from pathlib import Path
-from typing import Dict, FrozenSet, List, NamedTuple, Optional, Set, Tuple, TypedDict, TypeGuard, cast
+from typing import Dict, FrozenSet, List, NamedTuple, Set, Tuple, TypedDict, TypeGuard, cast
 
 import pandas as pd
 
@@ -137,122 +138,129 @@ def _surface_forms(xml_string: str) -> Set[str]:
 
 
 class MorpheusAnswer(NamedTuple):
-    lemmas: List[str]
-    enclitic: str | None
+    """Morpheus's answer to one query"""
+    lemmas: FrozenSet[str]
     #: The analyzed forms, lowercase and without macrons. They leave out the enclitic when Morpheus splits one off.
     surfaces: FrozenSet[str]
+    #: Whether an inflection is an imperative, an interjection or an adverb, which dum can follow
+    dum_can_follow: bool
 
 
-def _any_surface_spells(word: str, surfaces: Set[str]) -> bool:
+_NO_ANSWER = MorpheusAnswer(frozenset(), frozenset(), False)
+
+
+def _any_surface_spells(word: str, surfaces: FrozenSet[str]) -> bool:
     return bool(spellings_of(word, surfaces, LETTER_CONVENTION))
 
 
 @cache
-def _analyze_word_with_clitic(word_to_analyze: str) -> MorpheusAnswer:
-    """
-    Calls the local morpheus/cruncher endpoint. If the primary analysis is empty,
-    attempts to strip a known enclitic and re-query with the stem.
-    The enclitic is set only when the lemmas came from the host.
-    Raises when a request fails, or when an answer is an error or isn't XML, so that nothing is cached for the word.
-    """
-    if not word_to_analyze or not word_to_analyze.isalpha():
-        return MorpheusAnswer([], None, frozenset())
+def _lookup(word: str) -> MorpheusAnswer:
+    """Asks Morpheus for the word once, with strictCase: a capitalized word gets no analysis when all its forms are
+    lowercase, and the other way round. Raises when the request fails, or when the answer is an error or isn't XML, so
+    that nothing is cached for the word"""
+    if not word or not word.isalpha():
+        return _NO_ANSWER
 
+    params = {"lang": "lat", "engine": "morpheuslat", "word": word, "strictCase": str(int(True))}
     headers = {"Accept": "application/xml"}
-
     try:
-        # 1. Primary API Call (with the full word)
-        params = {"lang": "lat", "engine": "morpheuslat", "word": word_to_analyze, "strictCase": str(int(True))}
         response = requests.get(MORPHEUS_URL, params=params, headers=headers, timeout=10)
         response.raise_for_status()
-        # inside _analyze_word_with_clitic, after the primary call:
-        lemmas = _extract_lemmas_from_morpheus_xml(response.text)
-        enclitic_found: Optional[str] = None
-        surfaces: Set[str] = set()
-
-        if lemmas:
-            surfaces = _surface_forms(response.text)
-            word_lower = word_to_analyze.lower()
-            if surfaces and not _any_surface_spells(word_lower, surfaces):
-                # Morpheus recognized it, but nothing covers the full word:
-                # it stripped an enclitic internally. Figure out which one.
-                for clitic in SPLIT_ENCLITICS:
-                    if word_lower.endswith(clitic) and _any_surface_spells(word_lower[:-len(clitic)], surfaces):
-                        if clitic == "dum" and not _is_valid_dum_stem(response.text):
-                            lemmas = []   # reject the bogus stem analysis, fall through
-                            break  # fall through to the manual-stripping fallback (re-queries with stem alone)
-                        enclitic_found = clitic
-                        break
-
-        # 2. Fallback Logic (if primary call returned nothing).
-        # For Morpheus builds that don't strip enclitics themselves, e.g. with a4d8f61 applied
-        if not lemmas:
-            for clitic in SPLIT_ENCLITICS:
-                # Check if the word ends with one of the special clitics
-                if word_to_analyze.endswith(clitic):
-                    stem = word_to_analyze[:-len(clitic)]
-
-                    # Ensure the stem is not empty (e.g., for a word that is just "que")
-                    if stem:
-                        logging.warning("Analysis for '%s' was empty. Retrying with stem '%s'.", word_to_analyze, stem)
-
-                        # 3. Secondary API Call (with the stripped stem)
-                        params['word'] = stem
-                        response_stem = requests.get(MORPHEUS_URL, params=params, headers=headers, timeout=10)
-                        response_stem.raise_for_status()
-                        stem_xml = response_stem.text
-
-                        # For 'dum', only consider it a clitic if attached to an imperative, interjection, or adverb.
-                        if clitic == "dum":
-                            if _is_valid_dum_stem(stem_xml):
-                                lemmas = _extract_lemmas_from_morpheus_xml(stem_xml)
-                        else:
-                            # For other clitics, we accept the analysis of the stem.
-                            lemmas = _extract_lemmas_from_morpheus_xml(stem_xml)
-
-                        if lemmas:
-                            logging.warning("'%s'-'%s' found", stem, clitic)
-                            enclitic_found = clitic
-                            surfaces = _surface_forms(stem_xml)
-
-                    # Once we've found a matching clitic and tried again, stop the loop.
-                    break
-
-        return MorpheusAnswer(lemmas, enclitic_found, frozenset(surfaces) if lemmas else frozenset())
-
     except requests.exceptions.RequestException:
-        logging.error("Error calling morpheus API for word '%s'", word_to_analyze)
+        logging.error("Error calling morpheus API for word '%s'", word)
         raise
 
+    lemmas = frozenset(_extract_lemmas_from_morpheus_xml(response.text))
+    if not lemmas:
+        return _NO_ANSWER
+    return MorpheusAnswer(lemmas, frozenset(_surface_forms(response.text)), _is_valid_dum_stem(response.text))
 
-_NO_ANSWER = MorpheusAnswer([], None, frozenset())
+
+class _Analysis(Enum):
+    WHOLE = auto()
+    SPLIT = auto()
+    NONE = auto()
 
 
-def _answers_in_both_cases(word: str) -> Tuple[MorpheusAnswer, MorpheusAnswer]:
-    """Returns Morpheus's answers for the word in lowercase and capitalized. Morpheus is queried with strictCase, so a
-    capitalized word gets no analysis when all its forms are lowercase, and the other way round.
-    When one answer analyzes the whole word, an answer that only analyzes it without an enclitic is dropped: Iove is
-    Juppiter, not io and ve."""
+def _analysis_of(word: str, answer: MorpheusAnswer) -> Tuple[_Analysis, str | None]:
+    """Says whether the answer analyzes the whole word, or the word without an ending of SPLIT_ENCLITICS that Morpheus
+    split off, and which one, or neither. A dum split counts only when dum can follow the host. An answer that no
+    spelling lines up with, such as one for an assimilated prefix (affert), is the whole word."""
+    if not answer.lemmas:
+        return _Analysis.NONE, None
     lower = word.lower()
-    lowercase, capitalized = _analyze_word_with_clitic(lower), _analyze_word_with_clitic(lower.capitalize())
-    if any(answer.lemmas and answer.enclitic is None for answer in (lowercase, capitalized)):
-        if lowercase.enclitic is not None:
-            lowercase = _NO_ANSWER
-        if capitalized.enclitic is not None:
-            capitalized = _NO_ANSWER
-    return lowercase, capitalized
+    if answer.surfaces and not _any_surface_spells(lower, answer.surfaces):
+        for ending in SPLIT_ENCLITICS:
+            if lower.endswith(ending) and _any_surface_spells(lower[:-len(ending)], answer.surfaces):
+                if ending == "dum" and not answer.dum_can_follow:
+                    return _Analysis.NONE, None
+                return _Analysis.SPLIT, ending
+    return _Analysis.WHOLE, None
+
+
+def _host_answer(word: str, enclitic: str) -> MorpheusAnswer:
+    """Returns Morpheus's answer for the word without the enclitic, in the word's case.
+    For Morpheus builds that don't strip enclitics themselves, e.g. with a4d8f61 applied"""
+    host = word[:-len(enclitic)]
+    logging.warning("Analysis for '%s' was empty. Retrying with stem '%s'.", word, host)
+    answer = _lookup(host)
+    if not answer.lemmas or (enclitic == "dum" and not answer.dum_can_follow):
+        return _NO_ANSWER
+    logging.warning("'%s'-'%s' found", host, enclitic)
+    return answer
+
+
+class MorpheusReading(NamedTuple):
+    """What Morpheus says about a word, whatever its case and place in the text"""
+    enclitic: str | None
+    #: What counts for the word in lowercase: the answer for the word, or for its host when there's an enclitic
+    lowercase: MorpheusAnswer
+    #: The same for the word capitalized
+    capitalized: MorpheusAnswer
+
+
+_NO_READING = MorpheusReading(None, _NO_ANSWER, _NO_ANSWER)
+
+
+@cache
+def _morpheus_reading(lower: str) -> MorpheusReading:
+    """Asks Morpheus for the lowercase word and the word capitalized. Then:
+    1. When either answer is the whole word, there's no enclitic, and a split in the other is dropped: Iove is
+       Juppiter, not io and ve.
+    2. Otherwise, when either is a split, that's the enclitic, the lowercase one first. A case without an analysis gets
+       its host's, since a capitalized host can be a name that the lowercase split doesn't show.
+    3. Otherwise, the word without its ending of SPLIT_ENCLITICS is asked for in both cases, and the ending is the
+       enclitic when either answers."""
+    if not lower.isalpha():
+        return _NO_READING
+    words = (lower, lower.capitalize())
+    answers = tuple(_lookup(word) for word in words)
+    analyses = tuple(_analysis_of(word, answer) for word, answer in zip(words, answers))
+
+    if any(analysis is _Analysis.WHOLE for analysis, _ in analyses):
+        return MorpheusReading(None, *(answer if analysis is _Analysis.WHOLE else _NO_ANSWER
+                                       for answer, (analysis, _) in zip(answers, analyses)))
+
+    splits = [ending for analysis, ending in analyses if analysis is _Analysis.SPLIT]
+    enclitic = splits[0] if splits else next((ending for ending in SPLIT_ENCLITICS if lower.endswith(ending)), None)
+    if enclitic is None or enclitic == lower:
+        return _NO_READING
+    answers = tuple(answer if analysis is _Analysis.SPLIT else _host_answer(word, enclitic)
+                    for word, answer, (analysis, _) in zip(words, answers, analyses))
+    if not any(answer.lemmas for answer in answers):
+        return _NO_READING
+    return MorpheusReading(enclitic, *answers)
 
 
 def find_enclitic(word_to_analyze: str) -> str | None:
-    """Returns the enclitic that Morpheus splits off the word, from the lowercase answer first"""
-    lowercase, capitalized = _answers_in_both_cases(word_to_analyze)
-    return lowercase.enclitic or capitalized.enclitic
+    """Returns the enclitic that Morpheus splits off the word in either case, from the lowercase answer first"""
+    return _morpheus_reading(word_to_analyze.lower()).enclitic
 
 
 def morpheus_surfaces(word: str) -> FrozenSet[str]:
     """Returns Morpheus's spellings of the word (stem and suffix, lowercase, without macrons)"""
-    lowercase, capitalized = _answers_in_both_cases(word)
-    return lowercase.surfaces | capitalized.surfaces
+    reading = _morpheus_reading(word.lower())
+    return reading.lowercase.surfaces | reading.capitalized.surfaces
 
 
 def spelled_with_morpheus_letters(word: str) -> str:
@@ -323,9 +331,9 @@ def determine_proper_noun_state(word_in_text: str, is_sentence_start: bool, prev
 
     # Perform dictionary lookups. This part is PURE and based only on
     # word forms, completely independent of context.
-    lowercase, capitalized = _answers_in_both_cases(word_in_text)
-    analyses_lower = lowercase.lemmas
-    analyses_upper = capitalized.lemmas
+    reading = _morpheus_reading(word_in_text.lower())
+    analyses_lower = reading.lowercase.lemmas
+    analyses_upper = reading.capitalized.lemmas
 
     # A word has a common form if its lowercase analysis returns anything,
     # OR if its capitalized analysis contains a lowercase lemma.

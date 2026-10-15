@@ -39,13 +39,15 @@ The list is deliberately a subset of Morpheus's `LatinSuff` (`src/anal/checkstri
 
 - **2015:** Alatius's `a4d8f61` ("Don't try to guess short enclitics") commented `que`, `ne`, `ve`, `ue`, `vis`,
   `piam`, `dem` and `dum` out of `LatinSuff`. morpheus-alatius-xml v1.0.0 and v1.0.1 include it. Morpheus then couldn't
-  analyze a word carrying one of them, so the script strips the ending itself and queries the stem (the fallback in
-  `_analyze_word_with_clitic`). The list was named `COMMENTED_OUT_CLITICS` after that.
+  analyze a word carrying one of them, so the script strips the ending itself and queries the stem (the fallback, now
+  in `_morpheus_reading`). The list was named `COMMENTED_OUT_CLITICS` after that.
 - **2026-03-29:** upstream's `dc47d28` reverted it, and v2.0.0 includes the revert. Morpheus strips every `LatinSuff`
   ending itself, only when the whole word fails, and returns the host's analysis. The surface-form check finds which
   ending it stripped. The list became `SPLIT_ENCLITICS` on 2026-10-10.
-- **The fallback stays** in case a build stops stripping enclitics again. It stops after the first ending that matches
-  (`que` before `ue`), which is harmless for these five: no Latin stem ends in q.
+- **The fallback stays** in case a build stops stripping enclitics again. It runs only when neither the lowercase nor
+  the capitalized word is analyzed whole, so `Iove` (Juppiter) is never asked for as `io`. It takes the ending that
+  Morpheus split off in the other case, or else the first that matches (`que` before `ue`), which is harmless for these
+  five: no Latin stem ends in q.
 - **The morphology script's `ENCLITICS`** is a different list, for analysis retries and part-of-speech heuristics. It has
   nothing to do with splitting; don't merge the two.
 - **Which build runs** is whatever your API container uses.

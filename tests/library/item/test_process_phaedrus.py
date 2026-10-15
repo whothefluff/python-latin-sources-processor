@@ -1,4 +1,5 @@
 import logging
+from typing import NamedTuple
 
 import pandas as pd
 import pytest
@@ -9,25 +10,11 @@ from scripts.library.util.proper_noun import ProperNounState
 from scripts.library.util.token_classification import TokenType
 
 
-def _answers(monkeypatch, enclitics):
-    """Makes Morpheus answer each word in enclitics with that enclitic, and any other word with no analysis."""
-    monkeypatch.setattr(process_phaedrus, "_analyze_word_with_clitic",
-                        lambda word: process_phaedrus.MorpheusAnswer([word] if word in enclitics else [],
-                                                                     enclitics.get(word), frozenset()))
-
-
-@pytest.mark.parametrize("word", ["seque", "Seque", "SEQUE"])
-def test_find_enclitic_finds_a_common_word_enclitic_in_any_case(monkeypatch, word):
-    _answers(monkeypatch, {"seque": "que"})
-
-    assert process_phaedrus.find_enclitic(word) == "que"
-
-
-@pytest.mark.parametrize("word", ["Caesarque", "caesarque"])
-def test_find_enclitic_finds_a_proper_noun_enclitic_in_any_case(monkeypatch, word):
-    _answers(monkeypatch, {"Caesarque": "que"})
-
-    assert process_phaedrus.find_enclitic(word) == "que"
+@pytest.fixture(autouse=True)
+def _forget_morpheus_answers():
+    for cached in (process_phaedrus._lookup, process_phaedrus._morpheus_reading,
+                   process_phaedrus.determine_proper_noun_state):
+        cached.cache_clear()
 
 
 class _Response:
@@ -38,33 +25,77 @@ class _Response:
         pass
 
 
-def _morpheus_xml(surfaces):
-    """Returns a Morpheus answer with one inflection per surface. A surface is a stem, or a stem and a suffix as
-    Morpheus writes them, such as ('ob:jurg', 'a_bat')."""
-    terms = ''.join(f'<infl><term><stem>{stem}</stem>{f"<suff>{suffix}</suff>" if suffix else ""}</term></infl>'
-                    for stem, suffix in ((surface, None) if isinstance(surface, str) else surface
-                                         for surface in surfaces))
-    return f'<words><word><entry><dict><hdwd>x</hdwd></dict>{terms}</entry></word></words>' if terms else '<words/>'
+class _Inflection(NamedTuple):
+    """An inflection with its stem and suffix as Morpheus writes them, such as 'ob:jurg' and 'a_bat'"""
+    stem: str
+    suffix: str | None = None
+    pofs: str | None = None
+    mood: str | None = None
 
 
-def _surfaces(monkeypatch, surfaces_by_word):
-    """Makes Morpheus answer each word in surfaces_by_word with those surfaces, and any other word with no analysis."""
+class _Entry(NamedTuple):
+    headword: str
+    inflections: tuple
+
+
+def _entry(headword, *surfaces):
+    """Returns an entry for the headword with one inflection per surface. A surface is a stem, a stem and a suffix, or
+    an _Inflection"""
+    return _Entry(headword, surfaces)
+
+
+def _inflection(surface) -> _Inflection:
+    if isinstance(surface, _Inflection):
+        return surface
+    return _Inflection(surface) if isinstance(surface, str) else _Inflection(*surface)
+
+
+def _morpheus_xml(answer):
+    """Returns Morpheus's answer for an _Entry, or for a list of surfaces with the headword x"""
+    entry = answer if isinstance(answer, _Entry) else _Entry("x", tuple(answer))
+    infls = ''.join(f'<infl><term><stem>{i.stem}</stem>{f"<suff>{i.suffix}</suff>" if i.suffix else ""}</term>'
+                    f'{f"<pofs>{i.pofs}</pofs>" if i.pofs else ""}{f"<mood>{i.mood}</mood>" if i.mood else ""}</infl>'
+                    for i in map(_inflection, entry.inflections))
+    return f'<words><word><entry><dict><hdwd>{entry.headword}</hdwd></dict>{infls}</entry></word></words>' if infls \
+        else '<words/>'
+
+
+def _morpheus(monkeypatch, answers):
+    """Makes Morpheus give each word in answers that answer, and any other word no analysis.
+    Returns the words asked for, in order."""
+    asked = []
+
     def get(url, params, headers, timeout):
-        return _Response(_morpheus_xml(surfaces_by_word.get(params['word'], [])))
+        asked.append(params['word'])
+        return _Response(_morpheus_xml(answers.get(params['word'], [])))
 
-    process_phaedrus._analyze_word_with_clitic.cache_clear()
     monkeypatch.setattr(process_phaedrus.requests, "get", get)
+    return asked
+
+
+@pytest.mark.parametrize("word", ["seque", "Seque", "SEQUE"])
+def test_find_enclitic_finds_a_common_word_enclitic_in_any_case(monkeypatch, word):
+    _morpheus(monkeypatch, {"seque": _entry("sui", "se")})
+
+    assert process_phaedrus.find_enclitic(word) == "que"
+
+
+@pytest.mark.parametrize("word", ["Caesarque", "caesarque"])
+def test_find_enclitic_finds_a_proper_noun_enclitic_in_any_case(monkeypatch, word):
+    _morpheus(monkeypatch, {"Caesarque": _entry("Caesar", ("Caesa^r", "*"))})
+
+    assert process_phaedrus.find_enclitic(word) == "que"
 
 
 @pytest.mark.parametrize("word, expected", [("iam", "jam"), ("Iam", "Jam"), ("voluit", "voluit"), ("ait", "ait")])
 def test_spelled_with_morpheus_letters_takes_morpheus_j_and_keeps_the_edition_u(monkeypatch, word, expected):
-    _surfaces(monkeypatch, {"iam": ["jam"], "voluit": ["voluit", "volvit"], "ait": ["ait"]})
+    _morpheus(monkeypatch, {"iam": ["jam"], "voluit": ["voluit", "volvit"], "ait": ["ait"]})
 
     assert process_phaedrus.spelled_with_morpheus_letters(word) == expected
 
 
 def test_a_host_that_morpheus_spells_with_j_gets_its_enclitic(monkeypatch):
-    _surfaces(monkeypatch, {"iamque": ["jam"]})
+    _morpheus(monkeypatch, {"iamque": ["jam"]})
 
     assert (process_phaedrus.find_enclitic("Iamque"), process_phaedrus.spelled_with_morpheus_letters("Iamque")) == ("que", "Jamque")
 
@@ -76,7 +107,7 @@ def test_surface_forms_leave_out_the_prefix_and_empty_suffix_marks(stem, suffix,
 
 @pytest.mark.parametrize("word, expected", [("obiurgabat", "objurgabat"), ("Obiurgabat", "Objurgabat")])
 def test_a_compound_that_morpheus_spells_with_j_gets_it(monkeypatch, word, expected):
-    _surfaces(monkeypatch, {"obiurgabat": [("ob:jurg", "a_bat")]})
+    _morpheus(monkeypatch, {"obiurgabat": [("ob:jurg", "a_bat")]})
 
     assert process_phaedrus.spelled_with_morpheus_letters(word) == expected
 
@@ -84,7 +115,7 @@ def test_a_compound_that_morpheus_spells_with_j_gets_it(monkeypatch, word, expec
 @pytest.mark.parametrize("word, host, expected", [("obiurgatque", ("ob:jurg", "at"), "objurgatque"),
                                                   ("virque", ("vi^r", "*"), "virque")])
 def test_a_compound_host_or_a_host_without_a_suffix_gets_its_enclitic(monkeypatch, word, host, expected):
-    _surfaces(monkeypatch, {word: [host]})
+    _morpheus(monkeypatch, {word: [host]})
 
     assert process_phaedrus.find_enclitic(word) == "que"
     assert process_phaedrus.spelled_with_morpheus_letters(word) == expected
@@ -92,7 +123,7 @@ def test_a_compound_host_or_a_host_without_a_suffix_gets_its_enclitic(monkeypatc
 
 @pytest.mark.parametrize("unreachable", ["musaque", "musa"], ids=["the word", "its host"])
 def test_a_request_to_morpheus_that_fails_raises_and_leaves_nothing_cached(monkeypatch, unreachable):
-    _surfaces(monkeypatch, {"musa": [("mu^s", "a")]})
+    _morpheus(monkeypatch, {"musa": _entry("musa", ("mu^s", "a"))})
     answer = process_phaedrus.requests.get
 
     def get(url, params, headers, timeout):
@@ -114,7 +145,6 @@ def test_a_request_to_morpheus_that_fails_raises_and_leaves_nothing_cached(monke
     ("agedum", {"age": "<words><word>"}, process_phaedrus.ET.ParseError),
 ], ids=["not XML", "an error", "not XML for a host that dum may follow"])
 def test_an_answer_that_is_an_error_or_isnt_xml_raises(monkeypatch, word, answers, error):
-    process_phaedrus._analyze_word_with_clitic.cache_clear()
     monkeypatch.setattr(process_phaedrus.requests, "get",
                         lambda url, params, headers, timeout: _Response(answers.get(params['word'], '<words/>')))
 
@@ -122,14 +152,9 @@ def test_an_answer_that_is_an_error_or_isnt_xml_raises(monkeypatch, word, answer
         process_phaedrus.find_enclitic(word)
 
 
-def _morpheus(monkeypatch, answers):
-    """Makes Morpheus give each word in answers that answer, and any other word no analysis."""
-    monkeypatch.setattr(process_phaedrus, "_analyze_word_with_clitic",
-                        lambda word: answers.get(word, process_phaedrus.MorpheusAnswer([], None, frozenset())))
-
-
-_IOVE = {"iove": process_phaedrus.MorpheusAnswer(["io"], "ve", frozenset({"io"})),
-         "Iove": process_phaedrus.MorpheusAnswer(["Juppiter"], None, frozenset({"jove"}))}
+# Morpheus splits iove as io and ve, and knows Iove whole, as Juppiter
+_IO = _entry("io", _Inflection("i^o", pofs="exclamation"))
+_IOVE = {"iove": _IO, "io": _IO, "Iove": _entry("Juppiter", ("Jov", "e"))}
 
 
 def test_a_word_that_morpheus_knows_whole_in_one_case_has_no_enclitic(monkeypatch):
@@ -146,6 +171,59 @@ def test_a_word_that_morpheus_knows_whole_only_as_a_name_is_a_name(monkeypatch):
                                                                                 ProperNounState.YES)
 
 
+def test_a_word_that_morpheus_knows_whole_in_one_case_is_never_asked_for_without_an_ending(monkeypatch):
+    asked = _morpheus(monkeypatch, _IOVE)
+
+    process_phaedrus.find_enclitic("Iove")
+    process_phaedrus.morpheus_surfaces("iove")
+    process_phaedrus.determine_proper_noun_state("Iove", True, False)
+
+    assert asked == ["iove", "Iove"]
+
+
+def test_a_split_in_one_case_still_asks_for_the_host_in_the_other(monkeypatch):
+    asked = _morpheus(monkeypatch, {"jubetque": _entry("jubeo", ("jub", "et"))})
+
+    assert process_phaedrus.find_enclitic("Jubetque") == "que"
+    assert asked == ["jubetque", "Jubetque", "Jubet"]
+
+
+def test_a_name_that_only_the_capitalized_host_has_counts(monkeypatch):
+    _morpheus(monkeypatch, {"venereque": _entry("venio", ("ve_n", "e_re")), "Venere": _entry("Venus", ("Vener", "e"))})
+
+    assert process_phaedrus.find_enclitic("Venereque") == "que"
+    assert process_phaedrus.determine_proper_noun_state("Venereque", False, False) == (ProperNounState.EITHER,
+                                                                                      ProperNounState.YES)
+
+
+def test_a_word_that_neither_case_knows_gets_the_enclitic_of_a_host_that_answers(monkeypatch):
+    asked = _morpheus(monkeypatch, {"musa": _entry("musa", ("mu^s", "a"))})
+
+    assert process_phaedrus.find_enclitic("Musaque") == "que"
+    assert process_phaedrus.morpheus_surfaces("Musaque") == {"musa"}
+    assert asked == ["musaque", "Musaque", "musa", "Musa"]
+
+
+_AGE = _Inflection("ag", "e", mood="imperative")
+_AGE_AS_A_NOUN = _Inflection("ag", "e", pofs="noun")
+
+
+@pytest.mark.parametrize("word, answers, expected", [
+    ("agedum", {"agedum": _entry("ago", _AGE)}, "dum"),
+    ("ehodum", {"ehodum": _entry("eho", _Inflection("eho", pofs="exclamation"))}, "dum"),
+    ("agedum", {"agedum": _entry("x", _AGE_AS_A_NOUN), "age": _entry("ago", _AGE)}, "dum"),
+    ("agedum", {"agedum": _entry("x", _AGE_AS_A_NOUN), "age": _entry("x", _AGE_AS_A_NOUN)}, None),
+    ("vixdum", {"vix": _entry("vix", _Inflection("vix", pofs="adverb"))}, "dum"),
+    ("agedum", {"age": _entry("x", _AGE_AS_A_NOUN)}, None),
+])
+def test_dum_is_an_enclitic_only_after_an_imperative_an_interjection_or_an_adverb(monkeypatch, word, answers,
+                                                                                    expected):
+    _morpheus(monkeypatch, answers)
+
+    assert process_phaedrus.find_enclitic(word) == expected
+    assert bool(process_phaedrus.morpheus_surfaces(word)) == (expected is not None)
+
+
 _CARMEN = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
   <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Carmen</title><author>Fictor</author></titleStmt></fileDesc>
   </teiHeader>
@@ -155,10 +233,10 @@ _CARMEN = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
     <l n="3">iacere et iacere iam.</l>
   </div></div></body></text>
 </TEI>"""
-_CARMEN_ANALYSES = {word: process_phaedrus.MorpheusAnswer(lemmas, None, frozenset({surface}))
-                    for word, lemmas, surface in [("levis", ["levis"], "levis"), ("et", ["et"], "et"),
-                                                  ("est", ["sum"], "est"), ("iacere", ["jaceo", "jacio"], "jacere"),
-                                                  ("iam", ["jam"], "jam"), ("i", ["eo"], "i")]}
+_CARMEN_ANALYSES = {word: _entry(headword, surface)
+                    for word, headword, surface in [("levis", "levis", "levis"), ("et", "et", "et"),
+                                                    ("est", "sum", "est"), ("iacere", "jaceo", "jacere"),
+                                                    ("iam", "jam", "jam"), ("i", "eo", "i")]}
 # Certain of levis as lĕvis in the first verse and as lēvis in the second, except for the last levis, of iacere as
 # jacēre and as jacere, and of iam
 _CARMEN_MACRONIZED = [("Levis", "Levis", 0), ("et", "et", 0), ("levis", "levis", 0), ("est", "est", 0), (".", ".", 0),
@@ -331,8 +409,6 @@ def test_a_word_that_morpheus_cant_be_asked_about_raises_instead_of_getting_no_s
     def get(url, params, headers, timeout):
         raise requests.exceptions.ConnectionError("No answer from Morpheus")
 
-    process_phaedrus._analyze_word_with_clitic.cache_clear()
-    process_phaedrus.determine_proper_noun_state.cache_clear()
     monkeypatch.setattr(process_phaedrus.requests, "get", get)
     _macronizer_answers(monkeypatch, _CARMEN_MACRONIZED)
 
