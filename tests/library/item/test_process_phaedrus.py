@@ -164,15 +164,24 @@ _CARMEN_MACRONIZED = [("Levis", "Levis", 0), ("et", "et", 0), ("levis", "levis",
                       (".", ".", 0)]
 
 
-@pytest.fixture
-def carmen(monkeypatch, tmp_path):
-    _morpheus(monkeypatch, _CARMEN_ANALYSES)
-    process_phaedrus.determine_proper_noun_state.cache_clear()
+def _macronizer_answers(monkeypatch, macronized):
+    """Makes the macronizer answer any text with macronized, a list of (word, macronized word, mask)."""
     monkeypatch.setattr(process_phaedrus, "macronize_text", lambda text: [
         process_phaedrus.TokenResult(word=word, is_word=word.isalpha(), macronized=macronized, uncertainty_mask=mask,
                                      candidates=[])
-        for word, macronized, mask in _CARMEN_MACRONIZED])
-    process_phaedrus.process_verse(_CARMEN, tmp_path)
+        for word, macronized, mask in macronized])
+
+
+def _process_carmen(monkeypatch, output_dir, xml=_CARMEN, macronized=_CARMEN_MACRONIZED):
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    process_phaedrus.determine_proper_noun_state.cache_clear()
+    _macronizer_answers(monkeypatch, macronized)
+    process_phaedrus.process_verse(xml, output_dir)
+
+
+@pytest.fixture
+def carmen(monkeypatch, tmp_path):
+    _process_carmen(monkeypatch, tmp_path)
     return tmp_path
 
 
@@ -188,3 +197,66 @@ def test_each_certain_occurrence_of_a_word_that_the_work_macronizes_in_two_ways_
 def test_only_the_macronizations_that_the_certain_occurrences_agree_on_are_unambiguous(carmen):
     assert _rows(carmen / "unambiguous_macronizations.csv") == [
         (",", ","), (".", "."), ("est", "est"), ("et", "et"), ("jam", "jam")]
+
+
+def test_a_request_to_the_macronizer_that_fails_raises_and_writes_nothing(monkeypatch, tmp_path):
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    process_phaedrus.determine_proper_noun_state.cache_clear()
+
+    def post(url, data, headers, timeout):
+        raise requests.exceptions.ConnectionError("No answer from the macronizer")
+
+    monkeypatch.setattr(process_phaedrus.requests, "post", post)
+
+    with pytest.raises(requests.exceptions.ConnectionError):
+        process_phaedrus.process_verse(_CARMEN, tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("macronized, error", [
+    (_CARMEN_MACRONIZED[:-2], "ran out before 'iam'"),
+    (_CARMEN_MACRONIZED + [("et", "et", 0)], "returned 1 more results than the text has tokens, from 'et'"),
+], ids=["fewer results", "more results"])
+def test_macronizer_results_that_dont_match_the_text_raise_and_write_nothing(monkeypatch, tmp_path, macronized, error):
+    with pytest.raises(RuntimeError, match=error):
+        _process_carmen(monkeypatch, tmp_path, macronized=macronized)
+    assert list(tmp_path.iterdir()) == []
+
+
+_CARMEN_WITH_GAPS = _CARMEN.replace('<l n="2">Est levis, levis.</l>', '<l n="2"><gap reason="lost"/></l>\n'
+                                    '    <l n="3">Est levis, levis.</l>').replace(
+    '<l n="3">iacere et iacere iam.</l>', '<l n="4">iacere et iacere iam.</l>\n    <l n="5"><gap reason="lost"/></l>')
+
+
+def test_lost_lines_get_no_macronizer_results(monkeypatch, tmp_path):
+    _process_carmen(monkeypatch, tmp_path, xml=_CARMEN_WITH_GAPS)
+
+    assert _rows(tmp_path / "work_macronizations.csv", "workId") == [
+        (0, "Levis", 0), (2, "levis", 0), (7, "lēvis", 0), (9, "levis", 2), (11, "jacēre", 0), (13, "jacere", 0)]
+
+
+def test_a_list_of_words_gets_the_macronizations_of_its_words_and_not_of_the_et_between_them(monkeypatch):
+    _macronizer_answers(monkeypatch, [("et", "et", 0), (" ", " ", 0), ("Levis", "Lēvis", 0), (" ", " ", 0),
+                                      ("et", "et", 0), (" ", " ", 0), ("Venere", "Venere", 2)])
+
+    assert process_phaedrus._get_macronization_data_from_api({"Levis", "Venere"}) == {"Levis": ("Lēvis", 0),
+                                                                                      "Venere": ("Venere", 2)}
+
+
+@pytest.mark.parametrize("words, macronized, error", [
+    ({"Levis", "Venere"}, [], "ran out before 'et'"),
+    ({"Levis", "Venere"}, [("et", "et", 0), ("Levis", "Lēvis", 0), ("et", "et", 0)], "ran out before 'Venere'"),
+    ({"Levis", "Venere"}, [("et", "et", 0), ("Levis", "Lēvis", 0), ("et", "et", 0), ("Venere", "Venere", 0),
+                           ("et", "et", 0), ("Roma", "Rōma", 0)],
+     "returned 2 more results than the text has tokens, from 'et'"),
+    ({"Levis"}, [("Levis", "Lēvis", 0)], "Expected 'et', reconstructed 'Levis'"),
+    ({"Levis"}, [("et", "et", 0), ("Levis", "Lēvis", 0), ("et", "et", 0)],
+     "returned 1 more results than the text has tokens, from 'et'"),
+    ({"Levis"}, [("et", "et", 0), ("Levis", "Lēvis", 0), (".", ".", 0)],
+     "returned 1 more results than the text has tokens, from '.'"),
+], ids=["no results", "fewer results", "more results", "without the first et", "one more et", "punctuation"])
+def test_macronizer_results_for_a_list_of_words_that_dont_match_it_raise(monkeypatch, words, macronized, error):
+    _macronizer_answers(monkeypatch, macronized)
+
+    with pytest.raises(RuntimeError, match=error):
+        process_phaedrus._get_macronization_data_from_api(words)

@@ -349,9 +349,10 @@ class TokenResult(TypedDict):
     candidates: list[str]
 
 
-def macronize_text(text: str) -> List[TokenResult] | None:
+def macronize_text(text: str) -> List[TokenResult]:
     """
     Calls the local macronization API to get macronization data for a given text.
+    Raises when the request fails.
     """
     payload = {"text": text, "clean": False}
     headers = {"Content-Type": "application/json"}
@@ -367,8 +368,8 @@ def macronize_text(text: str) -> List[TokenResult] | None:
         return results
 
     except requests.exceptions.RequestException:
-        logging.exception("Error calling macronization API")
-        return None
+        logging.error("Error calling macronization API")
+        raise
 
 
 def _process_text_segments(
@@ -462,6 +463,8 @@ def _consume_clitic_tokens(word: str, api_tokens: List[TokenResult], cursor: int
     Raises if the tokens can't be made to match word — a desync here means
     everything after it is unreliable, so there's no safe way to continue.
     """
+    if cursor == len(api_tokens):
+        raise RuntimeError(f"The macronizer's results ran out before '{word}'.")
     reconstructed, macronized, mask = "", "", 0
     while cursor < len(api_tokens) and len(reconstructed) < len(word):
         token = api_tokens[cursor]
@@ -476,6 +479,13 @@ def _consume_clitic_tokens(word: str, api_tokens: List[TokenResult], cursor: int
     return macronized, mask, cursor
 
 
+def _raise_for_results_left_over(api_tokens: List[TokenResult], cursor: int):
+    """Raises when api_tokens has results after cursor, where matching them with the text's tokens ended."""
+    if cursor < len(api_tokens):
+        raise RuntimeError(f"The macronizer returned {len(api_tokens) - cursor} more results than the text has tokens, "
+                           f"from '{api_tokens[cursor]['word']}'.")
+
+
 def _reassemble_clitic_tokens(target_words: List[str], api_tokens: List[TokenResult]) -> Dict[str, Tuple[str, int]]:
     """
     Maps each word in target_words to its (macronized_word, uncertainty_mask),
@@ -486,6 +496,7 @@ def _reassemble_clitic_tokens(target_words: List[str], api_tokens: List[TokenRes
     for word in target_words:
         macronized, mask, cursor = _consume_clitic_tokens(word, api_tokens, cursor)
         result[word] = (macronized, mask)
+    _raise_for_results_left_over(api_tokens, cursor)
     return result
 
 
@@ -501,13 +512,9 @@ def _get_macronization_data_from_api(words: Set[str]) -> Dict[str, Tuple[str, in
     # The leading "et" provides context to avoid sentence-start capitalization logic for the first word.
     # It also never has status 2
     text_for_api = "et " + " et ".join(sorted_words)
-    results = macronize_text(text_for_api)
-
-    if not results:
-        return {}
-
-    word_tokens = [res for res in results if res['is_word'] and res['word'] != 'et']
-    return _reassemble_clitic_tokens(sorted_words, word_tokens)
+    api_tokens = [res for res in macronize_text(text_for_api) if not res['word'].isspace()]
+    macronizations = _reassemble_clitic_tokens(text_for_api.split(), api_tokens)
+    return {word: macronizations[word] for word in sorted_words}
 
 
 def _full_uncertainty_mask(word: str) -> int:
@@ -892,90 +899,88 @@ def process_verse(xml_string, output_dir):
         # 3. Get contextual macronization for the entire work.
         full_text = '\n'.join(lines_for_macronizer)
         logging.info("Calling macronization API for the entire work to get contextual results...")
-        api_results = macronize_text(full_text)
+        api_tokens = [res for res in macronize_text(full_text) if not res['word'].isspace()]
+        df_cursor = 0
+        api_cursor = 0
 
-        if api_results:
-            api_tokens = [res for res in api_results if not res['word'].isspace()]
-            df_cursor = 0
-            api_cursor = 0
+        logging.info("Mapping macronization results and sorting into ambiguous/unambiguous tables...")
+        while df_cursor < len(work_contents_df):
+            original_row = work_contents_df.iloc[df_cursor]
+            raw_word = original_row['word']
+            if not isinstance(raw_word, str):
+                df_cursor += 1
+                continue
+            original_word = raw_word
+            content_idx = original_row['idx']
+            token_type = int(original_row['tokenType'])
+            proper_noun_state = (None if pd.isna(original_row['properNounState'])
+                                 else int(original_row['properNounState']))
 
-            logging.info("Mapping macronization results and sorting into ambiguous/unambiguous tables...")
-            while df_cursor < len(work_contents_df) and api_cursor < len(api_tokens):
-                original_row = work_contents_df.iloc[df_cursor]
-                raw_word = original_row['word']
-                if not isinstance(raw_word, str):
-                    df_cursor += 1
-                    continue
-                original_word = raw_word
-                content_idx = original_row['idx']
-                token_type = int(original_row['tokenType'])
-                proper_noun_state = (None if pd.isna(original_row['properNounState'])
-                                     else int(original_row['properNounState']))
+            # Skip processing for None
+            if not original_word:
+                df_cursor += 1
+                continue
 
-                # Skip processing for None
-                if not original_word:
-                    df_cursor += 1
-                    continue
+            # Reassemble clitics by greedily consuming API tokens
+            combined_macronized, combined_mask, api_cursor = _consume_clitic_tokens(
+                original_word, api_tokens, api_cursor
+            )
 
-                # Reassemble clitics by greedily consuming API tokens
-                combined_macronized, combined_mask, api_cursor = _consume_clitic_tokens(
-                    original_word, api_tokens, api_cursor
+            # 4a. Non-word tokens should be stored exactly as they appear (this includes punctuation, abbreviations, etc.)
+            if token_type > 1:
+                certain_macronizations_by_key[original_word].add(combined_macronized)
+                certain_tokens.append(CertainToken(work_id, content_idx, original_word, token_type,
+                                                   proper_noun_state, combined_macronized))
+            else:
+                # 4b. Decision logic: store in work-specific or global table
+                lower_word = original_word.lower()
+
+                respelled_word = spelled_with_morpheus_letters(original_word)
+                respelled_macronized = respell_macronized(original_word, respelled_word, combined_macronized)
+                #context_state = original_row['properNounState']
+                is_macron_uncertain_by_pn_state = (
+                        lower_word in uncertain_depending_on_proper_noun_state
+                        and original_word[0].isupper()
                 )
+                is_macron_uncertain_always = combined_mask != 0
 
-                # 4a. Non-word tokens should be stored exactly as they appear (this includes punctuation, abbreviations, etc.)
-                if token_type > 1:
-                    certain_macronizations_by_key[original_word].add(combined_macronized)
-                    certain_tokens.append(CertainToken(work_id, content_idx, original_word, token_type,
-                                                       proper_noun_state, combined_macronized))
+                if is_macron_uncertain_always:
+                    work_macronizations_data.append(
+                        WorkMacronization(work_id, content_idx, respelled_macronized, combined_mask))
+                elif is_macron_uncertain_by_pn_state:
+                    logging.warning("'%s' at '%s' has different macrons depending on whether it's a proper noun or not", original_word, content_idx)
+                    work_macronizations_data.append(
+                        WorkMacronization(work_id, content_idx, respelled_macronized, combined_mask))
                 else:
-                    # 4b. Decision logic: store in work-specific or global table
-                    lower_word = original_word.lower()
+                    # The macrons are stable. It's safe for the global unambiguous table.
+                    # Get the inherent state to decide HOW to save it
+                    inherent_state = inherent_states.get(lower_word) # default to None
 
-                    respelled_word = spelled_with_morpheus_letters(original_word)
-                    respelled_macronized = respell_macronized(original_word, respelled_word, combined_macronized)
-                    #context_state = original_row['properNounState']
-                    is_macron_uncertain_by_pn_state = (
-                            lower_word in uncertain_depending_on_proper_noun_state
-                            and original_word[0].isupper()
-                    )
-                    is_macron_uncertain_always = combined_mask != 0
-
-                    if is_macron_uncertain_always:
-                        work_macronizations_data.append(
-                            WorkMacronization(work_id, content_idx, respelled_macronized, combined_mask))
-                    elif is_macron_uncertain_by_pn_state:
-                        logging.warning("'%s' at '%s' has different macrons depending on whether it's a proper noun or not", original_word, content_idx)
-                        work_macronizations_data.append(
-                            WorkMacronization(work_id, content_idx, respelled_macronized, combined_mask))
-                    else:
-                        # The macrons are stable. It's safe for the global unambiguous table.
-                        # Get the inherent state to decide HOW to save it
-                        inherent_state = inherent_states.get(lower_word) # default to None
-
-                        if inherent_state == 0: # Common noun -> lowercase
+                    if inherent_state == 0: # Common noun -> lowercase
+                        certain_macronizations_by_key[respelled_word.lower()].add(respelled_macronized.lower())
+                    elif inherent_state == 1: # Proper noun -> capitalized
+                        certain_macronizations_by_key[respelled_word.capitalize()].add(
+                            respelled_macronized.capitalize())
+                    elif inherent_state == 2:
+                        if lower_word in uncertain_depending_on_proper_noun_state or lower_word in cap_form_unknown:
+                            # Only lowercase is globally safe — capitalized instances
+                            # are always routed to WorkMacronizations above.
                             certain_macronizations_by_key[respelled_word.lower()].add(respelled_macronized.lower())
-                        elif inherent_state == 1: # Proper noun -> capitalized
+                        else:
+                            # Both known, same macrons → store both
+                            certain_macronizations_by_key[respelled_word.lower()].add(respelled_macronized.lower())
                             certain_macronizations_by_key[respelled_word.capitalize()].add(
                                 respelled_macronized.capitalize())
-                        elif inherent_state == 2:
-                            if lower_word in uncertain_depending_on_proper_noun_state or lower_word in cap_form_unknown:
-                                # Only lowercase is globally safe — capitalized instances
-                                # are always routed to WorkMacronizations above.
-                                certain_macronizations_by_key[respelled_word.lower()].add(respelled_macronized.lower())
-                            else:
-                                # Both known, same macrons → store both
-                                certain_macronizations_by_key[respelled_word.lower()].add(respelled_macronized.lower())
-                                certain_macronizations_by_key[respelled_word.capitalize()].add(
-                                    respelled_macronized.capitalize())
-                        else: # None: don't store as unambiguous as it is technically an unknown word
-                            logging.warning("'%s' is morphologically un-analyzable but has a certain macronization. Storing as-is.", original_word)
-                            work_macronizations_data.append(
-                                WorkMacronization(work_id, content_idx, respelled_macronized, combined_mask))
-                        if inherent_state is not None:
-                            certain_tokens.append(CertainToken(work_id, content_idx, respelled_word, token_type,
-                                                               proper_noun_state, respelled_macronized))
+                    else: # None: don't store as unambiguous as it is technically an unknown word
+                        logging.warning("'%s' is morphologically un-analyzable but has a certain macronization. Storing as-is.", original_word)
+                        work_macronizations_data.append(
+                            WorkMacronization(work_id, content_idx, respelled_macronized, combined_mask))
+                    if inherent_state is not None:
+                        certain_tokens.append(CertainToken(work_id, content_idx, respelled_word, token_type,
+                                                           proper_noun_state, respelled_macronized))
 
-                df_cursor += 1
+            df_cursor += 1
+        _raise_for_results_left_over(api_tokens, api_cursor)
 
     unambiguous_macronizations_dict = agreed_macronizations(certain_macronizations_by_key)
     work_macronizations_data.extend(
