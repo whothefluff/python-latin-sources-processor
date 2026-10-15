@@ -59,8 +59,9 @@ Morpheus and the macronizer keep running. It has no display: pass the aggregate 
   reader imports them by position
 - Refuses to save when a work is found twice (already aggregated, or in two directories), since every run of a work's
   script gives it new ids
-- Lists an author of several works once, taking authors with the same name as one. Refuses to save when that author's
-  about, image or abbreviations differ from one work to another, or when an author id has more than one name
+- Lists an author of several works once, taking authors with the same name as one, under the id of the first work in
+  path order. Refuses to save when that author's about, image or abbreviations differ from one work to another, or when
+  an author id has more than one name
 - Gives a certain token its own macronization in `work_macronizations.csv`, with mask 0, when the reader would look it
   up under an unambiguous macronization that isn't its own: a word that works are certain of but macronize
   differently, or another token's, such as a numeral I's for a capitalized I

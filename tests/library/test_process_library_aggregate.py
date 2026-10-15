@@ -397,3 +397,13 @@ def test_an_author_id_under_one_name_in_both_works_is_one_author(tmp_path, runs)
         (CARMINA_PRIMA_AUTHOR_ID, 'Fictor', 'An invented poet.', 'Zml4dHVyZQ==')]
     assert _rows(_read(tmp_path / 'aggregate', 'authors_and_works.csv')) == [
         (CARMINA_PRIMA_AUTHOR_ID, CARMINA_PRIMA_ID), (CARMINA_PRIMA_AUTHOR_ID, CARMINA_ALTERA_ID)]
+
+
+def test_the_work_directories_are_aggregated_in_path_order_whatever_order_they_are_listed_in(monkeypatch, tmp_path):
+    rglob = Path.rglob
+    monkeypatch.setattr(Path, 'rglob', lambda path, pattern: reversed(sorted(rglob(path, pattern))))
+
+    aggregate(TWO_WORKS_BY_ONE_AUTHOR, tmp_path)
+
+    assert list(_read(tmp_path, 'works.csv')['id']) == [CARMINA_ALTERA_ID, CARMINA_PRIMA_ID]
+    assert list(_read(tmp_path, 'authors.csv')['id']) == [CARMINA_ALTERA_AUTHOR_ID]

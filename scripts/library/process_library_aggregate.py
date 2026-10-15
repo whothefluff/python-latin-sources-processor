@@ -74,7 +74,8 @@ def select_directory():
 def find_valid_work_dirs(base_dir):
     """
     Recursively searches through directories to find valid work directories
-    (those containing any of the library files, so that a work without work_contents.csv is found too)
+    (those containing any of the library files, so that a work without work_contents.csv is found too), in path order,
+    which decides whose author id a merged author keeps
     """
     valid_work_dirs = []
     base_path = Path(base_dir)
@@ -87,7 +88,7 @@ def find_valid_work_dirs(base_dir):
             valid_work_dirs.append(work_dir)
             logging.info(f"Found valid work directory: {work_dir}")
 
-    return valid_work_dirs
+    return sorted(valid_work_dirs)
 
 
 def works_of(works_df, authors_df, authors_and_works_df):
