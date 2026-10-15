@@ -51,6 +51,12 @@ Morpheus and the macronizer keep running. It has no display: pass the aggregate 
   from any working directory: `python -m scripts.library.process_library_aggregate output/library/item`
 - Additive process - new data is appended to existing files (useful when adding new works)
 - **Deleting** the aggregate files is necessary for reprocessing old entries without adding duplicates
+- Raises and saves nothing when a work's directory, or the aggregate when there is one, has a publication into it that
+  didn't finish or a `.<name>.old` file that one left, is missing one of the ten files that a work's script writes, has
+  one that can't be read or that has other columns than the reader's, or has no rows in `works.csv`,
+  `work_contents.csv`, `work_content_subdivisions.csv`, `authors.csv` or `authors_and_works.csv`. A directory with any
+  of the ten files is a work's. Otherwise it saves all of the files or none, with their columns in the order that the
+  reader imports them by position
 - Refuses to save when a work is found twice (already aggregated, or in two directories), since every run of a work's
   script gives it new ids
 - Lists an author of several works once, taking authors with the same name as one. Refuses to save when that author's

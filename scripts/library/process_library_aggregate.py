@@ -1,17 +1,37 @@
 import argparse
 import logging
+import tempfile
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Set, Tuple, cast
+from typing import Dict, Hashable, List, Mapping, Set, Tuple, cast
 
 import pandas as pd
 from tqdm import tqdm
 
+from scripts.common.publishing import publish, raise_for_publication_leftovers
 from scripts.library.util.unambiguous_macronizations import (
     CertainToken, agreed_macronizations, lookup_key, work_macronizations_where_lookup_differs,
 )
 
-TYPE_BY_FILE_AND_COLUMN = {
+#: The files that every work's script writes, and their columns in the order that the reader imports them by position
+COLUMNS_BY_LIBRARY_FILE: Dict[str, List[str]] = {
+    'works.csv': ['id', 'name', 'about', 'uvLowercase', 'uvCapitals', 'ijLowercase', 'ijCapitals'],
+    'work_contents.csv': ['workId', 'idx', 'word', 'sourceReference', 'properNounState', 'tokenType', 'sentenceIdx',
+                          'wordIdx', 'enclitic', 'expansion'],
+    'work_content_subdivisions.csv': ['workId', 'node', 'typ', 'cnt', 'name', 'parent', 'fromIndex', 'toIndex'],
+    'work_content_supplementary.csv': ['workId', 'typ', 'cnt', 'fromIndex', 'toIndex', 'val'],
+    'work_abbreviations.csv': ['workId', 'id', 'val'],
+    'authors.csv': ['id', 'name', 'about', 'image'],
+    'author_abbreviations.csv': ['authorId', 'id', 'val'],
+    'authors_and_works.csv': ['authorId', 'workId'],
+    'work_macronizations.csv': ['workId', 'idx', 'macronizedWord', 'uncertaintyBitMask'],
+    'unambiguous_macronizations.csv': ['word', 'macronizedWord'],
+}
+#: The library files that have rows for every work. Any of the others can have only a header
+FILES_WITH_ROWS_FOR_EVERY_WORK = ('works.csv', 'work_contents.csv', 'work_content_subdivisions.csv', 'authors.csv',
+                                  'authors_and_works.csv')
+
+TYPE_BY_FILE_AND_COLUMN: Dict[str, Mapping[Hashable, str]] = {
     'work_contents.csv': {
         'properNounState': 'Int64',
         'wordIdx': 'Int64'
@@ -54,14 +74,15 @@ def select_directory():
 def find_valid_work_dirs(base_dir):
     """
     Recursively searches through directories to find valid work directories
-    (those containing work_contents.csv)
+    (those containing any of the library files, so that a work without work_contents.csv is found too)
     """
     valid_work_dirs = []
     base_path = Path(base_dir)
 
     # Only look through actual subdirectories, no symlinks or junctions
-    for current_path in base_path.rglob('work_contents.csv'):
-        if current_path.is_file():
+    for current_path in base_path.rglob('*.csv'):
+        is_library_file = current_path.is_file() and current_path.name in COLUMNS_BY_LIBRARY_FILE
+        if is_library_file and current_path.parent not in valid_work_dirs:
             work_dir = current_path.parent
             valid_work_dirs.append(work_dir)
             logging.info(f"Found valid work directory: {work_dir}")
@@ -153,125 +174,72 @@ def merge_macronizations(dfs_by_source: List[Dict[str, pd.DataFrame]],
                       for token in _certain_tokens_of(dfs, unambiguous_macronizations)]
     added = work_macronizations_where_lookup_differs(certain_macronizations_by_key, certain_tokens)
     return (pd.DataFrame(list(agreed_macronizations(certain_macronizations_by_key).items()),
-                         columns=['word', 'macronizedWord']),
-            pd.concat([work_macronizations, pd.DataFrame(added, columns=work_macronizations.columns)],
+                         columns=COLUMNS_BY_LIBRARY_FILE['unambiguous_macronizations.csv']),
+            pd.concat([work_macronizations,
+                       pd.DataFrame(added, columns=COLUMNS_BY_LIBRARY_FILE['work_macronizations.csv'])],
                       ignore_index=True))
 
 
-def validate_aggregation(existing_df, original_dfs, aggregated_df, file_name):
-    """
-    Validates the aggregation process for a specific file type.
-    Checks that the number of newly added rows matches the sum of rows from found folders.
-    Returns (is_valid, message)
-    """
-    # Get the number of rows we're trying to add from the found folders for this file
-    rows_to_add = sum(len(df) for df in original_dfs)
-
-    # Calculate expected total rows
-    expected_total = len(existing_df) + rows_to_add
-
-    # Check if these rows were actually added to the aggregated file
-    if len(aggregated_df) != expected_total:
-        return False, f"Row mismatch in {file_name}: Expected {expected_total} rows, got {len(aggregated_df)}"
-
-    # Column consistency check
-    base_columns = set(original_dfs[0].columns)
-    for df in original_dfs:
-        if set(df.columns) != base_columns:
-            return False, f"Column mismatch in {file_name}: Inconsistent columns across source files"
-
-    return True, ""
+def read_library_files(output_dir: Path, work_dirs: List[Path]) -> List[Dict[str, pd.DataFrame]]:
+    """Returns the library files of the aggregate in output_dir, when it has any, and of each work directory, by file
+    name. Raises when a publication into a directory didn't finish or left a file it replaced, when a file is missing
+    or can't be read, when a file that has rows for every work has none, or when a file's columns aren't the ones that
+    COLUMNS_BY_LIBRARY_FILE gives it, in any order."""
+    has_aggregate = any((output_dir / name).exists() for name in COLUMNS_BY_LIBRARY_FILE)
+    directories = ([output_dir] if has_aggregate else []) + work_dirs
+    for directory in directories:
+        raise_for_publication_leftovers(directory)
+    problems: List[str] = []
+    dfs_by_source: List[Dict[str, pd.DataFrame]] = []
+    for directory in tqdm(directories, desc="Reading directories"):
+        dfs: Dict[str, pd.DataFrame] = {}
+        for file_name, columns in COLUMNS_BY_LIBRARY_FILE.items():
+            path = directory / file_name
+            if not path.exists():
+                problems.append(f"{path} is missing")
+                continue
+            try:
+                df = pd.read_csv(path, dtype=TYPE_BY_FILE_AND_COLUMN.get(file_name))
+            except Exception as e:
+                problems.append(f"{path} can't be read: {e}")
+                continue
+            if df.empty and file_name in FILES_WITH_ROWS_FOR_EVERY_WORK:
+                problems.append(f"{path} has no rows")
+            if set(df.columns) != set(columns):
+                problems.append(f"{path} has the columns {list(df.columns)} instead of {columns}")
+            dfs[file_name] = df
+        dfs_by_source.append(dfs)
+        logging.info(f"Read {directory}")
+    if problems:
+        raise ValueError("Nothing was saved, because of these files:\n" + "\n".join(f"    {p}" for p in problems))
+    return dfs_by_source
 
 
 def aggregate(base_dir: Path, output_dir: Path = OUTPUT_DIR):
-    """Adds every work found under base_dir to the aggregate files in output_dir"""
+    """Adds every work found under base_dir to the aggregate files in output_dir, with each file's columns in the order
+    that the reader imports them. Raises, and saves nothing, when the files can't be aggregated."""
     output_dir.mkdir(parents=True, exist_ok=True)  # Ensure output directory exists
 
     valid_work_dirs = find_valid_work_dirs(base_dir)
     if not valid_work_dirs:
-        logging.warning("No valid work directories found (containing work_contents.csv). Exiting...")
+        logging.warning("No valid work directories found (containing any of the library files). Exiting...")
         return
 
-    # Dictionary to store original DataFrames for validation
-    original_dfs = {}
-    # Dictionary to store aggregated DataFrames
-    aggregated_dfs: Dict[str, pd.DataFrame] = {}
-    # Dictionary to store existing DataFrames
-    existing_dfs = {}
-
-    # Collect all unique CSV filenames across all work directories
-    template_files = set()
-    for work_dir in valid_work_dirs:
-        template_files.update(f.name for f in work_dir.glob("*.csv"))
-    template_files = list(template_files)
-
-    logging.info(f"CSV files to process: {template_files}")
-
-    # Initialize aggregated_dfs and existing_dfs with existing files
-    for file_name in template_files:
-        output_path = output_dir / file_name
-        if output_path.exists():
-            try:
-                existing_df = pd.read_csv(output_path, dtype=TYPE_BY_FILE_AND_COLUMN.get(file_name))
-                existing_dfs[file_name] = existing_df.copy()
-                aggregated_dfs[file_name] = existing_df.copy()
-                logging.info(f"Loaded existing aggregated file: {output_path} with {len(existing_df)} rows.")
-            except Exception as e:
-                logging.error(f"Error reading existing {output_path}: {str(e)}")
-                continue
-        else:
-            aggregated_dfs[file_name] = pd.DataFrame()
-            logging.info(f"Initialized new aggregated file: {output_path}")
-
     # Library files by source, to find works aggregated twice
-    dfs_by_source = [existing_dfs]
-
-    # Process each valid work directory
-    for work_dir in tqdm(valid_work_dirs, desc="Processing directories"):
-        logging.info(f"Processing directory: {work_dir}")
-        dfs_by_source.append({})
-
-        for file_name in template_files:
-            file_path = work_dir / file_name
-
-            if file_path.exists():
-                try:
-                    # Read the current CSV file
-                    df = pd.read_csv(file_path, dtype=TYPE_BY_FILE_AND_COLUMN.get(file_name))
-                    dfs_by_source[-1][file_name] = df
-
-                    # Store original DataFrame for validation
-                    if file_name not in original_dfs:
-                        original_dfs[file_name] = []
-                    original_dfs[file_name].append(df)
-
-                    # Add to aggregated DataFrame
-                    if aggregated_dfs[file_name].empty and file_name not in existing_dfs:
-                        aggregated_dfs[file_name] = df.copy()
-                    else:
-                        aggregated_dfs[file_name] = pd.concat(
-                            [aggregated_dfs[file_name], df],
-                            ignore_index=True
-                        )
-                    logging.info(f"Appended {len(df)} rows from {file_path}")
-
-                except Exception as e:
-                    logging.error(f"Error processing {file_path}: {str(e)}")
-
-        logging.info(f"Finished processing directory: {work_dir}")
+    dfs_by_source = read_library_files(output_dir, valid_work_dirs)
 
     # check necessary because every run of a work script creates new ids
     repeated_works = find_repeated_works(dfs_by_source)
     if repeated_works:
-        logging.error(f"Works found more than once: {repeated_works}. Nothing was saved. To process a work again, "
-                      f"delete the aggregate files in {output_dir} and aggregate every work")
-        return
+        raise ValueError(f"Works found more than once: {repeated_works}. Nothing was saved. To process a work again, "
+                         f"delete the aggregate files in {output_dir} and aggregate every work")
 
     authors_that_differ = find_authors_that_differ(dfs_by_source)
     if authors_that_differ:
-        logging.error(f"Authors whose rows differ from one work to another: {authors_that_differ}. Nothing was saved. "
-                      f"Give each of them the same about, image and abbreviations in every work")
-        return
+        raise ValueError(f"Authors whose rows differ from one work to another: {authors_that_differ}. Nothing was "
+                         f"saved. Give each of them the same about, image and abbreviations in every work")
+    aggregated_dfs = {file_name: pd.concat([dfs[file_name] for dfs in dfs_by_source], ignore_index=True)
+                      for file_name in COLUMNS_BY_LIBRARY_FILE}
     authors, authors_and_works, author_abbreviations = merge_authors(aggregated_dfs['authors.csv'],
                                                                      aggregated_dfs['authors_and_works.csv'],
                                                                      aggregated_dfs['author_abbreviations.csv'])
@@ -282,24 +250,12 @@ def aggregate(base_dir: Path, output_dir: Path = OUTPUT_DIR):
                   'unambiguous_macronizations.csv': unambiguous_macronizations,
                   'work_macronizations.csv': work_macronizations}
 
-    # Save all aggregated files with validation
-    for file_name, df in aggregated_dfs.items():
-        output_path = output_dir / file_name
-        existing_df = existing_dfs.get(file_name, pd.DataFrame())
-        is_valid, message = validate_aggregation(
-            existing_df,
-            original_dfs.get(file_name, []),
-            df,
-            file_name
-        )
-        if is_valid:
-            try:
-                merged_dfs.get(file_name, df).to_csv(output_path, index=False, lineterminator="\n")
-                logging.info(f"Successfully saved aggregated file: {output_path}")
-            except Exception as e:
-                logging.error(f"Error saving {output_path}: {str(e)}")
-        else:
-            logging.error(f"Validation failed for {file_name}: {message}")
+    with tempfile.TemporaryDirectory() as working_dir:
+        for file_name, df in aggregated_dfs.items():
+            merged_dfs.get(file_name, df)[COLUMNS_BY_LIBRARY_FILE[file_name]].to_csv(Path(working_dir) / file_name,
+                                                                                    index=False, lineterminator="\n")
+        publish(Path(working_dir), output_dir)
+    logging.info(f"Saved the aggregate files in {output_dir}")
 
 
 if __name__ == "__main__":

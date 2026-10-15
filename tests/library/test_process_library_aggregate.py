@@ -1,3 +1,5 @@
+import os
+import re
 import shutil
 from pathlib import Path
 from typing import List
@@ -5,6 +7,8 @@ from typing import List
 import pandas as pd
 import pytest
 
+from scripts.common import publishing
+from scripts.common.publishing import UNFINISHED_PUBLICATION, publish
 from scripts.library.process_library_aggregate import aggregate, find_repeated_works
 
 TWO_WORKS_BY_ONE_AUTHOR = Path(__file__).parent / 'fixtures' / 'two_works_by_one_author'
@@ -102,12 +106,16 @@ def test_both_works_keep_their_own_macronizations(aggregated):
         _rows(_read(aggregated, 'work_macronizations.csv')))
 
 
-def test_aggregating_the_same_works_again_saves_nothing(aggregated):
-    before = {path.name: path.read_bytes() for path in aggregated.glob('*.csv')}
+def _files(directory: Path) -> dict:
+    return {path.name: path.read_bytes() for path in directory.iterdir()}
 
-    aggregate(TWO_WORKS_BY_ONE_AUTHOR, aggregated)
 
-    assert {path.name: path.read_bytes() for path in aggregated.glob('*.csv')} == before
+def test_aggregating_the_same_works_again_raises_and_saves_nothing(aggregated):
+    before = _files(aggregated)
+
+    with pytest.raises(ValueError, match="Works found more than once"):
+        aggregate(TWO_WORKS_BY_ONE_AUTHOR, aggregated)
+    assert _files(aggregated) == before
 
 
 def test_the_aggregate_keeps_the_reader_primary_keys_unique(aggregated):
@@ -186,14 +194,172 @@ def test_a_word_that_the_reader_would_look_up_under_a_numeral_gets_its_own_macro
      'author_abbreviations.csv': [(CARMINA_PRIMA_AUTHOR_ID, 0, 'Fic.')]},
 ], ids=['another about', 'another abbreviation', 'one more abbreviation', 'the abbreviation under another id',
         'another abbreviation under the same author id'])
-def test_nothing_is_saved_when_an_author_differs_from_one_work_to_another(tmp_path, rows_in_carmina_altera, runs):
+def test_an_author_that_differs_from_one_work_to_another_raises_and_nothing_is_saved(tmp_path, rows_in_carmina_altera,
+                                                                                     runs):
     works = _copy_of_both_works(tmp_path)
     for file_name, rows in rows_in_carmina_altera.items():
         _replace_rows(works / 'carmina_altera' / file_name, rows)
     *earlier_runs, last_run = runs
     _aggregate_in_turn(works, earlier_runs, tmp_path / 'aggregate')
-    before = {path.name: path.read_bytes() for path in (tmp_path / 'aggregate').glob('*.csv')}
+    (tmp_path / 'aggregate').mkdir(exist_ok=True)
+    before = _files(tmp_path / 'aggregate')
 
-    aggregate(works / last_run, tmp_path / 'aggregate')
+    with pytest.raises(ValueError, match="Authors whose rows differ from one work to another: \\['Fictor'\\]"):
+        aggregate(works / last_run, tmp_path / 'aggregate')
+    assert _files(tmp_path / 'aggregate') == before
 
-    assert {path.name: path.read_bytes() for path in (tmp_path / 'aggregate').glob('*.csv')} == before
+
+#: Stands for a file's header without its rows
+_ONLY_THE_HEADER = object()
+
+
+@pytest.mark.parametrize('runs', list(AGGREGATION_RUNS.values()), ids=list(AGGREGATION_RUNS))
+@pytest.mark.parametrize('file_name, contents, problem', [
+    ('work_abbreviations.csv', None, r'carmina_altera/work_abbreviations\.csv is missing'),
+    ('work_contents.csv', None, r'carmina_altera/work_contents\.csv is missing'),
+    ('works.csv', '', r"carmina_altera/works\.csv can't be read"),
+    ('works.csv', _ONLY_THE_HEADER, r'carmina_altera/works\.csv has no rows'),
+    ('work_contents.csv', _ONLY_THE_HEADER, r'carmina_altera/work_contents\.csv has no rows'),
+    ('work_content_subdivisions.csv', _ONLY_THE_HEADER, r'carmina_altera/work_content_subdivisions\.csv has no rows'),
+    ('authors.csv', _ONLY_THE_HEADER, r'carmina_altera/authors\.csv has no rows'),
+    ('authors_and_works.csv', _ONLY_THE_HEADER, r'carmina_altera/authors_and_works\.csv has no rows'),
+    ('work_abbreviations.csv', 'workId,id,value\n',
+     r"carmina_altera/work_abbreviations\.csv has the columns \['workId', 'id', 'value'\] instead of "
+     r"\['workId', 'id', 'val'\]"),
+    ('work_abbreviations.csv', 'workId,id,val,lang\n',
+     r"carmina_altera/work_abbreviations\.csv has the columns \['workId', 'id', 'val', 'lang'\] instead of "
+     r"\['workId', 'id', 'val'\]"),
+], ids=['a file missing', 'the contents missing', 'a file that can\'t be read', 'works without rows',
+        'contents without rows', 'subdivisions without rows', 'authors without rows', 'authorships without rows',
+        'other columns', 'one more column'])
+def test_a_work_file_that_cant_be_aggregated_raises_and_nothing_is_saved(tmp_path, file_name, contents, problem, runs):
+    works = _copy_of_both_works(tmp_path)
+    path = works / 'carmina_altera' / file_name
+    if contents is None:
+        path.unlink()
+    elif contents is _ONLY_THE_HEADER:
+        path.write_text(path.read_text(encoding='utf-8').splitlines(keepends=True)[0], encoding='utf-8')
+    else:
+        path.write_text(contents, encoding='utf-8')
+    *earlier_runs, last_run = runs
+    _aggregate_in_turn(works, earlier_runs, tmp_path / 'aggregate')
+    (tmp_path / 'aggregate').mkdir(exist_ok=True)
+    before = _files(tmp_path / 'aggregate')
+
+    with pytest.raises(ValueError, match=problem):
+        aggregate(works / last_run, tmp_path / 'aggregate')
+    assert _files(tmp_path / 'aggregate') == before
+
+
+@pytest.mark.parametrize('file_name, contents, problem', [
+    ('work_macronizations.csv', None, 'work_macronizations.csv is missing'),
+    ('authors.csv', '', "authors.csv can't be read"),
+    ('authors.csv', 'id,name,about,image\n', "authors.csv has no rows"),
+    ('works.csv', 'id,name,about\n00000000-0000-4000-8000-000000000010,Carmina Prima,\n',
+     "works.csv has the columns ['id', 'name', 'about'] instead of ['id', 'name', 'about', 'uvLowercase', "
+     "'uvCapitals', 'ijLowercase', 'ijCapitals']"),
+], ids=['a file missing', 'a file that can\'t be read', 'authors without rows', 'the columns of an older version'])
+def test_an_aggregate_file_that_cant_be_aggregated_raises_and_nothing_is_saved(tmp_path, file_name, contents, problem):
+    aggregate(TWO_WORKS_BY_ONE_AUTHOR / 'carmina_prima', tmp_path)
+    if contents is None:
+        (tmp_path / file_name).unlink()
+    else:
+        (tmp_path / file_name).write_text(contents, encoding='utf-8')
+    before = _files(tmp_path)
+
+    with pytest.raises(ValueError, match=re.escape(problem)):
+        aggregate(TWO_WORKS_BY_ONE_AUTHOR / 'carmina_altera', tmp_path)
+    assert _files(tmp_path) == before
+
+
+def test_a_directory_without_library_files_isnt_a_work(tmp_path):
+    works = _copy_of_both_works(tmp_path)
+    (works / 'notes').mkdir()
+    (works / 'notes' / 'readings.csv').write_text('word,reading\n', encoding='utf-8')
+
+    aggregate(works, tmp_path / 'aggregate')
+
+    assert _rows(_read(tmp_path / 'aggregate', 'works.csv')) == _rows_of_both_works('works.csv')
+
+
+def _reverse_the_columns_of_every_file(directory: Path):
+    for csv_path in directory.glob('*.csv'):
+        data_frame = _read(directory, csv_path.name)
+        data_frame[list(reversed(data_frame.columns))].to_csv(csv_path, index=False)
+
+
+@pytest.mark.parametrize('runs', list(AGGREGATION_RUNS.values()), ids=list(AGGREGATION_RUNS))
+def test_work_files_with_their_columns_in_another_order_are_aggregated_as_in_the_reader_order(tmp_path, runs):
+    works = _copy_of_both_works(tmp_path)
+    _reverse_the_columns_of_every_file(works / 'carmina_prima')
+    _reverse_the_columns_of_every_file(works / 'carmina_altera')
+    _aggregate_in_turn(TWO_WORKS_BY_ONE_AUTHOR, runs, tmp_path / 'from_the_reader_order')
+
+    _aggregate_in_turn(works, runs, tmp_path / 'aggregate')
+
+    assert list(_read(tmp_path / 'aggregate', 'work_macronizations.csv').columns) == [
+        'workId', 'idx', 'macronizedWord', 'uncertaintyBitMask']
+    assert _files(tmp_path / 'aggregate') == _files(tmp_path / 'from_the_reader_order')
+
+
+def test_aggregate_files_with_their_columns_in_another_order_are_saved_as_in_the_reader_order(tmp_path):
+    for output_dir in (tmp_path / 'aggregate', tmp_path / 'from_the_reader_order'):
+        aggregate(TWO_WORKS_BY_ONE_AUTHOR / 'carmina_prima', output_dir)
+    _reverse_the_columns_of_every_file(tmp_path / 'aggregate')
+    aggregate(TWO_WORKS_BY_ONE_AUTHOR / 'carmina_altera', tmp_path / 'from_the_reader_order')
+
+    aggregate(TWO_WORKS_BY_ONE_AUTHOR / 'carmina_altera', tmp_path / 'aggregate')
+
+    assert _files(tmp_path / 'aggregate') == _files(tmp_path / 'from_the_reader_order')
+
+
+def test_a_work_is_added_after_the_works_already_aggregated_and_their_author_keeps_its_id(tmp_path):
+    aggregate(TWO_WORKS_BY_ONE_AUTHOR / 'carmina_altera', tmp_path)
+
+    aggregate(TWO_WORKS_BY_ONE_AUTHOR / 'carmina_prima', tmp_path)
+
+    assert list(_read(tmp_path, 'works.csv')['id']) == [CARMINA_ALTERA_ID, CARMINA_PRIMA_ID]
+    assert list(_read(tmp_path, 'authors.csv')['id']) == [CARMINA_ALTERA_AUTHOR_ID]
+
+
+def test_a_work_that_a_finished_publication_left_a_replaced_file_in_raises_and_nothing_is_saved(tmp_path):
+    works = _copy_of_both_works(tmp_path)
+    shutil.copyfile(works / 'carmina_altera' / 'work_contents.csv', works / 'carmina_altera' / '.work_contents.csv.old')
+
+    with pytest.raises(FileExistsError, match=r"carmina_altera has files that a publication replaced and couldn't "
+                                              r"remove: \.work_contents\.csv\.old"):
+        aggregate(works, tmp_path / 'aggregate')
+    assert _files(tmp_path / 'aggregate') == {}
+
+
+def test_a_work_whose_publication_couldnt_be_undone_raises_and_nothing_is_saved(monkeypatch, tmp_path):
+    # Carmina Prima has no work_macronizations.csv. Publishing Carmina Altera's files over it fails to move works.csv
+    # in, and then to remove the work_macronizations.csv it added: Carmina Prima is left with its own files and Carmina
+    # Altera's macronizations
+    works = _copy_of_both_works(tmp_path)
+    carmina_prima = works / 'carmina_prima'
+    (carmina_prima / 'work_macronizations.csv').unlink()
+    rename = os.replace
+    unlink = Path.unlink
+
+    def replace(source, target):
+        if Path(source).name == '.works.csv.new':
+            raise PermissionError(f"{target} is open in another program")
+        rename(source, target)
+
+    def unlink_all_but_the_macronizations(path, missing_ok=False):
+        if path == carmina_prima / 'work_macronizations.csv':
+            raise PermissionError(f"{path} is open in another program")
+        unlink(path, missing_ok=missing_ok)
+
+    with monkeypatch.context() as failing:
+        failing.setattr(publishing.os, 'replace', replace)
+        failing.setattr(Path, 'unlink', unlink_all_but_the_macronizations)
+        with pytest.raises(OSError, match="couldn't be undone"):
+            publish(works / 'carmina_altera', carmina_prima)
+    assert not list(carmina_prima.glob('.*.old'))
+
+    with pytest.raises(FileExistsError, match=rf"carmina_prima/{UNFINISHED_PUBLICATION}:\nA publication into "
+                                              rf"{carmina_prima} didn't finish"):
+        aggregate(works, tmp_path / 'aggregate')
+    assert _files(tmp_path / 'aggregate') == {}
