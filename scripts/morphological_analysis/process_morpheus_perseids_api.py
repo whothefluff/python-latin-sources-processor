@@ -40,6 +40,15 @@ def _merge_bodies(analysis_lower: Dict, analysis_title: Dict) -> List[Dict]:
     return merged
 
 
+class WordsWithoutAnalysis(Exception):
+    """The words that a run couldn't write an analysis for, each with the reason."""
+
+    def __init__(self, reasons_by_word: Dict[str, str]):
+        self.reasons_by_word = reasons_by_word
+        super().__init__(f"{len(reasons_by_word)} words have no analysis written: "
+                         + ", ".join(f"'{word}' ({reason})" for word, reason in reasons_by_word.items()))
+
+
 class MorphologicalAnalyzer:
     MACRON_MAP = {
         "a_": "ā",
@@ -153,17 +162,18 @@ class MorphologicalAnalyzer:
 
     @staticmethod
     def analyze_word(word: str) -> Dict:
-        """Query the local API for word analysis"""
+        """Query the local API for word analysis. Raises when the request fails, or when the status isn't 201 or the
+        answer has no annotation (Morpheus answers every word with 201 and an annotation, known or not)."""
         try:
             params = {"lang": "lat", "engine": "morpheuslat", "word": word}
-            response = requests.get(MORPHEUS_URL, params=params)
+            response = requests.get(MORPHEUS_URL, params=params, timeout=10)
             if response.status_code == 201:
-                return response.json()
+                answer = response.json()
+                if "Annotation" not in answer.get("RDF", {}):
+                    raise ValueError(f"Morpheus's answer for '{word}' has no annotation: {answer}")
+                return answer
             else:
-                logging.warning(
-                    f"API request failed for word '{word}' with status {response.status_code}"
-                )
-                return {}
+                raise RuntimeError(f"Morpheus answered '{word}' with status {response.status_code}")
         except requests.RequestException as e:
             logging.error(f"API request error for word '{word}': {str(e)}")
             raise e
@@ -190,7 +200,8 @@ class MorphologicalAnalyzer:
     def process_analysis(word: str, analysis: Dict, stripped_enclitic: str | None = None,
                          analyzed_as: str | None = None) -> tuple[List[Dict], List[Dict]]:
         """Process the analysis JSON and return details and inflections.
-        analyzed_as is the word that Morpheus was asked for, when it isn't word."""
+        analyzed_as is the word that Morpheus was asked for, when it isn't word.
+        Raises when an analysis has no headword."""
         details = []
         inflections = []
         spellings_not_compared = set()
@@ -224,11 +235,8 @@ class MorphologicalAnalyzer:
                 if headword in IGNORED_DICT_REFS:
                     logging.info(f"Ignoring form '{word}_{original_item_index}' due to unwanted dictionary reference '{headword}'.")
                     continue # Skip to the next body without incrementing final_item_index
-            except KeyError:
-                pass # Malformed body, no checks possible here so proceed as normally
-
-            if "rest" not in body:
-                continue
+            except KeyError as e:
+                raise ValueError(f"Analysis {original_item_index} of '{word}' has no {e}") from e
 
             try:
                 entry = body["rest"]["entry"]
@@ -354,8 +362,7 @@ class MorphologicalAnalyzer:
 
                 item += 1
             except KeyError as e:
-                logging.error(f"Error processing analysis for word '{word}': {str(e)}")
-                continue
+                raise ValueError(f"Analysis {original_item_index} of '{word}' has no {e}") from e
 
         if spellings_not_compared:
             logging.warning(f"'{word}' kept analyses whose letters weren't compared, review them: {sorted(spellings_not_compared)}")
@@ -518,9 +525,12 @@ class MorphologicalAnalyzer:
             raise
 
     def process_words(self):
-        """Process all words from the input file, with retries for enclitics."""
+        """Process all words from the input file, with retries for enclitics. After the last word, raises when a word
+        has no analysis written: when Morpheus couldn't be asked or its answer couldn't be read, or when every analysis
+        was dropped."""
         details: list[dict]
         inflections: list[dict]
+        reasons_by_word_without_analysis: Dict[str, str] = {}
         words_to_process = self.unique_words - self.processed_forms
         sorted_words_to_process = sorted(list(words_to_process))
         logging.info(f"Starting to process {len( sorted_words_to_process )} new words")
@@ -573,17 +583,22 @@ class MorphologicalAnalyzer:
                         logging.warning(f"No analysis found for '{word}', stored as unknown.")
                 else:
                     logging.warning(f"No analysis results for word: {word}")
+                    reasons_by_word_without_analysis[word] = "every analysis was dropped"
 
             except requests.RequestException as e:
                 logging.error(f"API request error for word '{word}': {str(e)}. Will retry next run.")
+                reasons_by_word_without_analysis[word] = str(e)
                 continue
             except Exception as e:
                 logging.error(f"Error processing word '{word}': {str( e )}")
+                reasons_by_word_without_analysis[word] = str(e)
                 continue
 
         logging.info(
             f"Finished processing words. Total processed: {len( self.processed_forms )}"
         )
+        if reasons_by_word_without_analysis:
+            raise WordsWithoutAnalysis(reasons_by_word_without_analysis)
 
     def _query_merged(self, word: str) -> Dict:
         lower_form = word.lower()
