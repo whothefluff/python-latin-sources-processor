@@ -80,23 +80,24 @@ WORK_SPECIFIC_PROPER_NOUN_OVERRIDES: Dict[int, ProperNounState | None] = {
 logging.basicConfig(level=logging.INFO)
 
 
+def _parsed_morpheus_answer(xml_string: str) -> ET.Element:
+    """Returns Morpheus's answer as XML. Raises when it isn't XML, or when it's an error, which the API only sends for
+    an unknown engine or language. A word that Morpheus doesn't know gets an answer without analyses."""
+    root = ET.fromstring(xml_string)
+    if root.tag == 'error':
+        raise ValueError(f"Morpheus answered with an error: '{root.text}'")
+    return root
+
+
 def _extract_lemmas_from_morpheus_xml(xml_string: str) -> List[str]:
     """Parses the XML output from the morpheus endpoint to extract lemmas."""
     lemmas = []
-    try:
-        # The XML is often wrapped in a <words> tag.
-        # An empty or error response should not cause a crash.
-        if not xml_string or "<words/>" in xml_string or "<error>" in xml_string:
-            return []
-        root = ET.fromstring(xml_string)
-        # Find all headwords (hdwd), which contain the lemma
-        for hdwd_element in root.findall('.//hdwd'):
-            if hdwd_element.text:
-                lemmas.append(hdwd_element.text.strip())
-        return list(set(lemmas)) # Return unique lemmas
-    except ET.ParseError:
-        logging.exception("XML Parse Error for morpheus '%s'", xml_string)
-        return []
+    root = _parsed_morpheus_answer(xml_string)
+    # Find all headwords (hdwd), which contain the lemma
+    for hdwd_element in root.findall('.//hdwd'):
+        if hdwd_element.text:
+            lemmas.append(hdwd_element.text.strip())
+    return list(set(lemmas)) # Return unique lemmas
 
 
 def _is_valid_dum_stem(xml_string: str) -> bool:
@@ -104,43 +105,31 @@ def _is_valid_dum_stem(xml_string: str) -> bool:
     Parses Morpheus XML to check if a word is an imperative, interjection, or adverb.
     This is used to validate if 'dum' is acting as a clitic.
     """
-    try:
-        # The XML is often wrapped in a <words> tag.
-        # An empty or error response should not cause a crash.
-        if not xml_string or "<words/>" in xml_string or "<error>" in xml_string:
-            return False
-        root = ET.fromstring(xml_string)
-        # Find all inflection blocks (<infl>)
-        for infl_element in root.findall('.//infl'):
-            # Check for <mood>imperative</mood>
-            mood = infl_element.find('mood')
-            if mood is not None and mood.text == 'imperative':
-                return True
+    root = _parsed_morpheus_answer(xml_string)
+    # Find all inflection blocks (<infl>)
+    for infl_element in root.findall('.//infl'):
+        # Check for <mood>imperative</mood>
+        mood = infl_element.find('mood')
+        if mood is not None and mood.text == 'imperative':
+            return True
 
-            # Check for <pofs>exclamation</pofs> or <pofs>adverb</pofs>
-            pofs = infl_element.find('pofs')
-            if pofs is not None and pofs.text in ['exclamation', 'adverb']:
-                return True
-        return False
-    except ET.ParseError:
-        logging.exception("XML Parse Error while checking for DUM clitic stem from response: '%s'", xml_string)
-        return False
+        # Check for <pofs>exclamation</pofs> or <pofs>adverb</pofs>
+        pofs = infl_element.find('pofs')
+        if pofs is not None and pofs.text in ['exclamation', 'adverb']:
+            return True
+    return False
 
 
 def _surface_forms(xml_string: str) -> Set[str]:
     """Returns each inflection's stem and suffix as one spelling, lowercase and without Morpheus's marks: _ and ^ for
     vowel length, : after a compound's prefix (ob:jurg) and * for an empty suffix (vir)."""
     surfaces = set()
-    try:
-        root = ET.fromstring(xml_string)
-        for term in root.findall('.//term'):
-            stem = term.findtext('stem') or ''
-            suff = term.findtext('suff') or ''
-            surface = re.sub(r'[_^:*\-]', '', (stem + suff)).lower()
-            if surface:
-                surfaces.add(surface)
-    except ET.ParseError:
-        pass
+    for term in _parsed_morpheus_answer(xml_string).findall('.//term'):
+        stem = term.findtext('stem') or ''
+        suff = term.findtext('suff') or ''
+        surface = re.sub(r'[_^:*\-]', '', (stem + suff)).lower()
+        if surface:
+            surfaces.add(surface)
     return surfaces
 
 
@@ -161,6 +150,7 @@ def _analyze_word_with_clitic(word_to_analyze: str) -> MorpheusAnswer:
     Calls the local morpheus/cruncher endpoint. If the primary analysis is empty,
     attempts to strip a known enclitic and re-query with the stem.
     The enclitic is set only when the lemmas came from the host.
+    Raises when a request fails, or when an answer is an error or isn't XML, so that nothing is cached for the word.
     """
     if not word_to_analyze or not word_to_analyze.isalpha():
         return MorpheusAnswer([], None, frozenset())
@@ -228,8 +218,8 @@ def _analyze_word_with_clitic(word_to_analyze: str) -> MorpheusAnswer:
         return MorpheusAnswer(lemmas, enclitic_found, frozenset(surfaces) if lemmas else frozenset())
 
     except requests.exceptions.RequestException:
-        logging.exception("Error calling morpheus API for word '%s'", word_to_analyze)
-        return MorpheusAnswer([], None, frozenset())
+        logging.error("Error calling morpheus API for word '%s'", word_to_analyze)
+        raise
 
 
 _NO_ANSWER = MorpheusAnswer([], None, frozenset())

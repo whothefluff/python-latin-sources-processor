@@ -1,5 +1,6 @@
 import pandas as pd
 import pytest
+import requests
 
 from scripts.library.item import process_phaedrus
 from scripts.library.util.proper_noun import ProperNounState
@@ -84,6 +85,38 @@ def test_a_compound_host_or_a_host_without_a_suffix_gets_its_enclitic(monkeypatc
 
     assert process_phaedrus.find_enclitic(word) == "que"
     assert process_phaedrus.spelled_with_morpheus_letters(word) == expected
+
+
+@pytest.mark.parametrize("unreachable", ["musaque", "musa"], ids=["the word", "its host"])
+def test_a_request_to_morpheus_that_fails_raises_and_leaves_nothing_cached(monkeypatch, unreachable):
+    _surfaces(monkeypatch, {"musa": [("mu^s", "a")]})
+    answer = process_phaedrus.requests.get
+
+    def get(url, params, headers, timeout):
+        if params['word'] == unreachable:
+            raise requests.exceptions.ConnectionError(f"No answer for '{unreachable}'")
+        return answer(url, params=params, headers=headers, timeout=timeout)
+
+    monkeypatch.setattr(process_phaedrus.requests, "get", get)
+    with pytest.raises(requests.exceptions.ConnectionError):
+        process_phaedrus.find_enclitic("musaque")
+    monkeypatch.setattr(process_phaedrus.requests, "get", answer)
+
+    assert process_phaedrus.find_enclitic("musaque") == "que"
+
+
+@pytest.mark.parametrize("word, answers, error", [
+    ("levis", {"levis": "<words><word>"}, process_phaedrus.ET.ParseError),
+    ("levis", {"levis": "<error>unknown engine</error>"}, ValueError),
+    ("agedum", {"age": "<words><word>"}, process_phaedrus.ET.ParseError),
+], ids=["not XML", "an error", "not XML for a host that dum may follow"])
+def test_an_answer_that_is_an_error_or_isnt_xml_raises(monkeypatch, word, answers, error):
+    process_phaedrus._analyze_word_with_clitic.cache_clear()
+    monkeypatch.setattr(process_phaedrus.requests, "get",
+                        lambda url, params, headers, timeout: _Response(answers.get(params['word'], '<words/>')))
+
+    with pytest.raises(error):
+        process_phaedrus.find_enclitic(word)
 
 
 def _morpheus(monkeypatch, answers):
