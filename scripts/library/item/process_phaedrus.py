@@ -28,7 +28,7 @@ from scripts.library.util.spelling import (
 from scripts.library.util.text_normalization import normalize_digraphs
 from scripts.library.util.token_classification import TokenType, get_token_type
 from scripts.library.util.unambiguous_macronizations import (
-    CertainToken, WorkMacronization, agreed_macronizations, work_macronizations_where_lookup_differs,
+    CertainToken, WorkMacronization, agreed_macronizations, lookup_key, work_macronizations_where_lookup_differs,
 )
 
 # noinspection HttpUrlsUsage
@@ -1298,10 +1298,12 @@ def check_proper_noun_completeness(errors, work_contents_df):
 def check_macronization_coverage(errors, work_contents_df, work_macronizations_df, unambiguous_macronizations_df):
     """
     Checks that every word has a valid macronization source.
-    - Same-case overlaps between the stable and work-specific tables are errors.
+    - A word in both tables isn't an error: an occurrence's own macronization comes before the stable one, as in the
+      reader, such as a capitalized I's before a numeral I's.
     - Cross-case overlaps (e.g. 'aliis' stable vs 'Aliis' work-specific) are
       expected for state-2 words and logged as warnings, not errors.
-    - Every word INSTANCE must have a source in one of the tables.
+    - Every word token must have its own macronization, or a stable one under the key that the reader looks it up by,
+      which depends on its properNounState. The reader shows other tokens as printed when they have neither.
     """
     # 1. Check for word types appearing in both tables.
     stable_word_forms = set(unambiguous_macronizations_df['word'])
@@ -1309,18 +1311,6 @@ def check_macronization_coverage(errors, work_contents_df, work_macronizations_d
     if not work_macronizations_df.empty:
         work_specific_merged = pd.merge(work_macronizations_df, work_contents_df, on='idx') # no workId is safe, each script is for 1 work only
         work_specific_forms = set(work_specific_merged['word'])
-
-        # Exact-case duplicates are real errors (same form stored twice).
-        exact_duplicates = stable_word_forms.intersection(work_specific_forms)
-        if exact_duplicates:
-            examples = sorted(list(exact_duplicates))[:50]
-            error_msg = (
-                f"Found {len(exact_duplicates)} word types defined in BOTH the stable and work-specific "
-                f"macronization tables with the SAME case. "
-                f"Examples: {', '.join(examples)}"
-            )
-            errors.append(error_msg)
-            return
 
         # Cross-case overlaps are expected (e.g. lowercase in stable, capitalized in work-specific).
         stable_types_lower = {w.lower() for w in stable_word_forms}
@@ -1362,22 +1352,14 @@ def check_macronization_coverage(errors, work_contents_df, work_macronizations_d
     work_specific_indices = set(work_macronizations_df['idx'])
     missing_instances = []
 
-    # Filter for actual alphabetic words that need checking.
-    word_df = work_contents_df[work_contents_df['word'].fillna('').str.isalpha()]
+    word_df = work_contents_df[work_contents_df['tokenType'] == int(TokenType.WORD)]
 
     for _, row in word_df.iterrows():
         word = row['word']
         idx = row['idx']
+        proper_noun_state = None if pd.isna(row['properNounState']) else int(row['properNounState'])
 
-        # An instance is covered if its index is in the work-specific table
-        # OR its specific form (respecting case) is in the stable table.
-        # We also check case variations for the stable table as a fallback,
-        # though ideally the stored form should match exactly.
-        is_in_stable_table = (
-                word in stable_word_forms or
-                word.lower() in stable_word_forms or
-                word.capitalize() in stable_word_forms
-        )
+        is_in_stable_table = lookup_key(word, TokenType.WORD, proper_noun_state, stable_word_forms) is not None
         is_in_work_specific_table = idx in work_specific_indices
 
         if not is_in_stable_table and not is_in_work_specific_table:

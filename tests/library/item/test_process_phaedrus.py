@@ -4,6 +4,7 @@ import requests
 
 from scripts.library.item import process_phaedrus
 from scripts.library.util.proper_noun import ProperNounState
+from scripts.library.util.token_classification import TokenType
 
 
 def _answers(monkeypatch, enclitics):
@@ -155,7 +156,7 @@ _CARMEN = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
 _CARMEN_ANALYSES = {word: process_phaedrus.MorpheusAnswer(lemmas, None, frozenset({surface}))
                     for word, lemmas, surface in [("levis", ["levis"], "levis"), ("et", ["et"], "et"),
                                                   ("est", ["sum"], "est"), ("iacere", ["jaceo", "jacio"], "jacere"),
-                                                  ("iam", ["jam"], "jam")]}
+                                                  ("iam", ["jam"], "jam"), ("i", ["eo"], "i")]}
 # Certain of levis as lĕvis in the first verse and as lēvis in the second, except for the last levis, of iacere as
 # jacēre and as jacere, and of iam
 _CARMEN_MACRONIZED = [("Levis", "Levis", 0), ("et", "et", 0), ("levis", "levis", 0), ("est", "est", 0), (".", ".", 0),
@@ -260,3 +261,47 @@ def test_macronizer_results_for_a_list_of_words_that_dont_match_it_raise(monkeyp
 
     with pytest.raises(RuntimeError, match=error):
         process_phaedrus._get_macronization_data_from_api(words)
+
+
+# A capitalized i ("go!") mid-sentence, which the reader looks up as I before i, and the numeral I
+_CARMEN_WITH_I = _CARMEN.replace('</l>\n  </div>', '</l>\n    <l n="4">et I et I.</l>\n  </div>')
+_CARMEN_WITH_I_MACRONIZED = _CARMEN_MACRONIZED + [("et", "et", 0), ("I", "Ī", 0), ("et", "et", 0), ("I", "I", 0),
+                                                  (".", ".", 0)]
+
+
+def test_a_word_whose_own_macronization_comes_before_a_numeral_unambiguous_one_is_covered(monkeypatch, tmp_path):
+    monkeypatch.setitem(process_phaedrus.WORK_SPECIFIC_TOKEN_OVERRIDES, 18, TokenType.NUMERAL)
+    monkeypatch.setitem(process_phaedrus.WORK_SPECIFIC_EXPANSIONS, 18, "ūnus")
+    _process_carmen(monkeypatch, tmp_path, xml=_CARMEN_WITH_I, macronized=_CARMEN_WITH_I_MACRONIZED)
+    errors = []
+
+    process_phaedrus.check_macronization_coverage(errors, pd.read_csv(tmp_path / "work_contents.csv"),
+                                                  pd.read_csv(tmp_path / "work_macronizations.csv"),
+                                                  pd.read_csv(tmp_path / "unambiguous_macronizations.csv"))
+
+    assert (16, "Ī", 0) in _rows(tmp_path / "work_macronizations.csv", "workId")
+    assert ("I", "I") in _rows(tmp_path / "unambiguous_macronizations.csv")
+    assert errors == []
+
+
+@pytest.mark.parametrize("word, token_type, proper_noun_state, keys, errors", [
+    ("Roma", TokenType.WORD, ProperNounState.YES, ["roma"],
+     ["Found 1 words missing a macronization entry entirely. Examples: 'Roma' (idx 0)"]),
+    ("Levis", TokenType.WORD, ProperNounState.NO, ["Levis"],
+     ["Found 1 words missing a macronization entry entirely. Examples: 'Levis' (idx 0)"]),
+    ("Venere", TokenType.WORD, ProperNounState.EITHER, ["venere"], []),
+    ("Fabula", TokenType.WORD, None, ["fabula"], []),
+    ("XII", TokenType.NUMERAL, ProperNounState.NO, [], []),
+], ids=["a name under the common word's key", "a common word under the name's key", "either under the common word's",
+        "unknown under the common word's", "a numeral without any"])
+def test_a_word_is_covered_by_the_unambiguous_macronization_that_the_reader_looks_it_up_by(
+        word, token_type, proper_noun_state, keys, errors):
+    contents = pd.DataFrame({"workId": ["w"], "idx": [0], "word": [word], "tokenType": [int(token_type)],
+                             "properNounState": pd.array([proper_noun_state], dtype="Int64")})
+    found = []
+
+    process_phaedrus.check_macronization_coverage(
+        found, contents, pd.DataFrame(columns=["workId", "idx", "macronizedWord", "uncertaintyBitMask"]),
+        pd.DataFrame({"word": keys, "macronizedWord": keys}, dtype=str))
+
+    assert found == errors

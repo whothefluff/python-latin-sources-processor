@@ -26,7 +26,7 @@ The script performs the following key functions:
     -   Sequential index integrity for contents, subdivisions, and supplementary data.
     -   Subdivision parent-child range containment.
     -   Proper noun state completeness for all alphabetic words.
-    -   Macronization coverage (every word instance has a source in exactly one table; no same-case duplicates across tables).
+    -   Macronization coverage (every word token has its own macronization, or an unambiguous one under the key that the reader looks it up by, which depends on its proper noun state).
     -   Expansion completeness (every abbreviation/numeral token has a supplied expansion).
     -   Sentence and word index correctness (sequential per scope, `wordIdx` null iff `tokenType` ≥ 4).
     -   Letters checked against Morpheus. Every word must have Morpheus's letter where the edition prints one letter for two. The check also logs, for review, the words that Morpheus spells with both letters of a pair that the edition tells apart, and the words that keep the edition's letters because no analysis has the same letters.
