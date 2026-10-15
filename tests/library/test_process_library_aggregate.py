@@ -363,3 +363,37 @@ def test_a_work_whose_publication_couldnt_be_undone_raises_and_nothing_is_saved(
                                               rf"{carmina_prima} didn't finish"):
         aggregate(works, tmp_path / 'aggregate')
     assert _files(tmp_path / 'aggregate') == {}
+
+
+def _carmina_altera_by_the_author_id_of_carmina_prima(works: Path, name: str):
+    _replace_rows(works / 'carmina_altera' / 'authors.csv',
+                  [(CARMINA_PRIMA_AUTHOR_ID, name, 'An invented poet.', 'Zml4dHVyZQ==')])
+    _replace_rows(works / 'carmina_altera' / 'authors_and_works.csv', [(CARMINA_PRIMA_AUTHOR_ID, CARMINA_ALTERA_ID)])
+    _replace_rows(works / 'carmina_altera' / 'author_abbreviations.csv', [(CARMINA_PRIMA_AUTHOR_ID, 0, 'Fict.')])
+
+
+@pytest.mark.parametrize('runs', list(AGGREGATION_RUNS.values()), ids=list(AGGREGATION_RUNS))
+def test_an_author_id_under_two_names_raises_and_nothing_is_saved(tmp_path, runs):
+    works = _copy_of_both_works(tmp_path)
+    _carmina_altera_by_the_author_id_of_carmina_prima(works, 'Fictor Alter')
+    *earlier_runs, last_run = runs
+    _aggregate_in_turn(works, earlier_runs, tmp_path / 'aggregate')
+    (tmp_path / 'aggregate').mkdir(exist_ok=True)
+    before = _files(tmp_path / 'aggregate')
+
+    with pytest.raises(ValueError, match=f"Author ids with more than one name: \\['{CARMINA_PRIMA_AUTHOR_ID}'\\]"):
+        aggregate(works / last_run, tmp_path / 'aggregate')
+    assert _files(tmp_path / 'aggregate') == before
+
+
+@pytest.mark.parametrize('runs', list(AGGREGATION_RUNS.values()), ids=list(AGGREGATION_RUNS))
+def test_an_author_id_under_one_name_in_both_works_is_one_author(tmp_path, runs):
+    works = _copy_of_both_works(tmp_path)
+    _carmina_altera_by_the_author_id_of_carmina_prima(works, 'Fictor')
+
+    _aggregate_in_turn(works, runs, tmp_path / 'aggregate')
+
+    assert _rows(_read(tmp_path / 'aggregate', 'authors.csv')) == [
+        (CARMINA_PRIMA_AUTHOR_ID, 'Fictor', 'An invented poet.', 'Zml4dHVyZQ==')]
+    assert _rows(_read(tmp_path / 'aggregate', 'authors_and_works.csv')) == [
+        (CARMINA_PRIMA_AUTHOR_ID, CARMINA_PRIMA_ID), (CARMINA_PRIMA_AUTHOR_ID, CARMINA_ALTERA_ID)]

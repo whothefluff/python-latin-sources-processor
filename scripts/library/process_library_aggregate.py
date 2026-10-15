@@ -136,6 +136,13 @@ def find_authors_that_differ(dfs_by_source: List[Dict[str, pd.DataFrame]]) -> Li
     return sorted(set(names[names.duplicated()]))
 
 
+def find_author_ids_with_several_names(dfs_by_source: List[Dict[str, pd.DataFrame]]) -> List[str]:
+    """Returns the author ids that the sources give more than one name"""
+    authors = pd.concat([dfs['authors.csv'] for dfs in dfs_by_source if 'authors.csv' in dfs])
+    name_counts = authors.groupby('id')['name'].nunique()
+    return sorted(cast(str, author_id) for author_id, count in name_counts.items() if count > 1)
+
+
 def _in_case_of(word: str, macronized: str) -> str:
     return ''.join(letter.upper() if original.isupper() else letter.lower()
                    for original, letter in zip(word, macronized, strict=True))
@@ -238,6 +245,11 @@ def aggregate(base_dir: Path, output_dir: Path = OUTPUT_DIR):
     if authors_that_differ:
         raise ValueError(f"Authors whose rows differ from one work to another: {authors_that_differ}. Nothing was "
                          f"saved. Give each of them the same about, image and abbreviations in every work")
+
+    author_ids_with_several_names = find_author_ids_with_several_names(dfs_by_source)
+    if author_ids_with_several_names:
+        raise ValueError(f"Author ids with more than one name: {author_ids_with_several_names}. Nothing was saved. "
+                         f"Give each of those authors one name in every work, or each name its own id")
     aggregated_dfs = {file_name: pd.concat([dfs[file_name] for dfs in dfs_by_source], ignore_index=True)
                       for file_name in COLUMNS_BY_LIBRARY_FILE}
     authors, authors_and_works, author_abbreviations = merge_authors(aggregated_dfs['authors.csv'],
