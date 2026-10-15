@@ -1,11 +1,15 @@
 import csv
 import logging
 import os
+import shutil
+import tempfile
 from itertools import product
+from pathlib import Path
 from typing import Dict, List, Set, Any, Tuple, Callable
 
 import requests
 from scripts.common.macrons import strip_macrons
+from scripts.common.publishing import publish, raise_for_publication_leftovers
 from scripts.common.services import MORPHEUS_URL
 from scripts.library.util.casing import apply_contract_casing
 from scripts.morphological_analysis.process_morpheus_perseids_api_aux.overrides import (
@@ -74,15 +78,16 @@ class MorphologicalAnalyzer:
     _PLAIN_LETTERS = str.maketrans("", "", "_^:-*")
 
 
-    def __init__(self, project_root: str):
+    def __init__(self, project_root: str, working_dir: str | None = None):
+        """working_dir is where the analyses are read and added to, the output directory when it's None."""
         self.project_root = project_root
         self.input_file = os.path.join(
             project_root, "output", "library", "work_contents.csv"
         )
         self.output_dir = os.path.join(project_root, "output", "morphological_analysis")
-        self.details_file = os.path.join(self.output_dir, "morphological_details.csv")
+        self.details_file = os.path.join(working_dir or self.output_dir, "morphological_details.csv")
         self.inflections_file = os.path.join(
-            self.output_dir, "morphological_detail_inflections.csv"
+            working_dir or self.output_dir, "morphological_detail_inflections.csv"
         )
         self.processed_forms: Set[str] = set()
         self.unique_words: Set[str] = set()
@@ -958,11 +963,12 @@ class MorphologicalDataValidator:
         self.warning_count += 1
 
     def validate(self):
-        """Runs all validation checks on the inflections file."""
+        """Runs all validation checks on the inflections file. Raises when a file is missing or a check finds an
+        issue."""
         logging.info(f"Starting validation of morphological data in '{self.file_path}'...")
-        if not os.path.exists(self.file_path):
-            logging.error(f"Validation failed: Inflections file not found at '{self.file_path}'")
-            return
+        for path in (self.file_path, self.details_path):
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"Validation failed: '{path}' not found")
 
         self._validate_casing_pos_gate()
         self._validate_no_duplicate_details()
@@ -1005,7 +1011,7 @@ class MorphologicalDataValidator:
         if self.warning_count == 0:
             logging.info("Validation complete. No issues found.")
         else:
-            logging.warning(f"Validation complete. Found {self.warning_count} potential issues.")
+            raise ValueError(f"Validation failed. Found {self.warning_count} issues, logged above.")
 
     def _validate_adjective(self, row: Dict[str, str], line_num: int):
         form = row['form']
@@ -1218,15 +1224,26 @@ class MorphologicalDataValidator:
                 self._log_warning(0, 'ref-consistency', form,
                                   f"item {item}: dictionaryRef is null but has inflections.")
 
+def analyze(project_root: str):
+    """Adds the analyses of the library's new words to the output files when every word gets one and they pass
+    validation. Otherwise raises, and the output files stay as they were. Doesn't start while a publication of the
+    library didn't finish or left a file it replaced."""
+    raise_for_publication_leftovers(Path(project_root) / "output" / "library")
+    output_dir = Path(project_root) / "output" / "morphological_analysis"
+    with tempfile.TemporaryDirectory() as working_dir:
+        for path in output_dir.glob("*.csv"):
+            shutil.copyfile(path, Path(working_dir) / path.name)
+        analyzer = MorphologicalAnalyzer(project_root, working_dir)
+        analyzer.process_words()
+        MorphologicalDataValidator(analyzer.inflections_file, analyzer.details_file).validate()
+        publish(Path(working_dir), output_dir)
+
+
 def main():
     try:
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        analyzer = MorphologicalAnalyzer(project_root)
-        analyzer.process_words()
+        analyze(project_root)
         logging.info("Morphological analysis processing complete.")
-
-        validator = MorphologicalDataValidator(analyzer.inflections_file, analyzer.details_file)
-        validator.validate()
 
     except Exception as e:
         logging.critical(f"Critical error in main execution: {str( e )}")

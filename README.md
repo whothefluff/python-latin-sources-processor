@@ -74,6 +74,11 @@ Morpheus and the macronizer keep running. It has no display: pass the aggregate 
 - Fails after the last word when a word got no analysis written: Morpheus couldn't be asked, its answer has no
   annotation or an analysis without a headword, or every analysis was dropped. A word that Morpheus doesn't know is
   written as unknown
+- Adds to a copy of the output files, validates it and moves it to `output/morphological_analysis/` only when every
+  word got an analysis and validation finds no issue. Otherwise it raises and leaves the output files as they were, so
+  the next run analyzes all the new words again
+- Doesn't start while a publication of the aggregate into `output/library/` didn't finish, or left a `.<name>.old`
+  file
 
 Theoretically you can create multiple scripts that use different services for morphological analysis,
 but only one version will be used with the current db schema
