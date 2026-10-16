@@ -338,6 +338,20 @@ def test_lost_lines_get_no_macronizer_results(monkeypatch, tmp_path):
         (0, "Levis", 0), (2, "levis", 0), (7, "lēvis", 0), (9, "levis", 2), (11, "jacēre", 0), (13, "jacere", 0)]
 
 
+# The edition marks the third verse for deletion
+_CARMEN_WITH_A_DELETION = _CARMEN.replace('<l n="3">iacere et iacere iam.</l>',
+                                          '<l n="3">\n      <del>iacere et iacere iam.</del>\n    </l>')
+
+
+def test_a_poem_ends_at_the_last_token_of_its_last_verse(monkeypatch, tmp_path):
+    _process_carmen(monkeypatch, tmp_path, xml=_CARMEN_WITH_A_DELETION)
+
+    subdivisions = pd.read_csv(tmp_path / "work_content_subdivisions.csv")
+    assert list(zip(subdivisions["typ"], subdivisions["fromIndex"], subdivisions["toIndex"])) == [
+        ("POEM", 0, 14), ("VERS", 0, 4), ("VERS", 5, 9), ("VERS", 10, 14), ("BOOK", 0, 14)]
+    assert _rows(tmp_path / "work_content_supplementary.csv", "workId") == [("NOTE", 0, 10, 14, "marked for deletion")]
+
+
 def test_a_list_of_words_gets_the_macronizations_of_its_words_and_not_of_the_et_between_them(monkeypatch):
     _macronizer_answers(monkeypatch, [("et", "et", 0), (" ", " ", 0), ("Levis", "Lēvis", 0), (" ", " ", 0),
                                       ("et", "et", 0), (" ", " ", 0), ("Venere", "Venere", 2)])

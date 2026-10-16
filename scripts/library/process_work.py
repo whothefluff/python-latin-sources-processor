@@ -743,12 +743,10 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
             parent_node = book_node
 
             poem_lines = list(poem)
-            to_index = fragment_index + sum(
-                len(split_text_into_segments(line.text)) for line in poem_lines if line.text) - 1
 
-            poem_sub = [work_id, poem_node, typ, seq, poem_name, parent_node, fragment_index, to_index]
+            # its toIndex is the last token of its lines
+            poem_sub = [work_id, poem_node, typ, seq, poem_name, parent_node, fragment_index, None]
             work_content_subdivisions_data.append(poem_sub)
-            print(f'Subdivision: {poem_sub}')
 
             is_first_line_of_poem = True
 
@@ -824,6 +822,9 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
                     work,
                     )
                 is_first_line_of_poem = False
+
+            poem_sub[7] = fragment_index - 1
+            print(f'Subdivision: {poem_sub}')
 
         for note in book.findall('.//tei:note', namespaces):
             note_id = note.get('n')
