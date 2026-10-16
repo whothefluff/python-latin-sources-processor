@@ -245,7 +245,7 @@ def _morpheus_reading(lower: str) -> MorpheusReading:
     enclitic = splits[0] if splits else next((ending for ending in SPLIT_ENCLITICS if lower.endswith(ending)), None)
     if enclitic is None or enclitic == lower:
         return _NO_READING
-    answers = tuple(answer if analysis is _Analysis.SPLIT else _host_answer(word, enclitic)
+    answers = tuple(answer if analysis is _Analysis.SPLIT else _host_answer(word, cast(str, enclitic))
                     for word, answer, (analysis, _) in zip(words, answers, analyses))
     if not any(answer.lemmas for answer in answers):
         return _NO_READING
