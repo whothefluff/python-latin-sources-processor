@@ -43,6 +43,7 @@ class SubdivisionRow(NamedTuple):
     parent_position: Optional[int]
     first_token_position: int
     last_token_position: int
+    edition_label: Optional[str] = None
 
 
 def _one_book_with_one_poem_with_a_verse_per_reference(tokens) -> List[SubdivisionRow]:
@@ -74,9 +75,12 @@ TROIAE = ('1.1.2', 'Troiae qui primus ab oris .')
 ITALIAM = ('1.1.3', 'Italiam fato profugus .')
 
 
-def _database_with_new_ids(path: Path, *works: _Work, candidate_table='CountableWordCandidateAnalyses') -> Path:
+def _database_with_new_ids(path: Path, *works: _Work, candidate_table='CountableWordCandidateAnalyses',
+                           with_edition_labels=True) -> Path:
     db = sqlite3.connect(path)
     db.executescript(READER_TABLES_THAT_THE_COMPARISON_READS)
+    if with_edition_labels:
+        db.execute('ALTER TABLE WorkContentSubdivisions ADD COLUMN editionLabel TEXT')
     db.execute(CANDIDATE_TABLE.format(candidate_table, ', cnt INTEGER' if 'Inflections' in candidate_table else ''))
     for work in works:
         work_id = str(uuid.uuid4())
@@ -105,9 +109,10 @@ def _database_with_new_ids(path: Path, *works: _Work, candidate_table='Countable
         for node, row in zip(nodes, subdivisions):
             parent_position = row.parent_position
             parent = None if parent_position is None else nodes[parent_position]
-            db.execute('INSERT INTO WorkContentSubdivisions VALUES ( ?, ?, ?, ?, ?, ?, ?, ? )',
+            values = '?, ' * (9 if with_edition_labels else 8)
+            db.execute(f'INSERT INTO WorkContentSubdivisions VALUES ( {values[:-2]} )',
                        (work_id, node, row.typ, row.cnt, row.name, parent, row.first_token_position,
-                        row.last_token_position))
+                        row.last_token_position, *([row.edition_label] if with_edition_labels else [])))
     db.commit()
     db.close()
     return path
@@ -215,6 +220,34 @@ def test_a_verse_moved_to_another_poem_has_another_parent(compared):
     assert [(c.new.typ, c.old_value, c.new_value) for c in changes['parent']] == [
         ('VERS', 'POEM 1 at 1.1.1#1', 'POEM 2 at 1.1.3#1')]
     assert [(c.new.typ, c.old_value, c.new_value) for c in changes['last token']] == [('POEM', '1.1.3#4', '1.1.2#6')]
+
+
+def _carmen_numbered(edition_label):
+    tokens = _tokens(ARMA)
+    return _Work(tokens, subdivisions=[SubdivisionRow('POEM', 0, 'Carmen', None, 0, 3, edition_label)])
+
+
+def test_a_changed_edition_label_is_reported(compared):
+    diff = compared([_carmen_numbered('1')], [_carmen_numbered('14a')]).work_diffs[0]
+
+    assert [(c.new.typ, c.old_value, c.new_value) for c in diff.subdivision_changes_by_field['editionLabel']] == [
+        ('POEM', '1', '14a')]
+
+
+@pytest.mark.parametrize('old_labelled, new_labelled, note', [
+    (False, True, 'Edition labels not compared: the old database has none'),
+    (True, False, 'Edition labels not compared: the new database has none'),
+    (False, False, 'Edition labels not compared: neither database has them'),
+], ids=['old', 'new', 'both'])
+def test_edition_labels_arent_compared_when_a_database_has_none_and_the_report_says_so(tmp_path, old_labelled,
+                                                                                         new_labelled, note):
+    old = _database_with_new_ids(tmp_path / 'old.db', _carmen_numbered('1'), with_edition_labels=old_labelled)
+    new = _database_with_new_ids(tmp_path / 'new.db', _carmen_numbered('14a'), with_edition_labels=new_labelled)
+
+    comparison = compare(old, new)
+
+    assert not comparison.differs
+    assert report(comparison)[-2:] == [note, 'No differences']
 
 
 def test_candidate_lemmas_are_compared_per_component(compared):

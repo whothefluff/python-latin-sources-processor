@@ -114,9 +114,9 @@ in `PIPELINE_CONTRACT.md`).*
 `tools/compare_reader_databases.py` compares two databases built by the reader's importer (the `data.db` its CI
 uploads as `latin-reader-database-<run number>`): the reader's `main` before the new CSVs, and a branch with them.
 It reports, per work and token, what the reader would show differently: text and reading order, macrons and masks,
-proper-noun states, enclitics, expansions, sentences and word indices, candidate lemmas, and subdivisions. Works are
-paired by their authors and name, or with `--same-work`, one to one. Adding a work must leave the others without
-differences:
+proper-noun states, enclitics, expansions, sentences and word indices, candidate lemmas, and subdivisions, with their
+edition labels when both databases have them (it says so when one doesn't). Works are paired by their authors and name,
+or with `--same-work`, one to one. Adding a work must leave the others without differences:
 
 ```bash
 python -m scripts.tools.compare_reader_databases old.db new.db --allow-added-works

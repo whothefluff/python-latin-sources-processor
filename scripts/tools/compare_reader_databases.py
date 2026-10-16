@@ -64,6 +64,8 @@ class Subdivision:
     from_idx: int
     to_idx: int
     depth: int
+    #: None in a database without edition labels
+    edition_label: Optional[str]
 
 
 @dataclass
@@ -187,16 +189,30 @@ def _tokens_by_work_id(db: sqlite3.Connection, candidate_table: str) -> Dict[str
     return tokens
 
 
+def _has_edition_labels(db: sqlite3.Connection) -> bool:
+    return any(column == 'editionLabel' for _, column, *_ in db.execute('PRAGMA table_info( WorkContentSubdivisions )'))
+
+
+def has_edition_labels(path: Path) -> bool:
+    db = _connect(path)
+    try:
+        return _has_edition_labels(db)
+    finally:
+        db.close()
+
+
 def _subdivisions_by_work_id(db: sqlite3.Connection) -> Dict[str, List[Subdivision]]:
-    rows = db.execute('''SELECT workId, node, parent, typ, cnt, name, fromIndex, toIndex
-                             FROM WorkContentSubdivisions''').fetchall()
+    edition_label = 'editionLabel' if _has_edition_labels(db) else 'NULL'
+    rows = db.execute(f'''SELECT workId, node, parent, typ, cnt, name, fromIndex, toIndex, {edition_label}
+                              FROM WorkContentSubdivisions''').fetchall()
     parents = {(work_id, node): parent for work_id, node, parent, *_ in rows}
     subdivisions = defaultdict(list)
-    for work_id, node, parent, typ, cnt, name, from_idx, to_idx in rows:
+    for work_id, node, parent, typ, cnt, name, from_idx, to_idx, label in rows:
         depth, ancestor = 0, parent
         while ancestor and depth <= len(rows):
             depth, ancestor = depth + 1, parents.get((work_id, ancestor))
-        subdivisions[work_id].append(Subdivision(node, parent or None, typ, cnt, name, from_idx, to_idx, depth))
+        subdivisions[work_id].append(Subdivision(node, parent or None, typ, cnt, name, from_idx, to_idx, depth,
+                                                 label))
     for work_subdivisions in subdivisions.values():
         work_subdivisions.sort(key=lambda s: (s.from_idx, s.depth, s.cnt))
     return subdivisions
@@ -277,7 +293,7 @@ def _compare_tokens(diff: WorkDiff) -> Dict[int, int]:
     return {pair.old.idx: pair.new.idx for pair in pairs}
 
 
-def _compare_subdivisions(diff: WorkDiff, new_idx_by_old_idx: Dict[int, int]):
+def _compare_subdivisions(diff: WorkDiff, new_idx_by_old_idx: Dict[int, int], compares_edition_labels: bool):
     unpaired_by_type_depth_and_first_token = defaultdict(list)
     for subdivision in diff.new.subdivisions:
         unpaired_by_type_depth_and_first_token[(subdivision.typ, subdivision.depth, subdivision.from_idx)].append(
@@ -308,11 +324,14 @@ def _compare_subdivisions(diff: WorkDiff, new_idx_by_old_idx: Dict[int, int]):
             changes['cnt'].append(SubdivisionChange(new, str(old.cnt), str(new.cnt)))
         if old.name != new.name:
             changes['name'].append(SubdivisionChange(new, repr(old.name), repr(new.name)))
+        if compares_edition_labels and old.edition_label != new.edition_label:
+            changes['editionLabel'].append(SubdivisionChange(new, _shown(old.edition_label),
+                                                             _shown(new.edition_label)))
 
 
-def compare_works(old: Work, new: Work) -> WorkDiff:
+def compare_works(old: Work, new: Work, compares_edition_labels: bool = True) -> WorkDiff:
     diff = WorkDiff(old, new)
-    _compare_subdivisions(diff, _compare_tokens(diff))
+    _compare_subdivisions(diff, _compare_tokens(diff), compares_edition_labels)
     return diff
 
 
@@ -323,6 +342,8 @@ class Comparison:
     added_works: List[Work]
     old_row_counts_by_table: Dict[str, int]
     new_row_counts_by_table: Dict[str, int]
+    old_has_edition_labels: bool
+    new_has_edition_labels: bool
     allow_added_works: bool = False
 
     @property
@@ -362,12 +383,17 @@ def compare(old_path: Path, new_path: Path, same_works: Sequence[Tuple[str, str]
             allow_added_works: bool = False) -> Comparison:
     old_works, new_works = read_works(old_path), read_works(new_path)
     counterparts = _new_identity_by_old_identity(old_works, new_works, same_works)
+    old_has_edition_labels, new_has_edition_labels = has_edition_labels(old_path), has_edition_labels(new_path)
+    compares_edition_labels = old_has_edition_labels and new_has_edition_labels
     return Comparison(
-        work_diffs=[compare_works(old_works[old], new_works[new]) for old, new in counterparts.items()],
+        work_diffs=[compare_works(old_works[old], new_works[new], compares_edition_labels)
+                    for old, new in counterparts.items()],
         removed_works=[work for identity, work in old_works.items() if identity not in counterparts],
         added_works=[work for identity, work in new_works.items() if identity not in counterparts.values()],
         old_row_counts_by_table=count_rows_by_table(old_path),
         new_row_counts_by_table=count_rows_by_table(new_path),
+        old_has_edition_labels=old_has_edition_labels,
+        new_has_edition_labels=new_has_edition_labels,
         allow_added_works=allow_added_works,
     )
 
@@ -442,6 +468,12 @@ def report(comparison: Comparison, examples: int = 10) -> List[str]:
                       if old_counts.get(name) != new_counts.get(name)]
     if changed_counts:
         lines += ['Row counts that changed (for information)', *changed_counts]
+    without_edition_labels = [which for which, has_them in (('old', comparison.old_has_edition_labels),
+                                                            ('new', comparison.new_has_edition_labels)) if not has_them]
+    if without_edition_labels:
+        lines.append('Edition labels not compared: ' + (f'the {without_edition_labels[0]} database has none'
+                                                        if len(without_edition_labels) == 1
+                                                        else 'neither database has them'))
     return lines + ['Differences found' if comparison.differs else 'No differences']
 
 
