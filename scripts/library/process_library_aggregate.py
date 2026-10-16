@@ -34,6 +34,7 @@ FILES_WITH_ROWS_FOR_EVERY_WORK = ('works.csv', 'work_contents.csv', 'work_conten
 
 TYPE_BY_FILE_AND_COLUMN: Dict[str, Mapping[Hashable, str]] = {
     'work_contents.csv': {
+        'sourceReference': 'str',
         'properNounState': 'Int64',
         'wordIdx': 'Int64'
     },
