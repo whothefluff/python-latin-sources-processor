@@ -1,17 +1,20 @@
-# README for process_phaedrus.py
+# README for process_work.py
 
-This script is responsible for the complete processing of the TEI XML source text for Phaedrus's Fables.
+This module processes the TEI XML source text of a work. What is specific to the work's edition is in the work's own
+script in `scripts/library/item/`, which runs this module with it: the letters that the edition prints, the
+corrections that its tokens need, its author's abbreviations, and its about and image files. Phaedrus's Fables are
+`process_phaedrus.py`.
 
 ## Overview
 
 The script performs the following key functions:
 
-1.  **Parses** the TEI XML file for Phaedrus.
+1.  **Parses** the TEI XML file of the work.
 2.  **Segments** the text into individual tokens (words, punctuation, etc.) and normalizes digraphs (`æ` → `ae`, `œ` → `oe`) to maintain skeleton identity with macronized forms.
-3.  **Classifies Tokens**: Each token is assigned a `tokenType` (1 = word, 2 = abbreviation, 3 = roman numeral, 4 = punctuation, 5 = editorial marker, 6 = other). Known abbreviations (e.g., praenomina like `C.`, `M.`) are re-attached to their trailing period during segmentation so they are treated as single tokens. Work-specific overrides can reclassify individual tokens via `WORK_SPECIFIC_TOKEN_OVERRIDES`.
+3.  **Classifies Tokens**: Each token is assigned a `tokenType` (1 = word, 2 = abbreviation, 3 = roman numeral, 4 = punctuation, 5 = editorial marker, 6 = other). Known abbreviations (e.g., praenomina like `C.`, `M.`) are re-attached to their trailing period during segmentation so they are treated as single tokens. Work-specific overrides can reclassify individual tokens via the work's `token_overrides` (`WORK_SPECIFIC_TOKEN_OVERRIDES` in Phaedrus's script).
 4.  **Determines Proper Noun State**: For each word, it queries a local Morpheus API to determine if the word is a common noun (0), a proper noun (1), or could be either (2), based on both its dictionary form and its context in the text. Abbreviations are forced to state 1; numerals to state 0.
 5.  **Detects Enclitics**: During morphological analysis, the script detects fused enclitics (`-que`, `-ne`, `-ve`, `-ue`, `-dum`) by comparing Morpheus's returned surface forms against the full token. When the full token is absent from the surface forms but a stem + clitic decomposition matches, the enclitic is recorded. Morpheus is queried with strictCase, and a capitalized token gets no analysis when all its forms are lowercase (`Seque`), so the token is looked up in both. An enclitic counts only when neither answer analyzes the whole token: `Iove` is Juppiter, not `io` and `ve`. When one case is split and the other has no analysis, the other case's host is still looked up, since a capitalized host can be a name. When neither case has any analysis, the host is looked up in both. For `-dum`, an additional check restricts detection to stems that are imperatives, interjections, or adverbs. Which endings are split, and why: [`ENCLITICS.md`](../../../ENCLITICS.md).
-6.  **Assigns Expansions**: Abbreviations and numerals can be given a macronized expansion (e.g., `C.` → `Mārcus`, `I` → `ūnum`) via `WORK_SPECIFIC_EXPANSIONS`, keyed by fragment index. These expansions are always macronized because they feed directly into the app's macron-aware normalization columns.
+6.  **Assigns Expansions**: Abbreviations and numerals can be given a macronized expansion (e.g., `C.` → `Mārcus`, `I` → `ūnum`) via the work's `expansions` (`WORK_SPECIFIC_EXPANSIONS` in Phaedrus's script), keyed by fragment index. These expansions are always macronized because they feed directly into the app's macron-aware normalization columns.
 7.  **Computes Sentence and Word Indices**: A `sentenceIdx` (per work) increments on sentence-terminal punctuation (`.`, `!`, `?`) and at forced boundaries (start of each poem/book title). A `wordIdx` (per sentence) increments only for tokens with `tokenType` ≤ 3, and is `NULL` for punctuation, editorial markers, and other non-word tokens.
 8.  **Generates Source References**: Each token receives a CTS-style `sourceReference` string (e.g., `3.7.12` for book 3, poem 7, line 12) for display in the reader and concordance results.
 9.  **Performs Macronization**: It queries a local Macronization API to determine the correct vowel lengths for every word in the text.
@@ -20,7 +23,7 @@ The script performs the following key functions:
     -   **Work-Specific Macronizations**: Words whose macronization is uncertain (nonzero uncertainty mask), unknown, context-dependent (different macrons depending on proper noun status), or morphologically unanalyzable are stored in a work-specific CSV.
     -   **Certain Macronizations That Differ**: When the macronizer is certain of a word but macronizes it differently in different places, the word stays out of the global CSV, and every certain occurrence that the reader would look up under it gets its own macronization in the work-specific CSV, with mask 0. So does a certain occurrence that the reader would look up under another token's macronization, such as a capitalized I under a numeral I's.
     -   Non-word tokens (punctuation, abbreviations, numerals, etc.) are stored in the unambiguous table as-is.
-11. **Spells Consonants as `j` and `v`**: Where the edition prints one letter for two sounds, as this edition prints `i` for both `i` and `j`, each word gets the letter that Morpheus's analyses of the word have, so `iam` becomes `jam`. When Morpheus splits off an enclitic, the analyses of the host decide. Letters that the edition tells apart, `u` and `v` here, stay as printed. Words are respelled only when the CSVs are written, because the steps before look words up as the source prints them. `works.csv` records the letters that the edition prints (`PIPELINE_CONTRACT.md`, section 5).
+11. **Spells Consonants as `j` and `v`**: Where the edition prints one letter for two sounds, as Phaedrus's edition prints `i` for both `i` and `j`, each word gets the letter that Morpheus's analyses of the word have, so `iam` becomes `jam`. When Morpheus splits off an enclitic, the analyses of the host decide. Letters that the edition tells apart, `u` and `v` in Phaedrus's, stay as printed. Words are respelled only when the CSVs are written, because the steps before look words up as the source prints them. `works.csv` records the letters that the edition prints (`PIPELINE_CONTRACT.md`, section 5).
 12. **Generates CSVs**: It outputs a comprehensive set of structured data files ready for aggregation and use in the final application.
 13. **Validates Output**: It writes the files to a temporary directory and runs a series of internal checks to ensure the result makes sense, then moves them to the output directory. When any check fails, it raises and leaves the output directory as it was. The checks include:
     -   Sequential index integrity for contents and supplementary data. Subdivisions are numbered among their siblings of the same type as the script numbers them: verses and books take the edition's number, n − 1, which can skip some (e.g. Phaedrus 4.24 has no verse 4), and a book without a number the one after the highest so far, so they only have to be unique; paragraphs and titles are 0, and a subdivision has one title at most, as the reader's unique index requires; the other types are counted from 0 up.
@@ -48,11 +51,13 @@ The script expects the Morpheus API to be available at `http://localhost:1501` a
 
 ## Input
 
--   **Source XML**: `data/library/item/phaedrus/phi0975.phi001.perseus-lat2_modified.xml`
+-   **Source XML**: the work's, such as `data/library/item/phaedrus/phi0975.phi001.perseus-lat2_modified.xml` for
+    Phaedrus
 
 ## Output
 
-The script generates the following files in `output/library/item/phaedrus/`:
+The work's script generates the following files in its directory of `output/library/item/`, such as
+`output/library/item/phaedrus/`:
 
 | File | Description |
 |------|-------------|
@@ -69,7 +74,7 @@ The script generates the following files in `output/library/item/phaedrus/`:
 
 ## How to Run
 
-Ensure the prerequisite APIs are running, then execute the script from the project root:
+Ensure the prerequisite APIs are running, then execute the work's script from the project root:
 
 ```bash
 python -m scripts.library.item.process_phaedrus

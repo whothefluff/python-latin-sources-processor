@@ -9,7 +9,7 @@ Which word endings the pipeline splits off into the `enclitic` column of `work_c
 Split an ending off only when the word it forms has no Lewis & Short entry of its own, so the reader looks up the host
 and the enclitic separately. An entry that only points elsewhere ("ĕgŏmet, v. … met") counts as none.
 
-`SPLIT_ENCLITICS` (`process_phaedrus.py`) holds `que`, `ne`, `ve`, `ue`, `dum`:
+`SPLIT_ENCLITICS` (`process_work.py`) holds `que`, `ne`, `ve`, `ue`, `dum`:
 
 - `que`, `ne` and `ve` attach to any word, and each has its own L&S entry. `ue` is `ve` in editions without v.
 - `dum` only after an imperative, interjection or adverb (`_is_valid_dum_stem`): `agedum` has no entry, while `age` and

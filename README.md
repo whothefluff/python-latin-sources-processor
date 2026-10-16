@@ -34,7 +34,7 @@ Morpheus and the macronizer keep running. It has no display: pass the aggregate 
 
 #### `library/item/XXX.py`
 
-- Processes related XML source texts
+- Holds what is specific to one work's edition, and processes its XML source text with `library/process_work.py`
 - Creates CSV files in `output/library/item/XXX/`
 - **Overwrites** existing files in the output path, once the new ones pass its validation. When Morpheus or the
   macronizer fails, or validation finds errors, it raises and leaves them as they were

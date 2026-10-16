@@ -1,19 +1,30 @@
 import logging
+from pathlib import Path
 from typing import NamedTuple
 
 import pandas as pd
 import pytest
 import requests
 
-from scripts.library.item import process_phaedrus
+from scripts.library import process_work
 from scripts.library.util.proper_noun import ProperNounState
+from scripts.library.util.spelling import LetterConvention
 from scripts.library.util.token_classification import TokenType
+
+_CARMEN_FILES = Path(__file__).parent / 'fixtures' / 'carmen'
+# u and v apart, i for both i and j
+_CARMEN_LETTERS = LetterConvention(uv_lowercase="uv", uv_capitals="UV", ij_lowercase="i", ij_capitals="I")
+_CARMEN_WORK = process_work.WorkConfiguration(
+    letter_convention=_CARMEN_LETTERS, token_overrides={}, expansions={}, proper_noun_overrides={},
+    author_abbreviations=('Fict.',), work_about_file=str(_CARMEN_FILES / 'work_about.txt'),
+    author_about_file=str(_CARMEN_FILES / 'author_about.txt'),
+    author_image_file=str(_CARMEN_FILES / 'author_image.bin'))
 
 
 @pytest.fixture(autouse=True)
 def _forget_morpheus_answers():
-    for cached in (process_phaedrus._lookup, process_phaedrus._morpheus_reading,
-                   process_phaedrus.determine_proper_noun_state):
+    for cached in (process_work._lookup, process_work._morpheus_reading,
+                   process_work.determine_proper_noun_state):
         cached.cache_clear()
 
 
@@ -69,7 +80,7 @@ def _morpheus(monkeypatch, answers):
         asked.append(params['word'])
         return _Response(_morpheus_xml(answers.get(params['word'], [])))
 
-    monkeypatch.setattr(process_phaedrus.requests, "get", get)
+    monkeypatch.setattr(process_work.requests, "get", get)
     return asked
 
 
@@ -77,39 +88,50 @@ def _morpheus(monkeypatch, answers):
 def test_find_enclitic_finds_a_common_word_enclitic_in_any_case(monkeypatch, word):
     _morpheus(monkeypatch, {"seque": _entry("sui", "se")})
 
-    assert process_phaedrus.find_enclitic(word) == "que"
+    assert process_work.find_enclitic(word, _CARMEN_LETTERS) == "que"
 
 
 @pytest.mark.parametrize("word", ["Caesarque", "caesarque"])
 def test_find_enclitic_finds_a_proper_noun_enclitic_in_any_case(monkeypatch, word):
     _morpheus(monkeypatch, {"Caesarque": _entry("Caesar", ("Caesa^r", "*"))})
 
-    assert process_phaedrus.find_enclitic(word) == "que"
+    assert process_work.find_enclitic(word, _CARMEN_LETTERS) == "que"
 
 
 @pytest.mark.parametrize("word, expected", [("iam", "jam"), ("Iam", "Jam"), ("voluit", "voluit"), ("ait", "ait")])
 def test_spelled_with_morpheus_letters_takes_morpheus_j_and_keeps_the_edition_u(monkeypatch, word, expected):
     _morpheus(monkeypatch, {"iam": ["jam"], "voluit": ["voluit", "volvit"], "ait": ["ait"]})
 
-    assert process_phaedrus.spelled_with_morpheus_letters(word) == expected
+    assert process_work.spelled_with_morpheus_letters(word, _CARMEN_LETTERS) == expected
 
 
 def test_a_host_that_morpheus_spells_with_j_gets_its_enclitic(monkeypatch):
     _morpheus(monkeypatch, {"iamque": ["jam"]})
 
-    assert (process_phaedrus.find_enclitic("Iamque"), process_phaedrus.spelled_with_morpheus_letters("Iamque")) == ("que", "Jamque")
+    assert (process_work.find_enclitic("Iamque", _CARMEN_LETTERS),
+            process_work.spelled_with_morpheus_letters("Iamque", _CARMEN_LETTERS)) == ("que", "Jamque")
+
+
+def test_a_word_gets_what_the_letters_of_its_work_give_it_whatever_another_work_got_before(monkeypatch):
+    _morpheus(monkeypatch, {"iamque": ["jam"]})
+    i_and_j_apart = _CARMEN_LETTERS._replace(ij_lowercase="ij", ij_capitals="IJ")
+
+    assert [(process_work.find_enclitic("Iamque", letters),
+             process_work.spelled_with_morpheus_letters("Iamque", letters))
+            for letters in (_CARMEN_LETTERS, i_and_j_apart, _CARMEN_LETTERS)] == [
+        ("que", "Jamque"), (None, "Iamque"), ("que", "Jamque")]
 
 
 @pytest.mark.parametrize("stem, suffix, expected", [("ob:jurg", "a_bat", "objurgabat"), ("vi^r", "*", "vir")])
 def test_surface_forms_leave_out_the_prefix_and_empty_suffix_marks(stem, suffix, expected):
-    assert process_phaedrus._surface_forms(_morpheus_xml([(stem, suffix)])) == {expected}
+    assert process_work._surface_forms(_morpheus_xml([(stem, suffix)])) == {expected}
 
 
 @pytest.mark.parametrize("word, expected", [("obiurgabat", "objurgabat"), ("Obiurgabat", "Objurgabat")])
 def test_a_compound_that_morpheus_spells_with_j_gets_it(monkeypatch, word, expected):
     _morpheus(monkeypatch, {"obiurgabat": [("ob:jurg", "a_bat")]})
 
-    assert process_phaedrus.spelled_with_morpheus_letters(word) == expected
+    assert process_work.spelled_with_morpheus_letters(word, _CARMEN_LETTERS) == expected
 
 
 @pytest.mark.parametrize("word, host, expected", [("obiurgatque", ("ob:jurg", "at"), "objurgatque"),
@@ -117,39 +139,39 @@ def test_a_compound_that_morpheus_spells_with_j_gets_it(monkeypatch, word, expec
 def test_a_compound_host_or_a_host_without_a_suffix_gets_its_enclitic(monkeypatch, word, host, expected):
     _morpheus(monkeypatch, {word: [host]})
 
-    assert process_phaedrus.find_enclitic(word) == "que"
-    assert process_phaedrus.spelled_with_morpheus_letters(word) == expected
+    assert process_work.find_enclitic(word, _CARMEN_LETTERS) == "que"
+    assert process_work.spelled_with_morpheus_letters(word, _CARMEN_LETTERS) == expected
 
 
 @pytest.mark.parametrize("unreachable", ["musaque", "musa"], ids=["the word", "its host"])
 def test_a_request_to_morpheus_that_fails_raises_and_leaves_nothing_cached(monkeypatch, unreachable):
     _morpheus(monkeypatch, {"musa": _entry("musa", ("mu^s", "a"))})
-    answer = process_phaedrus.requests.get
+    answer = process_work.requests.get
 
     def get(url, params, headers, timeout):
         if params['word'] == unreachable:
             raise requests.exceptions.ConnectionError(f"No answer for '{unreachable}'")
         return answer(url, params=params, headers=headers, timeout=timeout)
 
-    monkeypatch.setattr(process_phaedrus.requests, "get", get)
+    monkeypatch.setattr(process_work.requests, "get", get)
     with pytest.raises(requests.exceptions.ConnectionError):
-        process_phaedrus.find_enclitic("musaque")
-    monkeypatch.setattr(process_phaedrus.requests, "get", answer)
+        process_work.find_enclitic("musaque", _CARMEN_LETTERS)
+    monkeypatch.setattr(process_work.requests, "get", answer)
 
-    assert process_phaedrus.find_enclitic("musaque") == "que"
+    assert process_work.find_enclitic("musaque", _CARMEN_LETTERS) == "que"
 
 
 @pytest.mark.parametrize("word, answers, error", [
-    ("levis", {"levis": "<words><word>"}, process_phaedrus.ET.ParseError),
+    ("levis", {"levis": "<words><word>"}, process_work.ET.ParseError),
     ("levis", {"levis": "<error>unknown engine</error>"}, ValueError),
-    ("agedum", {"age": "<words><word>"}, process_phaedrus.ET.ParseError),
+    ("agedum", {"age": "<words><word>"}, process_work.ET.ParseError),
 ], ids=["not XML", "an error", "not XML for a host that dum may follow"])
 def test_an_answer_that_is_an_error_or_isnt_xml_raises(monkeypatch, word, answers, error):
-    monkeypatch.setattr(process_phaedrus.requests, "get",
+    monkeypatch.setattr(process_work.requests, "get",
                         lambda url, params, headers, timeout: _Response(answers.get(params['word'], '<words/>')))
 
     with pytest.raises(error):
-        process_phaedrus.find_enclitic(word)
+        process_work.find_enclitic(word, _CARMEN_LETTERS)
 
 
 # Morpheus splits iove as io and ve, and knows Iove whole, as Juppiter
@@ -160,23 +182,23 @@ _IOVE = {"iove": _IO, "io": _IO, "Iove": _entry("Juppiter", ("Jov", "e"))}
 def test_a_word_that_morpheus_knows_whole_in_one_case_has_no_enclitic(monkeypatch):
     _morpheus(monkeypatch, _IOVE)
 
-    assert process_phaedrus.find_enclitic("Iove") is None
-    assert process_phaedrus.spelled_with_morpheus_letters("Iove") == "Jove"
+    assert process_work.find_enclitic("Iove", _CARMEN_LETTERS) is None
+    assert process_work.spelled_with_morpheus_letters("Iove", _CARMEN_LETTERS) == "Jove"
 
 
 def test_a_word_that_morpheus_knows_whole_only_as_a_name_is_a_name(monkeypatch):
     _morpheus(monkeypatch, _IOVE)
 
-    assert process_phaedrus.determine_proper_noun_state("Iove", True, False) == (ProperNounState.YES,
-                                                                                ProperNounState.YES)
+    assert process_work.determine_proper_noun_state("Iove", True, False, _CARMEN_LETTERS) == (ProperNounState.YES,
+                                                                                               ProperNounState.YES)
 
 
 def test_a_word_that_morpheus_knows_whole_in_one_case_is_never_asked_for_without_an_ending(monkeypatch):
     asked = _morpheus(monkeypatch, _IOVE)
 
-    process_phaedrus.find_enclitic("Iove")
-    process_phaedrus.morpheus_surfaces("iove")
-    process_phaedrus.determine_proper_noun_state("Iove", True, False)
+    process_work.find_enclitic("Iove", _CARMEN_LETTERS)
+    process_work.morpheus_surfaces("iove", _CARMEN_LETTERS)
+    process_work.determine_proper_noun_state("Iove", True, False, _CARMEN_LETTERS)
 
     assert asked == ["iove", "Iove"]
 
@@ -184,23 +206,23 @@ def test_a_word_that_morpheus_knows_whole_in_one_case_is_never_asked_for_without
 def test_a_split_in_one_case_still_asks_for_the_host_in_the_other(monkeypatch):
     asked = _morpheus(monkeypatch, {"jubetque": _entry("jubeo", ("jub", "et"))})
 
-    assert process_phaedrus.find_enclitic("Jubetque") == "que"
+    assert process_work.find_enclitic("Jubetque", _CARMEN_LETTERS) == "que"
     assert asked == ["jubetque", "Jubetque", "Jubet"]
 
 
 def test_a_name_that_only_the_capitalized_host_has_counts(monkeypatch):
     _morpheus(monkeypatch, {"venereque": _entry("venio", ("ve_n", "e_re")), "Venere": _entry("Venus", ("Vener", "e"))})
 
-    assert process_phaedrus.find_enclitic("Venereque") == "que"
-    assert process_phaedrus.determine_proper_noun_state("Venereque", False, False) == (ProperNounState.EITHER,
-                                                                                      ProperNounState.YES)
+    assert process_work.find_enclitic("Venereque", _CARMEN_LETTERS) == "que"
+    assert process_work.determine_proper_noun_state("Venereque", False, False, _CARMEN_LETTERS) == (
+        ProperNounState.EITHER, ProperNounState.YES)
 
 
 def test_a_word_that_neither_case_knows_gets_the_enclitic_of_a_host_that_answers(monkeypatch):
     asked = _morpheus(monkeypatch, {"musa": _entry("musa", ("mu^s", "a"))})
 
-    assert process_phaedrus.find_enclitic("Musaque") == "que"
-    assert process_phaedrus.morpheus_surfaces("Musaque") == {"musa"}
+    assert process_work.find_enclitic("Musaque", _CARMEN_LETTERS) == "que"
+    assert process_work.morpheus_surfaces("Musaque", _CARMEN_LETTERS) == {"musa"}
     assert asked == ["musaque", "Musaque", "musa", "Musa"]
 
 
@@ -220,8 +242,8 @@ def test_dum_is_an_enclitic_only_after_an_imperative_an_interjection_or_an_adver
                                                                                     expected):
     _morpheus(monkeypatch, answers)
 
-    assert process_phaedrus.find_enclitic(word) == expected
-    assert bool(process_phaedrus.morpheus_surfaces(word)) == (expected is not None)
+    assert process_work.find_enclitic(word, _CARMEN_LETTERS) == expected
+    assert bool(process_work.morpheus_surfaces(word, _CARMEN_LETTERS)) == (expected is not None)
 
 
 _CARMEN = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
@@ -247,17 +269,17 @@ _CARMEN_MACRONIZED = [("Levis", "Levis", 0), ("et", "et", 0), ("levis", "levis",
 
 def _macronizer_answers(monkeypatch, macronized):
     """Makes the macronizer answer any text with macronized, a list of (word, macronized word, mask)."""
-    monkeypatch.setattr(process_phaedrus, "macronize_text", lambda text: [
-        process_phaedrus.TokenResult(word=word, is_word=word.isalpha(), macronized=macronized, uncertainty_mask=mask,
-                                     candidates=[])
+    monkeypatch.setattr(process_work, "macronize_text", lambda text: [
+        process_work.TokenResult(word=word, is_word=word.isalpha(), macronized=macronized, uncertainty_mask=mask,
+                                 candidates=[])
         for word, macronized, mask in macronized])
 
 
-def _process_carmen(monkeypatch, output_dir, xml=_CARMEN, macronized=_CARMEN_MACRONIZED):
+def _process_carmen(monkeypatch, output_dir, xml=_CARMEN, macronized=_CARMEN_MACRONIZED, work=_CARMEN_WORK):
     _morpheus(monkeypatch, _CARMEN_ANALYSES)
-    process_phaedrus.determine_proper_noun_state.cache_clear()
+    process_work.determine_proper_noun_state.cache_clear()
     _macronizer_answers(monkeypatch, macronized)
-    process_phaedrus.process_verse(xml, output_dir)
+    process_work.process_verse(xml, output_dir, work)
 
 
 @pytest.fixture
@@ -282,15 +304,15 @@ def test_only_the_macronizations_that_the_certain_occurrences_agree_on_are_unamb
 
 def test_a_request_to_the_macronizer_that_fails_raises_and_writes_nothing(monkeypatch, tmp_path):
     _morpheus(monkeypatch, _CARMEN_ANALYSES)
-    process_phaedrus.determine_proper_noun_state.cache_clear()
+    process_work.determine_proper_noun_state.cache_clear()
 
     def post(url, data, headers, timeout):
         raise requests.exceptions.ConnectionError("No answer from the macronizer")
 
-    monkeypatch.setattr(process_phaedrus.requests, "post", post)
+    monkeypatch.setattr(process_work.requests, "post", post)
 
     with pytest.raises(requests.exceptions.ConnectionError):
-        process_phaedrus.process_verse(_CARMEN, tmp_path)
+        process_work.process_verse(_CARMEN, tmp_path, _CARMEN_WORK)
     assert list(tmp_path.iterdir()) == []
 
 
@@ -320,7 +342,7 @@ def test_a_list_of_words_gets_the_macronizations_of_its_words_and_not_of_the_et_
     _macronizer_answers(monkeypatch, [("et", "et", 0), (" ", " ", 0), ("Levis", "Lēvis", 0), (" ", " ", 0),
                                       ("et", "et", 0), (" ", " ", 0), ("Venere", "Venere", 2)])
 
-    assert process_phaedrus._get_macronization_data_from_api({"Levis", "Venere"}) == {"Levis": ("Lēvis", 0),
+    assert process_work._get_macronization_data_from_api({"Levis", "Venere"}) == {"Levis": ("Lēvis", 0),
                                                                                       "Venere": ("Venere", 2)}
 
 
@@ -340,7 +362,7 @@ def test_macronizer_results_for_a_list_of_words_that_dont_match_it_raise(monkeyp
     _macronizer_answers(monkeypatch, macronized)
 
     with pytest.raises(RuntimeError, match=error):
-        process_phaedrus._get_macronization_data_from_api(words)
+        process_work._get_macronization_data_from_api(words)
 
 
 # A capitalized i ("go!") mid-sentence, which the reader looks up as I before i, and the numeral I
@@ -350,14 +372,13 @@ _CARMEN_WITH_I_MACRONIZED = _CARMEN_MACRONIZED + [("et", "et", 0), ("I", "Ī", 0
 
 
 def test_a_word_whose_own_macronization_comes_before_a_numeral_unambiguous_one_is_covered(monkeypatch, tmp_path):
-    monkeypatch.setitem(process_phaedrus.WORK_SPECIFIC_TOKEN_OVERRIDES, 18, TokenType.NUMERAL)
-    monkeypatch.setitem(process_phaedrus.WORK_SPECIFIC_EXPANSIONS, 18, "ūnus")
-    _process_carmen(monkeypatch, tmp_path, xml=_CARMEN_WITH_I, macronized=_CARMEN_WITH_I_MACRONIZED)
+    _process_carmen(monkeypatch, tmp_path, xml=_CARMEN_WITH_I, macronized=_CARMEN_WITH_I_MACRONIZED,
+                    work=_CARMEN_WORK._replace(token_overrides={18: TokenType.NUMERAL}, expansions={18: "ūnus"}))
     errors = []
 
-    process_phaedrus.check_macronization_coverage(errors, pd.read_csv(tmp_path / "work_contents.csv"),
-                                                  pd.read_csv(tmp_path / "work_macronizations.csv"),
-                                                  pd.read_csv(tmp_path / "unambiguous_macronizations.csv"))
+    process_work.check_macronization_coverage(errors, pd.read_csv(tmp_path / "work_contents.csv"),
+                                              pd.read_csv(tmp_path / "work_macronizations.csv"),
+                                              pd.read_csv(tmp_path / "unambiguous_macronizations.csv"))
 
     assert (16, "Ī", 0) in _rows(tmp_path / "work_macronizations.csv", "workId")
     assert ("I", "I") in _rows(tmp_path / "unambiguous_macronizations.csv")
@@ -380,7 +401,7 @@ def test_a_word_is_covered_by_the_unambiguous_macronization_that_the_reader_look
                              "properNounState": pd.array([proper_noun_state], dtype="Int64")})
     found = []
 
-    process_phaedrus.check_macronization_coverage(
+    process_work.check_macronization_coverage(
         found, contents, pd.DataFrame(columns=["workId", "idx", "macronizedWord", "uncertaintyBitMask"]),
         pd.DataFrame({"word": keys, "macronizedWord": keys}, dtype=str))
 
@@ -397,7 +418,7 @@ def test_verses_numbered_by_the_edition_and_a_word_that_morpheus_doesnt_know_pas
                                                                                               caplog):
     _process_carmen(monkeypatch, tmp_path, xml=_CARMEN_WITH_A_GAP, macronized=_CARMEN_WITH_A_GAP_MACRONIZED)
 
-    process_phaedrus.validate_csv_files(_CARMEN_WITH_A_GAP, tmp_path)
+    process_work.validate_csv_files(_CARMEN_WITH_A_GAP, tmp_path, _CARMEN_WORK)
 
     subdivisions = pd.read_csv(tmp_path / "work_content_subdivisions.csv")
     assert list(subdivisions[subdivisions["typ"] == "VERS"]["cnt"]) == [0, 1, 3, 4]
@@ -409,11 +430,11 @@ def test_a_word_that_morpheus_cant_be_asked_about_raises_instead_of_getting_no_s
     def get(url, params, headers, timeout):
         raise requests.exceptions.ConnectionError("No answer from Morpheus")
 
-    monkeypatch.setattr(process_phaedrus.requests, "get", get)
+    monkeypatch.setattr(process_work.requests, "get", get)
     _macronizer_answers(monkeypatch, _CARMEN_MACRONIZED)
 
     with pytest.raises(requests.exceptions.ConnectionError):
-        process_phaedrus.process_verse(_CARMEN, tmp_path)
+        process_work.process_verse(_CARMEN, tmp_path, _CARMEN_WORK)
     assert list(tmp_path.iterdir()) == []
 
 
@@ -462,7 +483,7 @@ def _subdivisions(*rows):
 def test_subdivisions_are_numbered_by_the_edition_or_counted_as_the_script_numbers_them(subdivisions, errors):
     found = []
 
-    process_phaedrus.check_subdivision_numbers(found, subdivisions)
+    process_work.check_subdivision_numbers(found, subdivisions)
 
     assert found == errors
 
@@ -492,16 +513,16 @@ def test_abbreviations_numerals_and_other_tokens_have_their_proper_noun_states(w
                              "properNounState": pd.array([proper_noun_state], dtype="Int64")})
     found = []
 
-    process_phaedrus.check_proper_noun_states(found, contents)
+    process_work.check_proper_noun_states(found, contents)
 
     assert found == errors
 
 
-def _publish_carmen(monkeypatch, output_dir, xml=_CARMEN, macronized=_CARMEN_MACRONIZED):
+def _publish_carmen(monkeypatch, output_dir, xml=_CARMEN, macronized=_CARMEN_MACRONIZED, work=_CARMEN_WORK):
     _morpheus(monkeypatch, _CARMEN_ANALYSES)
-    process_phaedrus.determine_proper_noun_state.cache_clear()
+    process_work.determine_proper_noun_state.cache_clear()
     _macronizer_answers(monkeypatch, macronized)
-    process_phaedrus.publish_work(xml, output_dir)
+    process_work.publish_work(xml, output_dir, work)
 
 
 _WORK_FILES = ["author_abbreviations.csv", "authors.csv", "authors_and_works.csv", "unambiguous_macronizations.csv",
@@ -517,12 +538,22 @@ def test_a_work_that_passes_validation_is_published(monkeypatch, tmp_path):
         (0, "Levis", 0), (2, "levis", 0), (6, "lēvis", 0), (8, "levis", 2), (10, "jacēre", 0), (12, "jacere", 0)]
 
 
+def test_a_work_gets_the_letters_corrections_author_and_about_texts_of_its_configuration(monkeypatch, tmp_path):
+    _process_carmen(monkeypatch, tmp_path, work=_CARMEN_WORK._replace(proper_noun_overrides={0: ProperNounState.YES}))
+
+    assert _rows(tmp_path / "works.csv", "id") == [("Carmen", "An invented work.", "uv", "UV", "i", "I")]
+    assert _rows(tmp_path / "authors.csv", "id") == [("Fictor", "An invented poet.", "Zml4dHVyZQ==")]
+    assert _rows(tmp_path / "author_abbreviations.csv", "authorId") == [(0, "Fict.")]
+    assert pd.read_csv(tmp_path / "work_contents.csv")["properNounState"][0] == ProperNounState.YES
+
+
 def test_a_work_that_fails_validation_raises_and_leaves_the_published_files_as_they_were(monkeypatch, tmp_path):
     _publish_carmen(monkeypatch, tmp_path)
     before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
     # The numeral has no expansion
-    monkeypatch.setitem(process_phaedrus.WORK_SPECIFIC_TOKEN_OVERRIDES, 18, TokenType.NUMERAL)
+    numeral_without_expansion = _CARMEN_WORK._replace(token_overrides={18: TokenType.NUMERAL})
 
     with pytest.raises(ValueError, match="1 abbreviation/numeral tokens missing an 'expansion'"):
-        _publish_carmen(monkeypatch, tmp_path, xml=_CARMEN_WITH_I, macronized=_CARMEN_WITH_I_MACRONIZED)
+        _publish_carmen(monkeypatch, tmp_path, xml=_CARMEN_WITH_I, macronized=_CARMEN_WITH_I_MACRONIZED,
+                        work=numeral_without_expansion)
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
