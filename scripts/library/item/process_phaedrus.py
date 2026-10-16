@@ -89,7 +89,7 @@ def _parsed_morpheus_answer(xml_string: str) -> ET.Element:
     an unknown engine or language. A word that Morpheus doesn't know gets an answer without analyses."""
     root = ET.fromstring(xml_string)
     if root.tag == 'error':
-        raise ValueError(f"Morpheus answered with an error: '{root.text}'")
+        raise ValueError(f"Morpheus answered with an error: '{root.text if root.text is not None else 'None'}'")
     return root
 
 
