@@ -26,7 +26,8 @@ The script performs the following key functions:
 11. **Spells Consonants as `j` and `v`**: Where the edition prints one letter for two sounds, as Phaedrus's edition prints `i` for both `i` and `j`, each word gets the letter that Morpheus's analyses of the word have, so `iam` becomes `jam`. When Morpheus splits off an enclitic, the analyses of the host decide. Letters that the edition tells apart, `u` and `v` in Phaedrus's, stay as printed. Words are respelled only when the CSVs are written, because the steps before look words up as the source prints them. `works.csv` records the letters that the edition prints (`PIPELINE_CONTRACT.md`, section 5).
 12. **Generates CSVs**: It outputs a comprehensive set of structured data files ready for aggregation and use in the final application.
 13. **Validates Output**: It writes the files to a temporary directory and runs a series of internal checks to ensure the result makes sense, then moves them to the output directory. When any check fails, it raises and leaves the output directory as it was. The checks include:
-    -   Sequential index integrity for contents and supplementary data. Subdivisions are numbered among their siblings of the same type as the script numbers them: verses and books take the edition's number, n − 1, which can skip some (e.g. Phaedrus 4.24 has no verse 4), and a book without a number the one after the highest so far, so they only have to be unique; paragraphs and titles are 0, and a subdivision has one title at most, as the reader's unique index requires; the other types are counted from 0 up.
+    -   Sequential index integrity for contents and supplementary data. Subdivisions are counted among their siblings of the same type, from 0 up, whatever the edition numbers them (Phaedrus 4.24 has no verse 4), and a subdivision has one title at most, numbered 0, as the reader's unique index requires.
+    -   Edition labels: books, poems, prologues, epilogues and verses have one, and other subdivisions none.
     -   Subdivision parent-child range containment.
     -   Proper noun states: 1 for every abbreviation, 0 for every numeral, none for punctuation, editorial marks and other tokens. Words without one, which Morpheus has no analysis for, are logged for review.
     -   Macronization coverage (every word token has its own macronization, or an unambiguous one under the key that the reader looks it up by, which depends on its proper noun state).
@@ -64,7 +65,7 @@ The work's script generates the following files in its directory of `output/libr
 | `works.csv` | Work metadata (id, name, about) and the edition's letters (`uvLowercase`, `uvCapitals`, `ijLowercase`, `ijCapitals`) |
 | `authors.csv` | Author metadata (id, name, about, image) |
 | `work_contents.csv` | Tokenized text with columns: `workId`, `idx`, `word`, `sourceReference`, `properNounState`, `tokenType`, `sentenceIdx`, `wordIdx`, `enclitic`, `expansion` |
-| `work_content_subdivisions.csv` | Hierarchical structure (books, poems, verses, titles, etc.) |
+| `work_content_subdivisions.csv` | Hierarchical structure (books, poems, verses, titles, etc.). `editionLabel` is the subdivision's TEI `n`, preserved as text (`appendix`, `prologus`, `14a`, `3ff`) |
 | `work_content_supplementary.csv` | Notes, gaps, and other editorial annotations |
 | `author_abbreviations.csv` | Standard abbreviations for the author (sources: [`ABBREVIATIONS.md`](../../../ABBREVIATIONS.md)) |
 | `work_abbreviations.csv` | Standard abbreviations for the work (sources: [`ABBREVIATIONS.md`](../../../ABBREVIATIONS.md)) |

@@ -428,14 +428,15 @@ _CARMEN_WITH_A_GAP = _CARMEN.replace('<l n="3">iacere et iacere iam.</l>',
 _CARMEN_WITH_A_GAP_MACRONIZED = _CARMEN_MACRONIZED + [("Fictor", "Fictor", 0), ("est", "est", 0), (".", ".", 0)]
 
 
-def test_verses_numbered_by_the_edition_and_a_word_that_morpheus_doesnt_know_pass_validation(monkeypatch, tmp_path,
-                                                                                              caplog):
+def test_verses_that_the_edition_numbers_with_a_gap_and_a_word_that_morpheus_doesnt_know_pass_validation(
+        monkeypatch, tmp_path, caplog):
     _process_carmen(monkeypatch, tmp_path, xml=_CARMEN_WITH_A_GAP, macronized=_CARMEN_WITH_A_GAP_MACRONIZED)
 
     process_work.validate_csv_files(_CARMEN_WITH_A_GAP, tmp_path, _CARMEN_WORK)
 
-    subdivisions = pd.read_csv(tmp_path / "work_content_subdivisions.csv")
-    assert list(subdivisions[subdivisions["typ"] == "VERS"]["cnt"]) == [0, 1, 3, 4]
+    subdivisions = pd.read_csv(tmp_path / "work_content_subdivisions.csv", dtype={"editionLabel": str})
+    verses = subdivisions[subdivisions["typ"] == "VERS"]
+    assert list(zip(verses["cnt"], verses["editionLabel"])) == [(0, "1"), (1, "2"), (2, "4"), (3, "5")]
     assert [record.getMessage() for record in caplog.records if record.levelno >= logging.ERROR] == []
     assert "'Fictor' at index 15" in caplog.text
 
@@ -486,20 +487,25 @@ def _subdivisions(*rows):
 
 
 @pytest.mark.parametrize("subdivisions, errors", [
-    (_subdivisions(("v1", "VERS", 0, "p"), ("v3", "VERS", 2, "p")), []),
-    (_subdivisions(("b1", "BOOK", 0, None), ("b3", "BOOK", 2, None)), []),
-    (_subdivisions(("a1", "PARA", 0, "p"), ("a2", "PARA", 0, "p")), []),
+    (_subdivisions(("v1", "VERS", 0, "p"), ("v2", "VERS", 1, "p")), []),
+    (_subdivisions(("v1", "VERS", 0, "p"), ("v3", "VERS", 2, "p")),
+     ["For subs, column 'cnt' in group (workId=w, parent=p, typ=VERS) does not contain sequential integers starting "
+      "from 0."]),
+    (_subdivisions(("b1", "BOOK", 0, None), ("b3", "BOOK", 2, None)),
+     ["For subs, column 'cnt' in group (workId=w, parent=nan, typ=BOOK) does not contain sequential integers starting "
+      "from 0."]),
+    (_subdivisions(("a1", "PARA", 0, "p"), ("a2", "PARA", 1, "p")), []),
     (_subdivisions(("v1", "VERS", 1, "p"), ("v2", "VERS", 1, "p")),
      ["For subs, column 'cnt' in group (workId=w, parent=p, typ=VERS) contains duplicate values."]),
     (_subdivisions(("v1", "VERS", -1, "p")),
-     ["For subs, column 'cnt' in group (workId=w, parent=p, typ=VERS) contains values that aren't integers from 0 "
-      "up."]),
-    (_subdivisions(("v1", "VERS", 0.5, "p")),
-     ["For subs, column 'cnt' in group (workId=w, parent=p, typ=VERS) contains values that aren't integers from 0 "
-      "up."]),
-    (_subdivisions(("v1", "VERS", None, "p")),
-     ["For subs, column 'cnt' in group (workId=w, parent=p, typ=VERS) contains values that aren't integers from 0 "
-      "up."]),
+     ["For subs, column 'cnt' in group (workId=w, parent=p, typ=VERS) does not contain sequential integers starting "
+      "from 0."]),
+    (_subdivisions(("v1", "VERS", 0.5, "p"), ("v2", "VERS", 1.5, "p")),
+     ["For subs, column 'cnt' in group (workId=w, parent=p, typ=VERS) does not contain sequential integers starting "
+      "from 0."]),
+    (_subdivisions(("v1", "VERS", -0.5, "p")),
+     ["For subs, column 'cnt' in group (workId=w, parent=p, typ=VERS) does not contain sequential integers starting "
+      "from 0."]),
     (_subdivisions(("b1", "BOOK", 0, None), ("b2", "BOOK", 0, None)),
      ["For subs, column 'cnt' in group (workId=w, parent=nan, typ=BOOK) contains duplicate values."]),
     (_subdivisions(("p1", "POEM", 0, "b"), ("p3", "POEM", 2, "b")),
@@ -516,16 +522,44 @@ def _subdivisions(*rows):
      ["Title t2 isn't numbered 0.", "Subdivision p has more than one title."]),
     (_subdivisions(("t1", "TITL", 1, "p")), ["Title t1 isn't numbered 0."]),
     (_subdivisions(("t1", "TITL", 0, "p1"), ("t2", "TITL", 0, "p2")), []),
-    (_subdivisions(("a1", "PARA", 1, "p")), ["Paragraph a1 isn't numbered 0."]),
-], ids=["verses that skip a number", "books that skip a number", "two paragraphs of a poem", "a verse number twice",
-        "a negative verse number", "a fraction of a verse number", "a verse without a number", "a book number twice",
-        "poems that skip a number", "prologues that skip a number", "epilogues that skip a number",
-        "two titles of a poem", "two titles of a poem numbered 0 and 1", "a title numbered 1",
-        "a title of each poem", "a paragraph numbered 1"])
-def test_subdivisions_are_numbered_by_the_edition_or_counted_as_the_script_numbers_them(subdivisions, errors):
+    (_subdivisions(("a1", "PARA", 1, "p")),
+     ["For subs, column 'cnt' in group (workId=w, parent=p, typ=PARA) does not contain sequential integers starting "
+      "from 0."]),
+], ids=["verses counted from 0", "verses that skip a number", "books that skip a number", "two paragraphs of a poem",
+        "a verse number twice", "a negative verse number", "verses numbered 0.5 and 1.5", "a verse numbered -0.5",
+        "a book number twice", "poems that skip a number",
+        "prologues that skip a number", "epilogues that skip a number", "two titles of a poem",
+        "two titles of a poem numbered 0 and 1", "a title numbered 1", "a title of each poem",
+        "a paragraph numbered 1"])
+def test_subdivisions_are_counted_among_their_siblings_of_the_same_type(subdivisions, errors):
     found = []
 
     process_work.check_subdivision_numbers(found, subdivisions)
+
+    assert found == errors
+
+
+def _labelled_subdivisions(*rows):
+    """Returns the subdivisions of one work, each given as (node, typ, editionLabel)"""
+    return pd.DataFrame([("w", *row) for row in rows], columns=["workId", "node", "typ", "editionLabel"])
+
+
+_EVERY_TYPE_LABELLED_AS_THE_EDITION = [("b1", "BOOK", "appendix"), ("p1", "POEM", "14a"), ("p2", "PROL", "prologus"),
+                                       ("p3", "EPIL", "epilogus"), ("v1", "VERS", "3ff"), ("t1", "TITL", None),
+                                       ("a1", "PARA", None)]
+
+
+@pytest.mark.parametrize("subdivisions, errors", [
+    (_labelled_subdivisions(*_EVERY_TYPE_LABELLED_AS_THE_EDITION), []),
+    (_labelled_subdivisions(("v1", "VERS", None)), ["VERS v1 has no editionLabel."]),
+    (_labelled_subdivisions(("t1", "TITL", "1")),
+     ["TITL t1 has an editionLabel, which only BOOK, POEM, PROL, EPIL, VERS have."]),
+], ids=["every type", "a verse without one", "a title with one"])
+def test_books_poems_prologues_epilogues_and_verses_have_an_edition_label_and_other_subdivisions_none(subdivisions,
+                                                                                                      errors):
+    found = []
+
+    process_work.check_edition_labels(found, subdivisions)
 
     assert found == errors
 

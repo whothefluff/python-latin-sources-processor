@@ -77,3 +77,11 @@ morphology forms:
   `u` or `v`), `uvCapitals` (`UV`, `U` or `V`), `ijLowercase` (`ij`, `i` or `j`) and `ijCapitals` (`IJ`, `I` or
   `J`). Two letters mean the edition tells them apart; one letter stands for both.
 * **Hand-Written Data:** Expansions and override analyses are written the same way by hand.
+
+## 6. Subdivisions
+
+In `work_content_subdivisions.csv`:
+
+* **`cnt`:** a subdivision's position among its siblings of the same type, from 0, whatever the edition numbers it.
+* **`editionLabel`:** the subdivision's TEI `n`, preserved as text. Books, poems, prologues, epilogues and verses have
+  one (`1`, `appendix`, `prologus`, `14a`, `3ff`); titles and paragraphs have none.

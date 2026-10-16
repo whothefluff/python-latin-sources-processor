@@ -14,7 +14,7 @@ from collections import defaultdict
 from enum import Enum, auto
 from functools import cache
 from pathlib import Path
-from typing import Dict, FrozenSet, List, NamedTuple, Set, Tuple, TypedDict, TypeGuard, cast
+from typing import Dict, FrozenSet, List, NamedTuple, Set, Tuple, TypedDict
 
 import pandas as pd
 
@@ -581,16 +581,6 @@ def generate_uuid():
     return str(uuid.uuid4())
 
 
-def is_numeric(s: str | None) -> TypeGuard[str]:
-    if s is None:
-        return False
-    try:
-        int(s)
-        return True
-    except ValueError:
-        return False
-
-
 def split_text_into_segments(text: str | None) -> list:
     if text is None:
         return [None]  # preserves indices for anomalous parts (e.g. gaps)
@@ -687,7 +677,7 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
 
     inherent_states: Dict[str, ProperNounState | None] = {}
 
-    for book in root.findall('.//tei:div[@subtype="book"]', namespaces):
+    for book_seq, book in enumerate(root.findall('.//tei:div[@subtype="book"]', namespaces)):
         book_node = generate_uuid()
         book_n = book.get('n')
         book_head_el = book.find('tei:head', namespaces)
@@ -706,7 +696,8 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
             to_index = fragment_index + len(book_head_segments) - 1
 
             # noinspection SpellCheckingInspection
-            book_head_sub = [work_id, generate_uuid(), 'TITL', 0, book_head_text, book_node, fragment_index, to_index]
+            book_head_sub = [work_id, generate_uuid(), 'TITL', 0, book_head_text, book_node, fragment_index, to_index,
+                             None]
             work_content_subdivisions_data.append(book_head_sub)
             print(f'Book Head Subdivision: {book_head_sub}')
 
@@ -745,10 +736,11 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
             poem_lines = list(poem)
 
             # its toIndex is the last token of its lines
-            poem_sub = [work_id, poem_node, typ, seq, poem_name, parent_node, fragment_index, None]
+            poem_sub = [work_id, poem_node, typ, seq, poem_name, parent_node, fragment_index, None, poem_id]
             work_content_subdivisions_data.append(poem_sub)
 
             is_first_line_of_poem = True
+            line_counters: Dict[str, int] = {}
 
             for line in poem_lines:
 
@@ -756,22 +748,21 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
 
                 poem_line_node = generate_uuid()
                 line_tag = line.tag.split('}')[-1]
+                edition_label = None
                 if line_tag == 'l':
                     typ = 'VERS'
-                    n_attr = line.get('n')
-                    if n_attr:
-                        poem_line_seq = int(n_attr) - 1
-                    else:
+                    edition_label = line.get('n')
+                    if not edition_label:
                         raise ValueError(f"<l> missing required @n attribute at fragment {fragment_index}")
                 elif line_tag == 'p':
                     typ = 'PARA'
-                    poem_line_seq = 0
                 elif line_tag == 'head':
                     # noinspection SpellCheckingInspection
                     typ = 'TITL'
-                    poem_line_seq = 0
                 else:
                     raise ValueError(f'Unknown tag {line_tag} found in poem.')
+                poem_line_seq = line_counters.get(typ, -1) + 1
+                line_counters[typ] = poem_line_seq
                 # Replace the unique strings with <del> and </del> tags
                 line_text = (line.text.replace('UNIQUE_STRING_FOR_DEL_START', '')
                              .replace('UNIQUE_STRING_FOR_DEL_END', '').strip()) if line.text else ''
@@ -796,7 +787,7 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
 
                 work_content_subdivisions_data.append(
                     [work_id, poem_line_node, typ, poem_line_seq, line_text, poem_node,
-                     fragment_index, to_index])
+                     fragment_index, to_index, edition_label])
 
                 line_segments = split_text_into_segments(line_text)
                 line_str_for_api = ' '.join(s for s in line_segments if s)
@@ -837,17 +828,10 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
             supplementary_index["NOTE"] += 1
             fragment_index = to_index + 1
 
-        book_n = book.get('n')
-        book_seq = int(book_n) - 1 if is_numeric(book_n) else None
-        if book_seq is None:
-            # Find the maximum book_seq in the current work_content_subdivisions_data
-            existing_book_seqs = [x[3] for x in work_content_subdivisions_data if x[2] == 'BOOK']
-            book_seq = max(existing_book_seqs) + 1 if existing_book_seqs else 0
-
         # Set the toIndex for the book after processing all its content
         book_to_index = fragment_index - 1
         work_content_subdivisions_data.append(
-            [work_id, book_node, 'BOOK', book_seq, book_name, None, book_from_index, book_to_index])
+            [work_id, book_node, 'BOOK', book_seq, book_name, None, book_from_index, book_to_index, book.get('n')])
 
     # Titles repeat their tokens' text
     tokens_by_idx = {token[1]: token for token in work_contents_data}
@@ -864,7 +848,7 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
         {'properNounState': 'Int64', 'wordIdx': 'Int64'})
     work_content_subdivisions_df = pd.DataFrame(work_content_subdivisions_data,
                                                 columns=['workId', 'node', 'typ', 'cnt', 'name', 'parent', 'fromIndex',
-                                                         'toIndex'])
+                                                         'toIndex', 'editionLabel'])
     authors_df = pd.DataFrame(authors_data, columns=['id', 'name', 'about', 'image'])
     author_abbreviations_df = pd.DataFrame(author_abbreviations_data, columns=['authorId', 'id', 'val'])
     work_abbreviations_df = pd.DataFrame(work_abbreviations_data, columns=['workId', 'id', 'val'])
@@ -1035,7 +1019,8 @@ def validate_csv_files(xml_string, output_dir, work: WorkConfiguration):
 
     # Load the relevant CSV files
     work_contents_df = pd.read_csv(os.path.join(output_dir, 'work_contents.csv'))
-    work_content_subdivisions_df = pd.read_csv(os.path.join(output_dir, 'work_content_subdivisions.csv'))
+    work_content_subdivisions_df = pd.read_csv(os.path.join(output_dir, 'work_content_subdivisions.csv'),
+                                               dtype={'editionLabel': str})
     work_content_supplementary_df = pd.read_csv(os.path.join(output_dir, 'work_content_supplementary.csv'))
     author_abbreviations_df = pd.read_csv(os.path.join(output_dir, 'author_abbreviations.csv'))
     work_macronizations_df = pd.read_csv(os.path.join(output_dir, 'work_macronizations.csv'))
@@ -1043,6 +1028,7 @@ def validate_csv_files(xml_string, output_dir, work: WorkConfiguration):
 
     check_seq_unique_ints_from_0(errors, author_abbreviations_df, 'author abbreviations', 'id', ['authorId'])
     check_subdivision_numbers(errors, work_content_subdivisions_df)
+    check_edition_labels(errors, work_content_subdivisions_df)
     check_seq_unique_ints_from_0(errors, work_contents_df, 'contents', 'idx', ['workId'])
     check_seq_unique_ints_from_0(errors, work_content_supplementary_df, 'supplementary', 'cnt', ['workId', 'typ'])
     check_children_within_parent_range(errors, work_content_subdivisions_df)
@@ -1071,9 +1057,12 @@ def check_seq_unique_ints_from_0(errors, df, f_name, column_name, group_columns=
         expected_values = pd.Series(range(0, len(series)))
         # Ensure matching dtype before comparison
         try:
+            fractional_parts = series.astype('float64').mod(1)
             series = series.astype('int64')
         except (ValueError, TypeError):
             return False  # contains NaN or non-integer → fail
+        if fractional_parts.ne(0).any():
+            return False  # a fraction, which astype cut to an integer
         is_sequential = series.equals(expected_values)
         is_unique = series.nunique() == len(series)
         return is_sequential and is_unique
@@ -1097,35 +1086,33 @@ def check_seq_unique_ints_from_0(errors, df, f_name, column_name, group_columns=
                 errors.append(f"Column '{column_name}' does not contain sequential integers starting from 0.")
 
 
-def check_unique_non_negative_ints(errors, df, f_name, column_name, group_columns):
-    for name, group in df.groupby(group_columns, dropna=False):
-        values = cast(pd.Series, pd.to_numeric(group[column_name], errors='coerce'))
-        group_name = ', '.join([f"{col}={val}" for col, val in zip(group_columns, name)])
-        if values.mod(1).ne(0).any() or values.lt(0).any():  # a missing number is NaN, whose remainder isn't 0
-            errors.append(f"For {f_name}, column '{column_name}' in group ({group_name}) contains values that aren't "
-                          f"integers from 0 up.")
-        elif values.duplicated().any():
-            errors.append(f"For {f_name}, column '{column_name}' in group ({group_name}) contains duplicate values.")
+#: The subdivisions that have their TEI n as editionLabel
+SUBDIVISION_TYPES_WITH_EDITION_LABELS = ('BOOK', 'POEM', 'PROL', 'EPIL', 'VERS')
 
 
 def check_subdivision_numbers(errors, work_content_subdivisions_df):
-    """Checks each subdivision's cnt as the script numbers it, among its siblings of the same type: verses and books
-    take the edition's number, n - 1, which can skip some (Phaedrus 4.24 has no verse 4), and a book without a number
-    the one after the highest so far, so they only have to be unique; paragraphs and titles are 0, and a subdivision
-    has one title at most, as the reader's unique index requires; and the other types are counted from 0 up."""
+    """Checks that each subdivision's cnt counts its siblings of the same type from 0 up, whatever the edition numbers
+    them, and that a subdivision has one title at most, numbered 0, as the reader's unique index requires."""
     subdivisions = work_content_subdivisions_df
-    numbered_by_the_edition = subdivisions[subdivisions['typ'].isin(['VERS', 'BOOK'])]
-    paragraphs = subdivisions[subdivisions['typ'] == 'PARA']
     titles = subdivisions[subdivisions['typ'] == 'TITL']
-    counted = subdivisions[~subdivisions['typ'].isin(['VERS', 'BOOK', 'PARA', 'TITL'])]
-    check_unique_non_negative_ints(errors, numbered_by_the_edition, 'subs', 'cnt', ['workId', 'parent', 'typ'])
-    for node in paragraphs[paragraphs['cnt'] != 0]['node']:
-        errors.append(f"Paragraph {node} isn't numbered 0.")
     for node in titles[titles['cnt'] != 0]['node']:
         errors.append(f"Title {node} isn't numbered 0.")
     for parent in sorted(set(titles[titles.duplicated(['workId', 'parent'])]['parent'])):
         errors.append(f"Subdivision {parent} has more than one title.")
-    check_seq_unique_ints_from_0(errors, counted, 'subs', 'cnt', ['workId', 'parent', 'typ'])
+    check_seq_unique_ints_from_0(errors, subdivisions[subdivisions['typ'] != 'TITL'], 'subs', 'cnt',
+                                 ['workId', 'parent', 'typ'])
+
+
+def check_edition_labels(errors, work_content_subdivisions_df):
+    """Checks that books, poems, prologues, epilogues and verses have an editionLabel, and other subdivisions none."""
+    subdivisions = work_content_subdivisions_df
+    labelled = subdivisions['typ'].isin(SUBDIVISION_TYPES_WITH_EDITION_LABELS)
+    has_label = subdivisions['editionLabel'].notnull()
+    for typ, node in zip(subdivisions[labelled & ~has_label]['typ'], subdivisions[labelled & ~has_label]['node']):
+        errors.append(f"{typ} {node} has no editionLabel.")
+    for typ, node in zip(subdivisions[~labelled & has_label]['typ'], subdivisions[~labelled & has_label]['node']):
+        errors.append(f"{typ} {node} has an editionLabel, which only "
+                      f"{', '.join(SUBDIVISION_TYPES_WITH_EDITION_LABELS)} have.")
 
 
 def check_to_index_always_gt_from_index_in_sub(errors, work_content_subdivisions_df):
