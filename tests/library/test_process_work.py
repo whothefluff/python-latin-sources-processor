@@ -452,6 +452,34 @@ def test_a_word_that_morpheus_cant_be_asked_about_raises_instead_of_getting_no_s
     assert list(tmp_path.iterdir()) == []
 
 
+_TWO_LOST_VERSES = """<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body><div subtype="book" n="1">
+  <div subtype="poem" n="1">
+    <l n="1">Roma est.</l><l n="2"><gap reason="lost"/></l><l n="3">Roma est.</l><l n="4"><gap reason="lost"/></l>
+  </div></div></body></text></TEI>"""
+_TWO_LOST_VERSES_CONTENTS = [{"idx": idx, "word": word}
+                             for idx, word in enumerate(["Roma", "est", ".", None, "Roma", "est", ".", None])]
+_TWO_LOST_VERSES_SUBDIVISIONS = [{"typ": "VERS", "name": None, "fromIndex": idx, "toIndex": idx} for idx in (3, 7)]
+_TWO_LOST_VERSES_GAPS = [{"typ": "GAP", "fromIndex": idx, "toIndex": idx} for idx in (3, 7)]
+
+
+@pytest.mark.parametrize("contents, subdivisions, supplementary, errors", [
+    (_TWO_LOST_VERSES_CONTENTS, _TWO_LOST_VERSES_SUBDIVISIONS, _TWO_LOST_VERSES_GAPS, []),
+    (_TWO_LOST_VERSES_CONTENTS, _TWO_LOST_VERSES_SUBDIVISIONS, _TWO_LOST_VERSES_GAPS[:1],
+     ["Expected exactly one supplementary entry for gap tag at idx 7, found 0"]),
+    (_TWO_LOST_VERSES_CONTENTS, _TWO_LOST_VERSES_SUBDIVISIONS[:1], _TWO_LOST_VERSES_GAPS,
+     ["Expected exactly one subdivision entry for gap tag at idx 7, found 0"]),
+    (_TWO_LOST_VERSES_CONTENTS[:7], _TWO_LOST_VERSES_SUBDIVISIONS[:1], _TWO_LOST_VERSES_GAPS[:1],
+     ["Mismatch between the number of <gap> tags and the number of empty content entries."]),
+], ids=["both gaps", "the second gap without its gap entry", "the second gap without its verse",
+        "the second gap without its token"])
+def test_every_gap_has_its_empty_token_its_verse_and_its_gap_entry(contents, subdivisions, supplementary, errors):
+    found = []
+
+    process_work.validate_gap_tags(found, _TWO_LOST_VERSES, subdivisions, contents, supplementary)
+
+    assert found == errors
+
+
 def _subdivisions(*rows):
     """Returns the subdivisions of one work, each given as (node, typ, cnt, parent)"""
     return pd.DataFrame([("w", *row) for row in rows], columns=["workId", "node", "typ", "cnt", "parent"])

@@ -1231,23 +1231,11 @@ def validate_gap_tags(errors, xml_string, subdivisions, contents, supp_entries):
     namespace = "{" + TEI_NAMESPACE + "}"
     gap_tags = find_all_gap_tags(root, namespace)
 
-    # Count the number of elements in gap_tags
-    num_gap_tags = len(gap_tags)
-
-    # Create a list to store the idx values
-    gap_indices = []
-
-    # Iterate over the contents list for as many times as there are elements in gap_tags
-    for _ in range(num_gap_tags):
-        # For each iteration, find the corresponding entry in the contents list
-        for content in contents:
-            # If a corresponding entry is found, add the idx value to the list
-            if pd.isnull(content['word']):
-                gap_indices.append(content['idx'])
-                break
+    # Every empty content entry, each to check against the gap tags
+    gap_indices = [content['idx'] for content in contents if pd.isnull(content['word'])]
 
     # Check if the number of gap tags is equal to the number of empty content entries
-    if num_gap_tags != len(gap_indices):
+    if len(gap_tags) != len(gap_indices):
         errors.append("Mismatch between the number of <gap> tags and the number of empty content entries.")
 
     # Check for corresponding subdivision entries
