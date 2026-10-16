@@ -1,4 +1,5 @@
 import logging
+import re
 from pathlib import Path
 from typing import NamedTuple
 
@@ -15,6 +16,7 @@ _CARMEN_FILES = Path(__file__).parent / 'fixtures' / 'carmen'
 # u and v apart, i for both i and j
 _CARMEN_LETTERS = LetterConvention(uv_lowercase="uv", uv_capitals="UV", ij_lowercase="i", ij_capitals="I")
 _CARMEN_WORK = process_work.WorkConfiguration(
+    cited_division_subtypes=('book', 'poem'), poem_types_by_n={},
     letter_convention=_CARMEN_LETTERS, token_overrides={}, expansions={}, proper_noun_overrides={},
     author_abbreviations=('Fict.',), work_about_file=str(_CARMEN_FILES / 'work_about.txt'),
     author_about_file=str(_CARMEN_FILES / 'author_about.txt'),
@@ -249,11 +251,11 @@ def test_dum_is_an_enclitic_only_after_an_imperative_an_interjection_or_an_adver
 _CARMEN = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
   <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Carmen</title><author>Fictor</author></titleStmt></fileDesc>
   </teiHeader>
-  <text><body><div type="textpart" subtype="book" n="1"><div type="textpart" subtype="poem" n="1">
+  <text><body><div type="edition"><div type="textpart" subtype="book" n="1"><div type="textpart" subtype="poem" n="1">
     <l n="1">Levis et levis est.</l>
     <l n="2">Est levis, levis.</l>
     <l n="3">iacere et iacere iam.</l>
-  </div></div></body></text>
+  </div></div></div></body></text>
 </TEI>"""
 _CARMEN_ANALYSES = {word: _entry(headword, surface)
                     for word, headword, surface in [("levis", "levis", "levis"), ("et", "et", "et"),
@@ -331,6 +333,19 @@ _CARMEN_WITH_GAPS = _CARMEN.replace('<l n="2">Est levis, levis.</l>', '<l n="2">
     '<l n="3">iacere et iacere iam.</l>', '<l n="4">iacere et iacere iam.</l>\n    <l n="5"><gap reason="lost"/></l>')
 
 
+# The second verse loses its end
+_CARMEN_WITH_A_LOST_END = _CARMEN.replace('<l n="2">Est levis, levis.</l>',
+                                          '<l n="2">Est levis, levis.<gap reason="lost"/></l>')
+
+
+def test_a_lost_passage_inside_a_verse_passes_validation(monkeypatch, tmp_path):
+    _process_carmen(monkeypatch, tmp_path, xml=_CARMEN_WITH_A_LOST_END)
+
+    process_work.validate_csv_files(_CARMEN_WITH_A_LOST_END, tmp_path, _CARMEN_WORK)
+
+    assert _rows(tmp_path / "work_content_supplementary.csv", "workId") == [("GAP", 0, 10, 10, "lost")]
+
+
 def test_lost_lines_get_no_macronizer_results(monkeypatch, tmp_path):
     _process_carmen(monkeypatch, tmp_path, xml=_CARMEN_WITH_GAPS)
 
@@ -348,8 +363,128 @@ def test_a_poem_ends_at_the_last_token_of_its_last_verse(monkeypatch, tmp_path):
 
     subdivisions = pd.read_csv(tmp_path / "work_content_subdivisions.csv")
     assert list(zip(subdivisions["typ"], subdivisions["fromIndex"], subdivisions["toIndex"])) == [
-        ("POEM", 0, 14), ("VERS", 0, 4), ("VERS", 5, 9), ("VERS", 10, 14), ("BOOK", 0, 14)]
+        ("BOOK", 0, 14), ("POEM", 0, 14), ("VERS", 0, 4), ("VERS", 5, 9), ("VERS", 10, 14)]
     assert _rows(tmp_path / "work_content_supplementary.csv", "workId") == [("NOTE", 0, 10, 14, "marked for deletion")]
+
+
+_STRUCTURES = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Carmen</title><author>Fictor</author></titleStmt></fileDesc>
+  </teiHeader>
+  <text><body><div type="edition"><div type="textpart" subtype="book" n="1">
+    <div type="textpart" subtype="poem" n="1">
+      <head>Carmen</head>
+      <lg>
+        <head xml:lang="eng">Youths</head>
+        <l n="1">Roma <q>est</q> levis<note>A note.</note></l>
+        <l n="2">et <gap reason="lost"/></l>
+      </lg>
+      <sp>
+        <speaker>Fictor</speaker>
+        <l n="3">levis est.</l>
+      </sp>
+    </div>
+    <note>On the book.</note>
+  </div></div></body></text>
+</TEI>"""
+
+
+def _macronizer_echoes(monkeypatch):
+    """Makes the macronizer certain of every token as it's written"""
+    monkeypatch.setattr(process_work, "macronize_text", lambda text: [
+        process_work.TokenResult(word=token, is_word=token.isalpha(), macronized=token, uncertainty_mask=0,
+                                 candidates=[])
+        for token in re.findall(r'\w+|[^\w\s]', text)])
+
+
+@pytest.fixture
+def structures(monkeypatch, tmp_path):
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+    process_work.process_verse(_STRUCTURES, tmp_path, _CARMEN_WORK)
+    return tmp_path
+
+
+def test_line_groups_and_speeches_are_subdivisions_and_divisions_end_at_their_last_token(structures):
+    subdivisions = pd.read_csv(structures / "work_content_subdivisions.csv", dtype={"editionLabel": str})
+    types_by_node = dict(zip(subdivisions["node"], subdivisions["typ"]))
+
+    assert [(typ, cnt, None if pd.isna(name) else name, types_by_node.get(parent), from_index, to_index,
+             None if pd.isna(label) else label)
+            for typ, cnt, name, parent, from_index, to_index, label in zip(
+                subdivisions["typ"], subdivisions["cnt"], subdivisions["name"], subdivisions["parent"],
+                subdivisions["fromIndex"], subdivisions["toIndex"], subdivisions["editionLabel"])] == [
+        ("BOOK", 0, None, None, 0, 9, "1"),
+        ("POEM", 0, "Carmen", "BOOK", 0, 9, "1"),
+        ("TITL", 0, "Carmen", "POEM", 0, 0, None),
+        ("LGRP", 0, None, "POEM", 1, 5, None),
+        ("VERS", 0, "Roma est levis", "LGRP", 1, 3, "1"),
+        ("VERS", 1, "et", "LGRP", 4, 5, "2"),
+        ("SPCH", 0, "Fictor", "POEM", 6, 9, None),
+        ("TITL", 0, "Fictor", "SPCH", 6, 6, None),
+        ("VERS", 0, "levis est.", "SPCH", 7, 9, "3"),
+    ]
+
+
+def test_a_speaker_and_what_is_said_after_it_start_sentences_and_a_lost_passage_is_a_token(structures):
+    contents = pd.read_csv(structures / "work_contents.csv", dtype={"word": str, "sourceReference": str},
+                           keep_default_na=False)
+
+    assert list(zip(contents["idx"], contents["word"], contents["sourceReference"], contents["sentenceIdx"],
+                    contents["wordIdx"])) == [
+        (0, "Carmen", "1.1", 0, "0"), (1, "Roma", "1.1.1", 0, "1"), (2, "est", "1.1.1", 0, "2"),
+        (3, "levis", "1.1.1", 0, "3"), (4, "et", "1.1.2", 0, "4"), (5, "", "1.1.2", 0, ""),
+        (6, "Fictor", "1.1", 1, "0"), (7, "levis", "1.1.3", 2, "0"), (8, "est", "1.1.3", 2, "1"),
+        (9, ".", "1.1.3", 2, ""),
+    ]
+
+
+def test_notes_and_headings_in_another_language_cover_what_holds_them_and_a_lost_passage_covers_its_token(
+        structures):
+    assert pd.read_csv(structures / "work_content_supplementary.csv").drop(columns="workId").values.tolist() == [
+        ["NOTE", 0, 1, 3, "A note."], ["GAP", 0, 5, 5, "lost"], ["NOTE", 1, 1, 5, "Youths"],
+        ["NOTE", 2, 0, 9, "On the book."]]
+
+
+def _carmina(book: str) -> str:
+    """Returns a TEI file of Carmen with the book given"""
+    return f"""<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Carmen</title><author>Fictor</author></titleStmt></fileDesc>
+  </teiHeader>
+  <text><body><div type="edition"><div type="textpart" subtype="book" n="1">{book}</div></div></body></text>
+</TEI>"""
+
+
+@pytest.mark.parametrize("n, typ", [("2", "POEM"), ("prologus", "PROL"), ("epilogus", "EPIL")],
+                         ids=["a poem", "a prologue", "an epilogue"])
+def test_the_first_verse_of_a_poem_prologue_or_epilogue_starts_a_sentence(monkeypatch, tmp_path, n, typ):
+    _morpheus(monkeypatch, {})
+    process_work.determine_proper_noun_state.cache_clear()
+    _macronizer_echoes(monkeypatch)
+    xml = _carmina(f'<div type="textpart" subtype="poem" n="1"><l n="1">Roma est</l></div>'
+                   f'<div type="textpart" subtype="poem" n="{n}"><l n="1">levis est.</l></div>')
+
+    process_work.process_verse(xml, tmp_path, _CARMEN_WORK._replace(poem_types_by_n={"prologus": "PROL",
+                                                                                      "epilogus": "EPIL"}))
+
+    contents = pd.read_csv(tmp_path / "work_contents.csv")
+    assert list(zip(contents["word"], contents["sentenceIdx"])) == [
+        ("Roma", 0), ("est", 0), ("levis", 1), ("est", 1), (".", 1)]
+    assert list(pd.read_csv(tmp_path / "work_content_subdivisions.csv")["typ"]) == ["BOOK", "POEM", "VERS", typ,
+                                                                                     "VERS"]
+
+
+def test_a_common_word_that_a_verse_starts_with_a_capital_inside_a_sentence_is_common(monkeypatch, tmp_path):
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    process_work.determine_proper_noun_state.cache_clear()
+    _macronizer_echoes(monkeypatch)
+    xml = _carmina('<div type="textpart" subtype="poem" n="1"><l n="1">Roma est</l><l n="2">Levis et levis.</l></div>')
+
+    process_work.process_verse(xml, tmp_path, _CARMEN_WORK)
+
+    contents = pd.read_csv(tmp_path / "work_contents.csv", dtype={"properNounState": "Int64"})
+    assert list(zip(contents["word"], contents["sentenceIdx"], contents["properNounState"])) == [
+        ("Roma", 0, pd.NA), ("est", 0, ProperNounState.NO), ("Levis", 0, ProperNounState.NO),
+        ("et", 0, ProperNounState.NO), ("levis", 0, ProperNounState.NO), (".", 0, pd.NA)]
 
 
 def test_a_list_of_words_gets_the_macronizations_of_its_words_and_not_of_the_et_between_them(monkeypatch):

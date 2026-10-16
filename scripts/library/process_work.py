@@ -11,10 +11,11 @@ import uuid
 # noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
 from collections import defaultdict
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from functools import cache
 from pathlib import Path
-from typing import Dict, FrozenSet, List, NamedTuple, Set, Tuple, TypedDict
+from typing import Dict, FrozenSet, List, NamedTuple, Sequence, Set, Tuple, TypedDict, cast
 
 import pandas as pd
 
@@ -29,14 +30,13 @@ from scripts.library.util.proper_noun import (
 from scripts.library.util.spelling import (
     LetterConvention, differs_in_told_apart_letters, respell, respell_macronized, spellings_of, token_spellings_of,
 )
+from scripts.library.util.tei_edition import TEI_NAMESPACE, Division, LostPassage, TextBlock, read_edition
 from scripts.library.util.text_normalization import normalize_digraphs
 from scripts.library.util.token_classification import TokenType, get_token_type
 from scripts.library.util.unambiguous_macronizations import (
     CertainToken, WorkMacronization, agreed_macronizations, lookup_key, work_macronizations_where_lookup_differs,
 )
 
-# noinspection HttpUrlsUsage
-TEI_NAMESPACE = 'http://www.tei-c.org/ns/1.0'
 # Enclitics split off into the `enclitic` column; deliberately a subset of Morpheus' LatinSuff
 SPLIT_ENCLITICS: list[str] = ["que", "ne", "ve", "ue", "dum"]
 
@@ -53,8 +53,12 @@ SENTENCE_TERMINATORS = ".!?"
 
 
 class WorkConfiguration(NamedTuple):
-    """The settings of a work's processing that depend on its edition: the letters that the edition prints, the
-    corrections that its tokens need, and its author's abbreviations, about texts and image"""
+    """The settings of a work's processing that depend on its edition: how it cites its text, the letters that it
+    prints, the corrections that its tokens need, and its author's abbreviations, about texts and image"""
+    #: The TEI subtypes of the divisions whose n is part of their tokens' references, as the edition cites them
+    cited_division_subtypes: Tuple[str, ...]
+    #: The subdivision types of the poems whose n isn't a poem's, such as prologus
+    poem_types_by_n: Dict[str, str]
     letter_convention: LetterConvention
     #: Token types by token index, where the script's own would be wrong
     token_overrides: Dict[int, TokenType]
@@ -581,9 +585,7 @@ def generate_uuid():
     return str(uuid.uuid4())
 
 
-def split_text_into_segments(text: str | None) -> list:
-    if text is None:
-        return [None]  # preserves indices for anomalous parts (e.g. gaps)
+def split_text_into_segments(text: str) -> list:
     # Normalize spaces and split text by words and punctuation
     text = text.strip()
     # Split text including em dash and other punctuation
@@ -608,42 +610,104 @@ def split_text_into_segments(text: str | None) -> list:
     return normalized_segments
 
 
-def _make_source_ref(*parts: str | int | None) -> str:
-    """
-    Builds a CTS-style ref by joining part identifiers with periods, matching
-    the book/poem/line cRefPattern in the TEI encodingDesc (e.g. "3.7.12").
-    None/empty parts are dropped, so a <p> with no @n falls back to a
-    poem-level ref rather than fabricating a line number.
-    """
+@dataclass
+class _Numbering:
+    """The rows of a work's tokens, subdivisions and supplementary entries, numbered in reading order"""
+    work_id: str
+    work: WorkConfiguration
+    contents: List[list] = field(default_factory=list)
+    subdivisions: List[list] = field(default_factory=list)
+    supplementary: List[list] = field(default_factory=list)
+    #: The text of each block, as the macronizer gets it
+    lines_for_macronizer: List[str] = field(default_factory=list)
+    inherent_states: Dict[str, ProperNounState | None] = field(default_factory=dict)
+    next_index: int = 0
+    #: Tracks sentences across the whole work, incremented to 0 on the first real sentence
+    sentence_idx: int = -1
+    #: Tracks words within the current sentence
+    word_idx: int = 0
+    #: Whether the text so far ended a sentence
+    starts_new_sentence: bool = True
+    #: Whether the next block starts a sentence whatever the text before it: the first of a poem, prologue or
+    #: epilogue, and the one after a speaker
+    next_block_starts_sentence: bool = False
+    supplementary_counts: Dict[str, int] = field(default_factory=lambda: {"NOTE": 0, "GAP": 0, "ABBR": 0})
 
-    valid_parts = []
+    def add_parts(self, parts: Sequence[Division | TextBlock], parent: Division | None, parent_node: str | None):
+        """Adds the rows of the parts of a division, or of the edition, each counted among its siblings of the same
+        type"""
+        counts: Dict[str, int] = defaultdict(int)
+        for part in parts:
+            cnt = counts[part.typ]
+            counts[part.typ] += 1
+            if isinstance(part, Division):
+                self.add_division(part, cnt, parent_node)
+            else:
+                self.add_block(part, cnt, parent_node)
+            if parent is not None and parent.typ == 'SPCH' and part.typ == 'TITL':
+                self.next_block_starts_sentence = True  # the speaker isn't part of what is said
 
-    for p in parts:
-        if p is not None and p != '':
-            valid_parts.append(str(p))
+    def add_division(self, division: Division, cnt: int, parent_node: str | None):
+        title = division.title
+        node = generate_uuid()
+        from_index = self.next_index
+        row = [self.work_id, node, division.typ, cnt, title.printed_text if title else None, parent_node, from_index,
+               None, division.edition_label]
+        self.subdivisions.append(row)
+        if division.typ in ('POEM', 'PROL', 'EPIL'):
+            self.next_block_starts_sentence = True
+        self.add_parts(division.parts, division, node)
+        to_index = self.next_index - 1  # its last token
+        row[7] = to_index
+        for note in division.notes:
+            self.add_supplementary("NOTE", from_index, to_index, note)
+        print(f'Subdivision: {row}')
 
-    return '.'.join(valid_parts)
+    def add_block(self, block: TextBlock, cnt: int, parent_node: str | None):
+        segments: list = [segment for piece in block.pieces for segment in
+                          ([None] if isinstance(piece, LostPassage) else split_text_into_segments(piece))]
+        node = generate_uuid()
+        first, last = self.next_index, self.next_index + len(segments) - 1
+        if block.deleted:
+            self.add_supplementary("NOTE", first, last, 'marked for deletion')
+        for position, segment in enumerate(segments):
+            if segment is None:
+                self.add_supplementary("GAP", first + position, first + position, 'lost')
+        self.subdivisions.append([self.work_id, node, block.typ, cnt, block.text or None, parent_node, first, last,
+                                  block.edition_label])
+        self.lines_for_macronizer.append(' '.join(segment for segment in segments if segment))
+        starts_new_sentence = self.starts_new_sentence or self.next_block_starts_sentence or block.typ == 'TITL'
+        self.next_block_starts_sentence = False
+        self.next_index, self.sentence_idx, self.word_idx, _, self.starts_new_sentence = _process_text_segments(
+            segments,
+            self.work_id,
+            first,
+            self.sentence_idx,
+            self.word_idx,
+            block.reference,
+            True,  # capitalization is forgivable at the start of a block
+            starts_new_sentence,
+            self.contents,
+            self.inherent_states,
+            self.work,
+        )
+        for note in block.notes:
+            self.add_supplementary("NOTE", first, last, note)
+
+    def add_supplementary(self, typ: str, from_index: int, to_index: int, val: str):
+        self.supplementary.append([self.work_id, typ, self.supplementary_counts[typ], from_index, to_index, val])
+        self.supplementary_counts[typ] += 1
 
 
 def process_verse(xml_string, output_dir, work: WorkConfiguration):
-    # Replace <del> and </del> tags with a unique string
-    xml_string = xml_string.replace('<del>', 'UNIQUE_STRING_FOR_DEL_START').replace('</del>',
-                                                                                    'UNIQUE_STRING_FOR_DEL_END')
-    xml_string = xml_string.replace('<gap reason="lost"/>', 'UNIQUE_STRING_FOR_GAP_LOST')
-
-    # Parse the modified XML string
     root = ET.fromstring(xml_string)
     namespaces = {'tei': TEI_NAMESPACE, 'xml': 'http://www.w3.org/XML/1998/namespace'}
 
     works_data = []
-    work_contents_data = []
-    lines_for_macronizer = []
-    work_content_subdivisions_data = []
     authors_data = []
     author_abbreviations_data = []
     work_abbreviations_data = []
     authors_and_works_data = []
-    work_content_supplementary_data = []
 
     work_id = generate_uuid()
     title_element = root.find('.//tei:title[@xml:lang="lat"]', namespaces)
@@ -666,172 +730,13 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
     # Linking author to work
     authors_and_works_data.append([author_id, work_id])
 
-    fragment_index = 0  # Global index counter for fragments
-    sentence_idx = -1 # Tracks sentences across the whole work, incremented to 0 on the first real sentence
-    word_idx = 0 # Tracks words within the current sentence
-    supplementary_index = {"NOTE": 0, "GAP": 0, "ABBR": 0}  # Note index counter
-
-    # Flag to track sentence starts for context
-    is_next_word_sentence_start = True
-    starts_new_sentence = True
-
-    inherent_states: Dict[str, ProperNounState | None] = {}
-
-    for book_seq, book in enumerate(root.findall('.//tei:div[@subtype="book"]', namespaces)):
-        book_node = generate_uuid()
-        book_n = book.get('n')
-        book_head_el = book.find('tei:head', namespaces)
-        book_name = book_head_el.text if book_head_el is not None else None
-        book_head_text = ''.join(book_head_el.itertext()) if book_head_el is not None else None
-
-        # Track the fromIndex for the book
-        book_from_index = fragment_index
-
-        # Add book head text to work_contents_data
-        if book_head_text:
-            book_head_segments = split_text_into_segments(book_head_text)
-            line_str_for_api = ' '.join(s for s in book_head_segments if s)
-            lines_for_macronizer.append(line_str_for_api)
-
-            to_index = fragment_index + len(book_head_segments) - 1
-
-            # noinspection SpellCheckingInspection
-            book_head_sub = [work_id, generate_uuid(), 'TITL', 0, book_head_text, book_node, fragment_index, to_index,
-                             None]
-            work_content_subdivisions_data.append(book_head_sub)
-            print(f'Book Head Subdivision: {book_head_sub}')
-
-            fragment_index, sentence_idx, word_idx, is_next_word_sentence_start, starts_new_sentence = _process_text_segments(
-                book_head_segments,
-                work_id,
-                fragment_index,
-                sentence_idx,
-                word_idx,
-                _make_source_ref(book_n),
-                is_next_word_sentence_start,
-                True,  # a book title never continues a previous sentence
-                work_contents_data,
-                inherent_states,
-                work,
-            )
-
-        type_counters = {}
-
-        for poem in book.findall('.//tei:div[@subtype="poem"]', namespaces):
-            poem_id = poem.get('n')
-            poem_head_el = poem.find('tei:head', namespaces)
-            poem_name = poem_head_el.text if poem_head_el is not None else None
-            poem_node = generate_uuid()
-            # noinspection SpellCheckingInspection
-            typ = {"epilogus": "EPIL", "prologus": "PROL"}.get(poem_id or '', 'POEM' if (poem_id or '').isdigit() else poem_id)
-
-            if typ not in type_counters:
-                type_counters[typ] = 0
-            else:
-                type_counters[typ] += 1
-
-            seq = type_counters[typ]
-            parent_node = book_node
-
-            poem_lines = list(poem)
-
-            # its toIndex is the last token of its lines
-            poem_sub = [work_id, poem_node, typ, seq, poem_name, parent_node, fragment_index, None, poem_id]
-            work_content_subdivisions_data.append(poem_sub)
-
-            is_first_line_of_poem = True
-            line_counters: Dict[str, int] = {}
-
-            for line in poem_lines:
-
-                is_next_word_sentence_start = True
-
-                poem_line_node = generate_uuid()
-                line_tag = line.tag.split('}')[-1]
-                edition_label = None
-                if line_tag == 'l':
-                    typ = 'VERS'
-                    edition_label = line.get('n')
-                    if not edition_label:
-                        raise ValueError(f"<l> missing required @n attribute at fragment {fragment_index}")
-                elif line_tag == 'p':
-                    typ = 'PARA'
-                elif line_tag == 'head':
-                    # noinspection SpellCheckingInspection
-                    typ = 'TITL'
-                else:
-                    raise ValueError(f'Unknown tag {line_tag} found in poem.')
-                poem_line_seq = line_counters.get(typ, -1) + 1
-                line_counters[typ] = poem_line_seq
-                # Replace the unique strings with <del> and </del> tags
-                line_text = (line.text.replace('UNIQUE_STRING_FOR_DEL_START', '')
-                             .replace('UNIQUE_STRING_FOR_DEL_END', '').strip()) if line.text else ''
-                line_text = line_text.replace('UNIQUE_STRING_FOR_GAP_LOST', '').strip() if line.text else ''
-
-                # Add to work_content_supplementary_data if <del> tag was found
-                if line.text and 'UNIQUE_STRING_FOR_DEL_START' in line.text and 'UNIQUE_STRING_FOR_DEL_END' in line.text:
-                    work_content_supplementary_data.append(
-                        [work_id, "NOTE", supplementary_index["NOTE"], fragment_index,
-                         fragment_index + len(split_text_into_segments(line_text)) - 1,
-                         'marked for deletion'])
-                    supplementary_index["NOTE"] += 1
-
-                if line.text and 'UNIQUE_STRING_FOR_GAP_LOST' in line.text:
-                    work_content_supplementary_data.append([work_id, "GAP", supplementary_index["GAP"], fragment_index,
-                                                            fragment_index + len(split_text_into_segments(line_text)),
-                                                            'lost'])
-                    supplementary_index["GAP"] += 1
-                    line_text = None
-
-                to_index = fragment_index + len(split_text_into_segments(line_text)) - 1 if line_text else fragment_index
-
-                work_content_subdivisions_data.append(
-                    [work_id, poem_line_node, typ, poem_line_seq, line_text, poem_node,
-                     fragment_index, to_index, edition_label])
-
-                line_segments = split_text_into_segments(line_text)
-                line_str_for_api = ' '.join(s for s in line_segments if s)
-                lines_for_macronizer.append(line_str_for_api)
-
-                book_n = book.get('n', '?')
-                if typ == 'TITL':
-                    source_ref = _make_source_ref(book_n, poem_id)
-                else:
-                    source_ref = _make_source_ref(book_n, poem_id, line.get('n'))
-
-                fragment_index, sentence_idx, word_idx, is_next_word_sentence_start, starts_new_sentence = _process_text_segments(
-                    line_segments,
-                    work_id,
-                    fragment_index,
-                    sentence_idx,
-                    word_idx,
-                    source_ref,
-                    is_next_word_sentence_start,
-                    starts_new_sentence or is_first_line_of_poem,
-                    work_contents_data,
-                    inherent_states,
-                    work,
-                    )
-                is_first_line_of_poem = False
-
-            poem_sub[7] = fragment_index - 1
-            print(f'Subdivision: {poem_sub}')
-
-        for note in book.findall('.//tei:note', namespaces):
-            note_id = note.get('n')
-            from_index = fragment_index
-            note_text = ''.join(note.itertext())
-            to_index = fragment_index + len(note_text.split()) - 1
-            work_content_supplementary_data.append(
-                [work_id, "NOTE", supplementary_index["NOTE"], from_index, to_index, note_text])
-            print(f'Note: {note_id if note_id is not None else "None"}, {from_index}, {to_index}, {note_text}')
-            supplementary_index["NOTE"] += 1
-            fragment_index = to_index + 1
-
-        # Set the toIndex for the book after processing all its content
-        book_to_index = fragment_index - 1
-        work_content_subdivisions_data.append(
-            [work_id, book_node, 'BOOK', book_seq, book_name, None, book_from_index, book_to_index, book.get('n')])
+    numbering = _Numbering(work_id, work)
+    numbering.add_parts(read_edition(root, work.cited_division_subtypes, work.poem_types_by_n), None, None)
+    work_contents_data = numbering.contents
+    work_content_subdivisions_data = numbering.subdivisions
+    work_content_supplementary_data = numbering.supplementary
+    lines_for_macronizer = numbering.lines_for_macronizer
+    inherent_states = numbering.inherent_states
 
     # Titles repeat their tokens' text
     tokens_by_idx = {token[1]: token for token in work_contents_data}
@@ -1227,10 +1132,9 @@ def validate_gap_tags(errors, xml_string, subdivisions, contents, supp_entries):
 
     # Check for corresponding subdivision entries
     for idx in gap_indices:
+        # the verse that holds it, which can have text before it or after it
         matching_subdivisions = [sub for sub in subdivisions if sub['typ'] == 'VERS' and
-                                 pd.isnull(sub['name']) and
-                                 sub['fromIndex'] == idx and
-                                 sub['toIndex'] == idx]
+                                 sub['fromIndex'] <= idx <= sub['toIndex']]
         if len(matching_subdivisions) != 1:
             errors.append(
                 f"Expected exactly one subdivision entry for gap tag at idx {idx}, found {len(matching_subdivisions)}")

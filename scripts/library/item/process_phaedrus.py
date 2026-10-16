@@ -49,6 +49,8 @@ def project_root( ):
 
 # noinspection SpellCheckingInspection
 PHAEDRUS = WorkConfiguration(
+    cited_division_subtypes=('book', 'poem'),
+    poem_types_by_n={'prologus': 'PROL', 'epilogus': 'EPIL'},
     letter_convention=LETTER_CONVENTION,
     token_overrides=WORK_SPECIFIC_TOKEN_OVERRIDES,
     expansions=WORK_SPECIFIC_EXPANSIONS,

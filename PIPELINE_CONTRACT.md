@@ -82,6 +82,9 @@ morphology forms:
 
 In `work_content_subdivisions.csv`:
 
+* **Types:** `BOOK`, `POEM`, `PROL`, `EPIL`, `LGRP` (a group of lines, `<lg>`), `SPCH` (a speech, `<sp>`, whose
+  `TITL` is its speaker), `TITL`, `VERS` and `PARA`. The roots are the books or, in a work without books, its poems,
+  prologues and epilogues.
 * **`cnt`:** a subdivision's position among its siblings of the same type, from 0, whatever the edition numbers it.
 * **`editionLabel`:** the subdivision's TEI `n`, preserved as text. Books, poems, prologues, epilogues and verses have
-  one (`1`, `appendix`, `prologus`, `14a`, `3ff`); titles and paragraphs have none.
+  one (`1`, `appendix`, `prologus`, `14a`, `3ff`), and other subdivisions none.
