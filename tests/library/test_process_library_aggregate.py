@@ -215,20 +215,18 @@ _ONLY_THE_HEADER = object()
 
 @pytest.mark.parametrize('runs', list(AGGREGATION_RUNS.values()), ids=list(AGGREGATION_RUNS))
 @pytest.mark.parametrize('file_name, contents, problem', [
-    ('work_abbreviations.csv', None, r'carmina_altera/work_abbreviations\.csv is missing'),
-    ('work_contents.csv', None, r'carmina_altera/work_contents\.csv is missing'),
-    ('works.csv', '', r"carmina_altera/works\.csv can't be read"),
-    ('works.csv', _ONLY_THE_HEADER, r'carmina_altera/works\.csv has no rows'),
-    ('work_contents.csv', _ONLY_THE_HEADER, r'carmina_altera/work_contents\.csv has no rows'),
-    ('work_content_subdivisions.csv', _ONLY_THE_HEADER, r'carmina_altera/work_content_subdivisions\.csv has no rows'),
-    ('authors.csv', _ONLY_THE_HEADER, r'carmina_altera/authors\.csv has no rows'),
-    ('authors_and_works.csv', _ONLY_THE_HEADER, r'carmina_altera/authors_and_works\.csv has no rows'),
+    ('work_abbreviations.csv', None, 'is missing'),
+    ('work_contents.csv', None, 'is missing'),
+    ('works.csv', '', "can't be read"),
+    ('works.csv', _ONLY_THE_HEADER, 'has no rows'),
+    ('work_contents.csv', _ONLY_THE_HEADER, 'has no rows'),
+    ('work_content_subdivisions.csv', _ONLY_THE_HEADER, 'has no rows'),
+    ('authors.csv', _ONLY_THE_HEADER, 'has no rows'),
+    ('authors_and_works.csv', _ONLY_THE_HEADER, 'has no rows'),
     ('work_abbreviations.csv', 'workId,id,value\n',
-     r"carmina_altera/work_abbreviations\.csv has the columns \['workId', 'id', 'value'\] instead of "
-     r"\['workId', 'id', 'val'\]"),
+     "has the columns ['workId', 'id', 'value'] instead of ['workId', 'id', 'val']"),
     ('work_abbreviations.csv', 'workId,id,val,lang\n',
-     r"carmina_altera/work_abbreviations\.csv has the columns \['workId', 'id', 'val', 'lang'\] instead of "
-     r"\['workId', 'id', 'val'\]"),
+     "has the columns ['workId', 'id', 'val', 'lang'] instead of ['workId', 'id', 'val']"),
 ], ids=['a file missing', 'the contents missing', 'a file that can\'t be read', 'works without rows',
         'contents without rows', 'subdivisions without rows', 'authors without rows', 'authorships without rows',
         'other columns', 'one more column'])
@@ -246,7 +244,7 @@ def test_a_work_file_that_cant_be_aggregated_raises_and_nothing_is_saved(tmp_pat
     (tmp_path / 'aggregate').mkdir(exist_ok=True)
     before = _files(tmp_path / 'aggregate')
 
-    with pytest.raises(ValueError, match=problem):
+    with pytest.raises(ValueError, match=re.escape(f"{path} {problem}")):
         aggregate(works / last_run, tmp_path / 'aggregate')
     assert _files(tmp_path / 'aggregate') == before
 
@@ -359,8 +357,8 @@ def test_a_work_whose_publication_couldnt_be_undone_raises_and_nothing_is_saved(
             publish(works / 'carmina_altera', carmina_prima)
     assert not list(carmina_prima.glob('.*.old'))
 
-    with pytest.raises(FileExistsError, match=rf"carmina_prima/{UNFINISHED_PUBLICATION}:\nA publication into "
-                                              rf"{carmina_prima} didn't finish"):
+    with pytest.raises(FileExistsError, match=re.escape(f"{carmina_prima / UNFINISHED_PUBLICATION}:\nA publication "
+                                                        f"into {carmina_prima} didn't finish")):
         aggregate(works, tmp_path / 'aggregate')
     assert _files(tmp_path / 'aggregate') == {}
 
