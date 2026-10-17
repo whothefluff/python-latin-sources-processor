@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -171,8 +172,8 @@ def test_a_library_whose_publication_couldnt_be_undone_isnt_analyzed(monkeypatch
     assert sorted(path.name for path in library.iterdir()) == [UNFINISHED_PUBLICATION, "work_contents.csv", "works.csv"]
     morpheus.clear()
 
-    with pytest.raises(FileExistsError,
-                       match=rf"{UNFINISHED_PUBLICATION}:\nA publication into {library} didn't finish"):
+    with pytest.raises(FileExistsError, match=re.escape(f"{library / UNFINISHED_PUBLICATION}:\nA publication into "
+                                                        f"{library} didn't finish")):
         process_morpheus_perseids_api.analyze(str(tmp_path))
     assert morpheus == []
     assert _outputs(tmp_path) == before
