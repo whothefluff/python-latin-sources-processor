@@ -177,3 +177,40 @@ def test_a_library_whose_publication_couldnt_be_undone_isnt_analyzed(monkeypatch
         process_morpheus_perseids_api.analyze(str(tmp_path))
     assert morpheus == []
     assert _outputs(tmp_path) == before
+
+
+_EXCLAMATION_HERCULES = {"dict": {"hdwd": {"$": "Hercules"}, "pofs": {"$": "exclamation"}},
+                         "infl": {"term": {"stem": {"$": "hercu^le_s"}}, "pofs": {"$": "exclamation"},
+                                  "stemtype": {"$": "exclam"}, "morph": {"$": "indeclform"}}}
+_NOUN_HERCULES = {"dict": {"hdwd": {"$": "Hercules"}, "pofs": {"$": "noun"}, "decl": {"$": "3rd"},
+                           "gend": {"$": "masculine"}},
+                  "infl": {"term": {"stem": {"$": "Hercul"}, "suff": {"$": "e_s"}}, "pofs": {"$": "noun"},
+                           "decl": {"$": "3rd"}, "case": {"$": "nominative"}, "gend": {"$": "masculine"},
+                           "num": {"$": "singular"}, "stemtype": {"$": "es_is"}}}
+
+
+def _items_of(monkeypatch, tmp_path, word, entries_by_spelling):
+    """Returns the items written for word when Morpheus answers each spelling with its entries, each body with an id
+    of its own."""
+    def get(url, params, timeout):
+        entries = entries_by_spelling.get(params["word"], [])
+        return _Response(201, _answer(*({"about": f"urn:uuid:{params['word']}{i}", "rest": {"entry": entry}}
+                                        for i, entry in enumerate(entries))))
+
+    monkeypatch.setattr(process_morpheus_perseids_api.requests, "get", get)
+    _library(tmp_path, [word])
+    analyzer = MorphologicalAnalyzer(str(tmp_path))
+    analyzer.process_words()
+    return sorted(map(tuple, pd.read_csv(analyzer.details_file, dtype=str, keep_default_na=False).values))
+
+
+def test_entries_of_the_two_spellings_that_only_share_a_headword_are_both_kept(monkeypatch, tmp_path):
+    assert _items_of(monkeypatch, tmp_path, "hercules", {"hercules": [_EXCLAMATION_HERCULES],
+                                                         "Hercules": [_NOUN_HERCULES]}) == [
+        ("Hercules", "1", "Hercules"), ("hercules", "0", "Hercules")]
+
+
+def test_an_entry_that_both_spellings_give_is_kept_once(monkeypatch, tmp_path):
+    assert _items_of(monkeypatch, tmp_path, "hercules", {"hercules": [_NOUN_HERCULES],
+                                                         "Hercules": [_NOUN_HERCULES]}) == [
+        ("Hercules", "0", "Hercules")]

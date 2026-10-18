@@ -1,4 +1,5 @@
 import csv
+import json
 import logging
 import os
 import shutil
@@ -21,8 +22,10 @@ from scripts.morphological_analysis.process_morpheus_perseids_api_aux.overrides 
 def _merge_bodies(analysis_lower: Dict, analysis_title: Dict) -> List[Dict]:
     """Merge Body entries from lowercase + Title-case queries. The API is now
     strict-case, so proper-noun-only entries (e.g. 'Athena') never surface
-    under a lowercase query. Dedupes by headword; lowercase-sourced bodies
-    come first so existing FORMS/FORMS_TO_IGNORE indices stay stable."""
+    under a lowercase query. An entry that both answers have is kept once, but
+    entries that only share a headword are all kept: 'hercules' gives the
+    exclamation and 'Hercules' the noun, both under Hercules. Lowercase-sourced
+    bodies come first so existing FORMS/FORMS_TO_IGNORE indices stay stable."""
     def get_bodies(analysis):
         if not analysis or "RDF" not in analysis or "Body" not in analysis["RDF"]["Annotation"]:
             return []
@@ -33,13 +36,14 @@ def _merge_bodies(analysis_lower: Dict, analysis_title: Dict) -> List[Dict]:
     merged = []
     for body in get_bodies(analysis_lower) + get_bodies(analysis_title):
         try:
-            headword = body["rest"]["entry"]["dict"]["hdwd"]["$"]
+            # The entry alone: each answer gives its bodies ids of its own
+            entry = json.dumps(body["rest"]["entry"], sort_keys=True)
         except KeyError:
             merged.append(body)
             continue
-        if headword in seen:
+        if entry in seen:
             continue
-        seen.add(headword)
+        seen.add(entry)
         merged.append(body)
     return merged
 
