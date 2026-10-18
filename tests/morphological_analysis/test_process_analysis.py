@@ -133,3 +133,80 @@ def test_an_excluded_adjective_inflection_does_not_capitalize_the_item(monkeypat
 
     assert _items(details) == [("attice", 0, "Atticus")]
     assert [i["partOfSpeech"] for i in inflections] == ["adverb"]
+
+
+def _degrees(word, *entries):
+    """Returns each reading's form, part of speech, spelling, declension and segments."""
+    _, inflections = MorphologicalAnalyzer.process_analysis(word, _entries(*entries))
+    return [(i["form"], i["partOfSpeech"], i["stem"] + (i["suffix"] or ""), i["declension"], i["segmentsInfo"])
+            for i in inflections]
+
+
+def _singular(case, gend, **tags):
+    return dict(case=case, gend=gend, num="singular", **tags)
+
+
+def test_a_comparative_built_on_its_positives_stem_is_of_the_3rd_declension():
+    assert _degrees("firmiores", ("firmus", "adjective", [
+        _inflection("adjective", "firm", "io_re_s", "us_a_um", case="nominative", gend="masculine", num="plural",
+                    decl="1st & 2nd", comp="comparative")])) == [
+        ("firmiores", "adjective", "firmiōrēs", "3rd", "ior, -ius")]
+
+
+def test_a_comparative_with_a_stem_of_its_own_keeps_its_stem_types_segments():
+    assert _degrees("melior", ("bonus", "adjective", [
+        _inflection("adjective", "me^li^", "or", "or_us_comp", **_singular("nominative", "masculine"), decl="3rd",
+                    comp="comparative")])) == [
+        ("melior", "adjective", "melior", "3rd", "or, -us")]
+
+
+def test_a_comparative_that_morpheus_calls_a_noun_is_a_comparative_too():
+    assert _degrees("doctior", ("doceo", "noun", [
+        _inflection("noun", "do^ct", "ior", "pp4", **_singular("nominative", "masculine"), comp="comparative")])) == [
+        ("doctior", "noun", "doctior", "3rd", "ior, -ius")]
+
+
+def test_a_neuter_comparative_in_ius_is_a_comparative():
+    assert _degrees("citius", ("cieo", "noun", [
+        _inflection("noun", "ci^t", "ius", "pp4", gend="adverbial", comp="comparative"),
+        _inflection("noun", "ci^t", "ius", "pp4", **_singular("nominative", "neuter"), comp="comparative")])) == [
+        ("citius", "adverb", "citius", None, None),
+        ("citius", "noun", "citius", "3rd", "ior, -ius")]
+
+
+def test_a_word_in_ius_that_is_no_comparative_keeps_its_declension_and_segments():
+    assert _degrees("filius", ("filius", "noun", [
+        _inflection("noun", "fi_l", "ius", "ius_i", **_singular("nominative", "masculine"), decl="2nd")])) == [
+        ("filius", "noun", "fīlius", "2nd", "ius, -i")]
+    assert _degrees("cybeleius", ("Cybele", "adjective", [
+        _inflection("adjective", "Cy^be^le_", "ius", "ius_ia_ium", **_singular("nominative", "masculine"),
+                    decl="1st & 2nd")])) == [
+        ("Cybeleius", "adjective", "Cybelēius", "1st & 2nd", "ius, -ia, -ium")]
+
+
+def test_a_genitive_plural_in_iorum_is_no_comparative():
+    assert _degrees("aliorum", ("allium", "noun", [
+        _inflection("noun", "ali", "o_rum", "us_i", case="genitive", gend="neuter", num="plural", decl="2nd")])) == [
+        ("aliorum", "noun", "aliōrum", "2nd", "us, -i")]
+
+
+def test_a_superlative_is_of_the_1st_and_2nd_declensions_with_its_endings_segments():
+    assert _degrees("fortissimus", ("fortis", "adjective", [
+        _inflection("adjective", "fort", "issimus", "is_e", **_singular("nominative", "masculine"), decl="3rd",
+                    comp="superlative")])) == [
+        ("fortissimus", "adjective", "fortissimus", "1st & 2nd", "issimus, -issima, -issimum")]
+    assert _degrees("pulcherrime", ("pulcher1", "adjective", [
+        _inflection("adjective", "pulch", "errime", "er_ra_rum", **_singular("vocative", "masculine"),
+                    decl="1st & 2nd", comp="superlative")])) == [
+        ("pulcherrime", "adjective", "pulcherrime", "1st & 2nd", "errimus, -errima, -errimum")]
+    assert _degrees("carissumus", ("carus", "adjective", [
+        _inflection("adjective", "ca_r", "issumus", "us_a_um", **_singular("nominative", "masculine"),
+                    decl="1st & 2nd", comp="superlative")])) == [
+        ("carissumus", "adjective", "cārissumus", "1st & 2nd", "issumus, -issuma, -issumum")]
+
+
+def test_a_superlative_with_a_stem_of_its_own_keeps_its_stem_types_segments():
+    assert _degrees("optimus", ("bonus", "adjective", [
+        _inflection("adjective", "o^pti^m", "us", "us_a_um", **_singular("nominative", "masculine"), decl="1st & 2nd",
+                    comp="superlative")])) == [
+        ("optimus", "adjective", "optimus", "1st & 2nd", "us, -a, -um")]

@@ -304,10 +304,11 @@ class MorphologicalAnalyzer:
                         "partOfSpeech": computed_pos,
                         "stem": MorphologicalAnalyzer.macronize(term.get("stem", {}).get("$")).replace(":", "-").replace("^", ""),
                         "suffix": suffix,
-                        "segmentsInfo": segments_info(computed_pos, verb_form, tense, stem_type, suffix, lookup_word),
+                        "segmentsInfo": segments_info(computed_pos, verb_form, tense, stem_type, suffix, degree,
+                                                      lookup_word),
                         "gender": None if gender == "adverbial" else "neuter" if verb_form == "infinitive" else "masculine/feminine/neuter" if gender is None and decl == "3rd" else gender,
                         "number": "singular" if verb_form == "infinitive" else infl.get("num", {}).get("$"),
-                        "declension": declension(computed_pos, decl, suffix, verb_form, tense),
+                        "declension": declension(computed_pos, decl, degree, verb_form, tense),
                         "case": case(gramm_case, verb_form, suffix, stem_type),
                         "verbForm": verb_form,
                         "tense": calc_tense(verb_form, tense),
@@ -781,7 +782,7 @@ def part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, gramm_case, de
     return "new combination, check"
 
 
-def declension( computed_pos:str, decl_tag:str, suffix:str | None, verb_form:str, verb_tense:str ) -> str | None:
+def declension( computed_pos:str, decl_tag:str, degree:str | None, verb_form:str, verb_tense:str ) -> str | None:
     if verb_form == "gerundive":
         return "1st & 2nd"
     elif verb_form == "participle":
@@ -792,9 +793,10 @@ def declension( computed_pos:str, decl_tag:str, suffix:str | None, verb_form:str
         return None
     elif verb_form == "supine":
         return "4th"
-    elif computed_pos in ["noun","adjective"] and suffix is not None and ( suffix.find("ior") != -1 or suffix.find("ius") != -1 ):
+    # Morpheus gives a comparative built on its positive's stem the positive's declension: firmiores is 1st & 2nd
+    elif computed_pos in ["noun","adjective"] and degree == "comparative":
         return "3rd"
-    elif computed_pos in ["noun","adjective"] and suffix is not None and suffix.find("issim") != -1:
+    elif computed_pos in ["noun","adjective"] and degree == "superlative":
         return "1st & 2nd"
     else:
         return decl_tag
@@ -837,12 +839,21 @@ def calc_tense(verb_form: str | None, original_t: str | None) -> str | None:
     return new_t
 
 
+#: The segments of a superlative by the ending in its suffix, such as the errim of pulcherrime
+SUPERLATIVE_SEGMENTS = {
+    "issim": "issimus, -issima, -issimum",
+    "issum": "issumus, -issuma, -issumum",
+    "errim": "errimus, -errima, -errimum",
+}
+
+
 def segments_info(
     computed_pos: str,
     verb_form: str,
     verb_tense: str,
     stemtype_tag: str,
     suffix: str | None,
+    degree: str | None,
     lookup_word: str
 ) -> str | None:
 
@@ -874,6 +885,16 @@ def segments_info(
         # Replace underscore with comma and hyphen
         return stemtype.replace( '_', ', -' )
 
+    # A comparative or superlative with a stem of its own, such as the meli- of melior or the optim- of optimus, keeps
+    # its stem type's segments
+    if degree == "comparative" and not stemtype_tag.endswith("_comp"):
+        degree_segments = "ior, -ius"
+    elif degree == "superlative":
+        degree_segments = next((segments for ending, segments in SUPERLATIVE_SEGMENTS.items()
+                                if suffix is not None and ending in suffix), None)
+    else:
+        degree_segments = None
+
     if stemtype_tag.startswith("irreg"):
         return "irregular"
     elif stemtype_tag == "indecl":
@@ -886,10 +907,8 @@ def segments_info(
                 noun_st_tag = "is_is" if stemtype_tag == "is_is_C" else "ion_iī" if stemtype_tag == "ios_i" else stemtype_tag
                 if noun_st_tag.count("_") == 1:
                     return process_tag( noun_st_tag )
-                elif suffix is not None and ( suffix.find("ior") != -1 or suffix.find("ius") != -1 ):
-                    return "ior, -ius"
-                elif suffix is not None and suffix.find("issim") != -1:
-                    return "issimus, -issima, -issimum"
+                elif degree_segments is not None:
+                    return degree_segments
             elif verb_form == "supine":
                 return "supine stem"
 
@@ -911,10 +930,8 @@ def segments_info(
                 gerundive_suffixes = { "conj1": "andus, -anda, -andum", "conj2": "endus, -enda, -endum", "conj3": "endus, -enda, -endum", "conj3_io": "iendus, -ienda, -iendum","conj4": "iendus, -ienda, -iendum",}
                 if stemtype_tag in gerundive_suffixes:
                     return gerundive_suffixes[stemtype_tag]
-            elif suffix is not None and ( suffix.find("ior") != -1 or suffix.find("ius") != -1 ):
-                return "ior, -ius"
-            elif suffix is not None and suffix.find("issim") != -1:
-                return "issimus, -issima, -issimum"
+            elif degree_segments is not None:
+                return degree_segments
             else:
                 adj_st_tag = remove_adj_suffix(stemtype_tag)
                 return process_tag( adj_st_tag )
