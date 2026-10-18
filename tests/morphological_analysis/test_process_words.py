@@ -219,6 +219,28 @@ def test_entries_of_the_two_spellings_that_only_share_a_headword_are_both_kept(m
         ("Hercules", "1", "Hercules"), ("hercules", "0", "Hercules")]
 
 
+def test_an_entry_under_a_headword_that_only_the_capitalized_answer_has_is_kept_whole(monkeypatch, tmp_path):
+    # Venere is the ablative of Venus, venere a perfect of venio and a present of venor
+    venio = {"dict": {"hdwd": {"$": "venio"}, "pofs": {"$": "verb"}},
+             "infl": {"term": {"stem": {"$": "ve_n"}, "suff": {"$": "e_re"}}, "pofs": {"$": "verb"},
+                      "mood": {"$": "indicative"}, "num": {"$": "plural"}, "pers": {"$": "3rd"},
+                      "tense": {"$": "perfect"}, "voice": {"$": "active"}, "stemtype": {"$": "perfstem"},
+                      "morph": {"$": "poetic"}}}
+    venor = {"dict": {"hdwd": {"$": "venor"}, "pofs": {"$": "verb"}},
+             "infl": {"term": {"stem": {"$": "ve_n"}, "suff": {"$": "e_re"}}, "pofs": {"$": "verb"},
+                      "mood": {"$": "subjunctive"}, "num": {"$": "singular"}, "pers": {"$": "2nd"},
+                      "tense": {"$": "present"}, "voice": {"$": "passive"}, "stemtype": {"$": "conj1"},
+                      "derivtype": {"$": "are_vb"}}}
+    venus = {"dict": {"hdwd": {"$": "Venus"}, "pofs": {"$": "noun"}, "decl": {"$": "3rd"}, "gend": {"$": "feminine"}},
+             "infl": {"term": {"stem": {"$": "Ve^n"}, "suff": {"$": "ere"}}, "pofs": {"$": "noun"},
+                      "decl": {"$": "3rd"}, "case": {"$": "ablative"}, "gend": {"$": "feminine"},
+                      "num": {"$": "singular"}, "stemtype": {"$": "us_eris"}}}
+
+    assert _written(monkeypatch, tmp_path, "venere", {"venere": [venio, venor], "Venere": [venus]}) == (
+        [("Venere", "2", "Venus"), ("venere", "0", "venio"), ("venere", "1", "venor")],
+        [("Venere", "2", "noun"), ("venere", "0", "verb"), ("venere", "1", "verb")])
+
+
 def test_an_entry_that_both_spellings_give_is_kept_once(monkeypatch, tmp_path):
     assert _items_of(monkeypatch, tmp_path, "hercules", {"hercules": [_NOUN_HERCULES],
                                                          "Hercules": [_NOUN_HERCULES]}) == [
