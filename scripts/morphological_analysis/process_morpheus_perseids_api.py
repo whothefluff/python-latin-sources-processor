@@ -1317,9 +1317,9 @@ def readings_ruled_out_by_certain_vowels(library_dir: Path, details_path: Path,
                 macronized, mask = work_macronizations.get(
                     (token["workId"], token["idx"]),
                     (unambiguous_macronizations[key], 0) if key is not None else (word, -1))
-            # A name's readings are under the capitalized word, other words' under the lowercase one, and a word that
-            # can be either has both
-            forms = {*([word.capitalize()] if state in (ProperNounState.YES, ProperNounState.EITHER) else []),
+            # A name's readings are under the capitalized word and a common word's under the lowercase one. A word
+            # that can be either has both, and so does a word of unknown state
+            forms = {*([word.capitalize()] if state != ProperNounState.NO else []),
                      *([word.lower()] if state != ProperNounState.YES else [])}
             readings = {reading for form in forms for reading in readings_by_form.get(form, [])}
             certain_vowels = [i for i, letter in enumerate(macronized) if letter in _VOWELS and (mask >> i) & 1 == 0]

@@ -128,9 +128,11 @@ def test_a_word_that_can_be_either_has_both(tmp_path):
         {}, {("vēnēre", "venio"): 1})
 
 
-def test_a_word_of_unknown_state_has_the_lowercase_readings(tmp_path):
-    assert _counts(_ruled_out(tmp_path, [_word("Venere", state=None)], {"venere": "venere"}, {}, _VENIO)) == (
-        {"venere": 1}, {("vēnēre", "venio"): 1})
+def test_a_word_of_unknown_state_has_both(tmp_path):
+    assert _counts(_ruled_out(tmp_path, [_word("venere", state=None)], {"venere": "venere"}, {}, _VENERE)) == (
+        {}, {("Vēnere", "Venus"): 1})
+    assert _counts(_ruled_out(tmp_path, [_word("venere", state=None)], {"venere": "venere"}, {}, _VENIO)) == (
+        {}, {("vēnēre", "venio"): 1})
 
 
 def test_only_an_ending_that_morpheus_leaves_out_is_put_back(tmp_path):
