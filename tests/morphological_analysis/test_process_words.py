@@ -191,9 +191,9 @@ _NOUN_HERCULES = {"dict": {"hdwd": {"$": "Hercules"}, "pofs": {"$": "noun"}, "de
                            "num": {"$": "singular"}, "stemtype": {"$": "es_is"}}}
 
 
-def _items_of(monkeypatch, tmp_path, word, entries_by_spelling):
-    """Returns the items written for word when Morpheus answers each spelling with its entries, each body with an id
-    of its own."""
+def _written(monkeypatch, tmp_path, word, entries_by_spelling):
+    """Returns the items written for word, and each reading's form, item and part of speech, when Morpheus answers
+    each spelling with its entries, each body with an id of its own."""
     def get(url, params, timeout):
         entries = entries_by_spelling.get(params["word"], [])
         return _Response(201, _answer(*({"about": f"urn:uuid:{params['word']}{i}", "rest": {"entry": entry}}
@@ -203,7 +203,14 @@ def _items_of(monkeypatch, tmp_path, word, entries_by_spelling):
     _library(tmp_path, [word])
     analyzer = MorphologicalAnalyzer(str(tmp_path))
     analyzer.process_words()
-    return sorted(map(tuple, pd.read_csv(analyzer.details_file, dtype=str, keep_default_na=False).values))
+    inflections = pd.read_csv(analyzer.inflections_file, dtype=str, keep_default_na=False)
+    return (sorted(map(tuple, pd.read_csv(analyzer.details_file, dtype=str, keep_default_na=False).values)),
+            sorted(zip(inflections["form"], inflections["item"], inflections["partOfSpeech"])))
+
+
+def _items_of(monkeypatch, tmp_path, word, entries_by_spelling):
+    """Returns the items written for word when Morpheus answers each spelling with its entries."""
+    return _written(monkeypatch, tmp_path, word, entries_by_spelling)[0]
 
 
 def test_entries_of_the_two_spellings_that_only_share_a_headword_are_both_kept(monkeypatch, tmp_path):
@@ -216,6 +223,31 @@ def test_an_entry_that_both_spellings_give_is_kept_once(monkeypatch, tmp_path):
     assert _items_of(monkeypatch, tmp_path, "hercules", {"hercules": [_NOUN_HERCULES],
                                                          "Hercules": [_NOUN_HERCULES]}) == [
         ("Hercules", "0", "Hercules")]
+
+
+def test_a_capitalized_headword_gains_only_the_readings_that_the_lowercase_answer_lacks(monkeypatch, tmp_path):
+    # Morpheus answers Hercules with one entry that holds the noun and the exclamation that hercules gives
+    noun_and_exclamation = dict(_NOUN_HERCULES, infl=[_NOUN_HERCULES["infl"], _EXCLAMATION_HERCULES["infl"]])
+
+    assert _written(monkeypatch, tmp_path, "hercules", {"hercules": [_EXCLAMATION_HERCULES],
+                                                        "Hercules": [noun_and_exclamation]}) == (
+        [("Hercules", "1", "Hercules"), ("hercules", "0", "Hercules")],
+        [("Hercules", "1", "noun"), ("hercules", "0", "interjection")])
+
+
+def test_a_lowercase_headword_has_only_the_readings_of_the_lowercase_answer(monkeypatch, tmp_path):
+    adjective = {"term": {"stem": {"$": "nov"}, "suff": {"$": "ae"}}, "pofs": {"$": "adjective"},
+                 "decl": {"$": "1st & 2nd"}, "case": {"$": "nominative"}, "gend": {"$": "feminine"},
+                 "num": {"$": "plural"}, "stemtype": {"$": "us_a_um"}}
+    shops = {"term": {"stem": {"$": "Nov"}, "suff": {"$": "ae"}}, "pofs": {"$": "noun"}, "decl": {"$": "1st"},
+             "case": {"$": "nominative"}, "gend": {"$": "feminine"}, "num": {"$": "plural"},
+             "stemtype": {"$": "a_ae"}}
+    novus = {"dict": {"hdwd": {"$": "novus"}, "pofs": {"$": "adjective"}}, "infl": adjective}
+
+    assert _items_of(monkeypatch, tmp_path, "novae", {
+        "novae": [novus],
+        "Novae": [{"dict": {"hdwd": {"$": "novus"}, "pofs": {"$": "noun"}}, "infl": [adjective, shops]}]}) == [
+        ("novae", "0", "novus")]
 
 
 def _library_of_one_certain_est(project_root):

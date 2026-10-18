@@ -23,31 +23,43 @@ from scripts.morphological_analysis.process_morpheus_perseids_api_aux.overrides 
 
 
 def _merge_bodies(analysis_lower: Dict, analysis_title: Dict) -> List[Dict]:
-    """Merge Body entries from lowercase + Title-case queries. The API is now
-    strict-case, so proper-noun-only entries (e.g. 'Athena') never surface
-    under a lowercase query. An entry that both answers have is kept once, but
-    entries that only share a headword are all kept: 'hercules' gives the
-    exclamation and 'Hercules' the noun, both under Hercules. Lowercase-sourced
-    bodies come first so existing FORMS/FORMS_TO_IGNORE indices stay stable."""
+    """Merge Body entries from lowercase + Title-case queries. Morpheus answers a lowercase word with its lowercase
+    analyses only, so proper-noun-only entries (e.g. 'Athena') never surface there. A capitalized word it answers with
+    those analyses too, grouped with the capitalized ones under their headword: 'Hercules' gives one entry with the
+    noun and the exclamation that 'hercules' gives. So an entry of the capitalized answer is kept whole under a headword
+    that the lowercase answer doesn't have. Under one it has, the entry keeps the inflections that are new when its
+    headword is capitalized (Hercules's noun), and is dropped when it isn't: a lowercase headword's readings are the
+    lowercase answer's. Lowercase-sourced bodies come first so existing FORMS/FORMS_TO_IGNORE indices stay stable."""
     def get_bodies(analysis):
         if not analysis or "RDF" not in analysis or "Body" not in analysis["RDF"]["Annotation"]:
             return []
         bodies = analysis["RDF"]["Annotation"]["Body"]
         return bodies if isinstance(bodies, list) else [bodies]
 
-    seen = set()
-    merged = []
-    for body in get_bodies(analysis_lower) + get_bodies(analysis_title):
-        try:
-            # The entry alone: each answer gives its bodies ids of its own
-            entry = json.dumps(body["rest"]["entry"], sort_keys=True)
-        except KeyError:
-            merged.append(body)
-            continue
-        if entry in seen:
-            continue
-        seen.add(entry)
+    def headword_of(body):
+        return body.get("rest", {}).get("entry", {}).get("dict", {}).get("hdwd", {}).get("$")
+
+    def inflections_of(body):
+        inflections = body.get("rest", {}).get("entry", {}).get("infl", [])
+        return inflections if isinstance(inflections, list) else [inflections]
+
+    merged = list(get_bodies(analysis_lower))
+    headwords = {headword_of(body) for body in merged}
+    # Compared as text: each answer gives its bodies ids of their own, but the same inflection the same tags
+    known = {json.dumps(inflection, sort_keys=True) for body in merged for inflection in inflections_of(body)}
+    for body in get_bodies(analysis_title):
+        headword = headword_of(body)
+        if headword is not None and headword in headwords:
+            if not headword[0].isupper():
+                continue
+            new = [inflection for inflection in inflections_of(body)
+                   if json.dumps(inflection, sort_keys=True) not in known]
+            if not new:
+                continue
+            body = {**body, "rest": {**body["rest"], "entry": {**body["rest"]["entry"], "infl": new}}}
+        headwords.add(headword)
         merged.append(body)
+        known.update(json.dumps(inflection, sort_keys=True) for inflection in inflections_of(body))
     return merged
 
 
