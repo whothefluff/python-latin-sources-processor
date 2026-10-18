@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 import tempfile
 from itertools import product
 from pathlib import Path
@@ -61,6 +62,14 @@ def _merge_bodies(analysis_lower: Dict, analysis_title: Dict) -> List[Dict]:
         merged.append(body)
         known.update(json.dumps(inflection, sort_keys=True) for inflection in inflections_of(body))
     return merged
+
+
+class ValidationFailed(ValueError):
+    """The output files have issues, which the validator logged."""
+
+    def __init__(self, issues: int):
+        self.issues = issues
+        super().__init__(f"Validation failed. Found {issues} issues, logged above.")
 
 
 class WordsWithoutAnalysis(Exception):
@@ -308,6 +317,10 @@ class MorphologicalAnalyzer:
                     stem_type = infl.get("stemtype", {}).get("$")
                     degree = infl.get("comp", {}).get("$")
                     computed_pos = part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, gramm_case, degree, lookup_word)
+                    if computed_pos == "new combination, check":
+                        spelling = MorphologicalAnalyzer._spelling_of(infl)
+                        logging.warning(f"'{word}': inflection {cnt} of {headword} ({spelling}) is {pos_infl!r} in an "
+                                        f"entry that is {pos_dict!r}, a pair that part_of_speech has no rule for")
                     tense = infl.get("tense", {}).get("$")
                     inflection = {
                         # "form" filled in after the loop, once we know is_proper
@@ -1043,7 +1056,7 @@ class MorphologicalDataValidator:
         if self.warning_count == 0:
             logging.info("Validation complete. No issues found.")
         else:
-            raise ValueError(f"Validation failed. Found {self.warning_count} issues, logged above.")
+            raise ValidationFailed(self.warning_count)
 
     def _validate_adjective(self, row: Dict[str, str], line_num: int):
         form = row['form']
@@ -1389,6 +1402,14 @@ def main():
         analyze(project_root)
         logging.info("Morphological analysis processing complete.")
 
+    # What's wrong is in the data, not the code, so it's said without a traceback
+    except ValidationFailed as failure:
+        logging.error(f"Nothing was saved: validation found {failure.issues} issues, listed above. Their line numbers "
+                      f"are of the files that weren't kept. The output files are as they were.")
+        sys.exit(1)
+    except WordsWithoutAnalysis as failure:
+        logging.error(f"Nothing was saved: {failure}. The output files are as they were.")
+        sys.exit(1)
     except Exception as e:
         logging.critical(f"Critical error in main execution: {str( e )}")
         raise

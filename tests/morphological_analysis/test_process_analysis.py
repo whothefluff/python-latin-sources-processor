@@ -135,6 +135,14 @@ def test_an_excluded_adjective_inflection_does_not_capitalize_the_item(monkeypat
     assert [i["partOfSpeech"] for i in inflections] == ["adverb"]
 
 
+
+def test_an_inflection_whose_part_of_speech_has_no_rule_in_its_entry_says_which(caplog):
+    MorphologicalAnalyzer.process_analysis("hercules", _entries(
+        ("Hercules", "noun", [_inflection("exclamation", "hercu^le_s")])))
+
+    assert ("'hercules': inflection 0 of Hercules (hercules) is 'exclamation' in an entry that is 'noun', a pair that "
+            "part_of_speech has no rule for") in caplog.text
+
 def _degrees(word, *entries):
     """Returns each reading's form, part of speech, spelling, declension and segments."""
     _, inflections = MorphologicalAnalyzer.process_analysis(word, _entries(*entries))

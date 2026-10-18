@@ -10,7 +10,7 @@ from scripts.common import publishing
 from scripts.common.publishing import UNFINISHED_PUBLICATION, publish
 from scripts.morphological_analysis import process_morpheus_perseids_api
 from scripts.morphological_analysis.process_morpheus_perseids_api import (
-    MorphologicalAnalyzer, Reading, RuledOutReadings, WordsWithoutAnalysis,
+    MorphologicalAnalyzer, Reading, RuledOutReadings, ValidationFailed, WordsWithoutAnalysis,
 )
 
 
@@ -295,3 +295,34 @@ def test_the_log_lists_the_most_tokens_first_with_three_places_each(monkeypatch,
         "1 readings are ruled out by the certain vowels of some tokens, by their spelling and lemma",
         "  tibī (tu): 5, such as Carmen 1.1, Carmen 1.2, Carmen 1.3",
     ]
+
+
+@pytest.mark.parametrize("failure, message", [
+    (ValidationFailed(1), "Nothing was saved: validation found 1 issues, listed above. Their line numbers are of the "
+                          "files that weren't kept. The output files are as they were."),
+    (WordsWithoutAnalysis({"et": "Morpheus answered 'et' with status 500"}),
+     "Nothing was saved: 1 words have no analysis written: 'et' (Morpheus answered 'et' with status 500). The output "
+     "files are as they were."),
+], ids=["analyses that fail validation", "a word without an analysis"])
+def test_a_run_that_fails_on_the_data_says_why_without_a_traceback(monkeypatch, caplog, failure, message):
+    def analyze(_project_root):
+        raise failure
+
+    monkeypatch.setattr(process_morpheus_perseids_api, "analyze", analyze)
+
+    with pytest.raises(SystemExit) as exited:
+        process_morpheus_perseids_api.main()
+
+    assert exited.value.code == 1
+    assert [(record.levelname, record.getMessage(), record.exc_info) for record in caplog.records] == [
+        ("ERROR", message, None)]
+
+
+def test_a_run_that_fails_on_the_code_shows_its_traceback(monkeypatch):
+    def analyze(_project_root):
+        raise KeyError("rest")
+
+    monkeypatch.setattr(process_morpheus_perseids_api, "analyze", analyze)
+
+    with pytest.raises(KeyError, match="rest"):
+        process_morpheus_perseids_api.main()
