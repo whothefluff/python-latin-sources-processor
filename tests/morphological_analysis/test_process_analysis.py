@@ -71,3 +71,65 @@ def test_an_analysis_that_the_overrides_ignore_is_dropped_without_failing(monkey
 
     assert _process("voluit", ("volvo", [_verb("volu", "it")]), ("volo1", [_verb("volu", "it")])) == (
         [(0, "volo1")], [(0, 0, "voluit")])
+
+
+def _inflection(pos, stem, suffix=None, stemtype="", **tags):
+    """Returns one of Morpheus's inflections, with its part of speech, stem, suffix and other tags."""
+    term = {"stem": {"$": stem}} | ({"suff": {"$": suffix}} if suffix else {})
+    return {"term": term, "pofs": {"$": pos}, "stemtype": {"$": stemtype}} | {
+        tag: {"$": value} for tag, value in tags.items()}
+
+
+def _entries(*entries):
+    """Returns Morpheus's JSON with one body for each headword, part of speech and inflections."""
+    return {"RDF": {"Annotation": {"Body": [
+        {"rest": {"entry": {"dict": {"hdwd": {"$": headword}, "pofs": {"$": pos}}, "infl": inflections}}}
+        for headword, pos, inflections in entries
+    ]}}}
+
+
+_ATTICUS = _inflection("adjective", "Attic", "us", "us_a_um", gend="masculine", num="singular", case="nominative",
+                       decl="1st & 2nd")
+_ATTICE = _inflection("adverb", "Attic", "e_")
+_HERCLE = ("Hercules", "exclamation", [_inflection("exclamation", "hercle")])
+
+
+def _items(details):
+    return [(detail["form"], detail["item"], detail["dictionaryRef"]) for detail in details]
+
+
+def _readings(inflections):
+    return [(i["form"], i["item"], i["cnt"], i["partOfSpeech"], i["stem"] + (i["suffix"] or ""), i["case"])
+            for i in inflections]
+
+
+def test_a_proper_adjective_is_capitalized_and_stays_an_adjective():
+    details, inflections = MorphologicalAnalyzer.process_analysis(
+        "atticus", _entries(("Atticus", "adjective", [_ATTICUS])))
+
+    assert _items(details) == [("Atticus", 0, "Atticus")]
+    assert _readings(inflections) == [("Atticus", 0, 0, "adjective", "Atticus", "nominative")]
+
+
+def test_an_interjection_whose_headword_is_a_name_stays_lowercase():
+    details, _ = MorphologicalAnalyzer.process_analysis("hercle", _entries(_HERCLE))
+
+    assert _items(details) == [("hercle", 0, "Hercules")]
+
+
+def test_an_override_that_makes_an_inflection_a_noun_capitalizes_the_item(monkeypatch):
+    monkeypatch.setitem(process_morpheus_perseids_api.FORMS, "hercle_0_0", {"partOfSpeech": "noun"})
+
+    details, _ = MorphologicalAnalyzer.process_analysis("hercle", _entries(_HERCLE))
+
+    assert _items(details) == [("Hercle", 0, "Hercules")]
+
+
+def test_an_excluded_adjective_inflection_does_not_capitalize_the_item(monkeypatch):
+    monkeypatch.setitem(process_morpheus_perseids_api.NOT_WANTED_INFLECTIONS, "attice_0_0", True)
+
+    details, inflections = MorphologicalAnalyzer.process_analysis(
+        "attice", _entries(("Atticus", "adjective", [_ATTICUS, _ATTICE])))
+
+    assert _items(details) == [("attice", 0, "Atticus")]
+    assert [i["partOfSpeech"] for i in inflections] == ["adverb"]

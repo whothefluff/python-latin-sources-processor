@@ -15,8 +15,12 @@ In `work_contents.csv`, the `word` and `macronizedWord` columns MUST have identi
 Any time a base/dictionary form is exported (specifically `form` and `macronizedForm` in the `MorphologicalDetails` and
 `MorphologicalDetailInflections` CSVs), it MUST follow a strict 2-shape casing rule:
 
-* If it is a proper noun: `Capitalized` (Title Case).
-* Otherwise: `lowercase`.
+* If its item is proper: `Capitalized` (Title Case). An item is proper when its headword (`dictionaryRef`) is
+  capitalized and at least one of the inflections it keeps (after overrides and exclusions) is a `noun` or an
+  `adjective`. Proper adjectives (`Atticus`, `Thessala`) are capitalized and keep `partOfSpeech = adjective`.
+* Otherwise: `lowercase`. An interjection whose headword is a name (`hercle` → `Hercules`) is not proper.
+
+One word can therefore have items under both shapes (`hercules`, the interjection, and `Hercules`, the noun).
 
 **Uniqueness Guarantee:** The morphological pipeline analyzes unique word formations based on this canonical casing. It
 will *never* export separate duplicate rows for surface casing variations (e.g., `fabula` vs `FABULA`). The downstream

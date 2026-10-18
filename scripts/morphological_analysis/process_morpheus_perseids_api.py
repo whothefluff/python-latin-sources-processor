@@ -11,7 +11,7 @@ import requests
 from scripts.common.macrons import strip_macrons
 from scripts.common.publishing import publish, raise_for_publication_leftovers
 from scripts.common.services import MORPHEUS_URL
-from scripts.library.util.casing import apply_contract_casing
+from scripts.library.util.casing import apply_contract_casing, is_proper_item
 from scripts.morphological_analysis.process_morpheus_perseids_api_aux.overrides import (
     FORMS, NOT_WANTED_INFLECTIONS, FULL_OVERRIDES, ANALYSIS_ALIASES, FORMS_TO_IGNORE, IGNORED_DICT_REFS,
     DICT_REF_REPLACEMENTS, TRUE_ADVERB_FORMS
@@ -273,7 +273,6 @@ class MorphologicalAnalyzer:
                     lookup_word = word
 
                 item_inflections = []
-                computed_pos_seen = []
 
                 for cnt, infl in enumerate(infl_list):
                     if spelled_like[cnt] is False:
@@ -290,7 +289,6 @@ class MorphologicalAnalyzer:
                     stem_type = infl.get("stemtype", {}).get("$")
                     degree = infl.get("comp", {}).get("$")
                     computed_pos = part_of_speech(pos_dict, pos_infl, verb_form, gender, suffix, gramm_case, degree, lookup_word)
-                    computed_pos_seen.append(computed_pos)
                     tense = infl.get("tense", {}).get("$")
                     inflection = {
                         # "form" filled in after the loop, once we know is_proper
@@ -351,12 +349,10 @@ class MorphologicalAnalyzer:
                     else:
                         item_inflections.append(inflection)
 
-                # Casing only makes sense for nouns. An interjection/adverb/etc. whose
-                # headword happens to reference a proper noun (e.g. "hercle" -> "Hercules")
-                # is not itself proper — headword casing is meaningless outside pos "noun".
-                is_proper = bool(headword) and headword[0].isupper() and "noun" in computed_pos_seen
-
-                contract_form = apply_contract_casing(word, is_proper)
+                # Judged on the inflections the item keeps, after overrides and exclusions. An interjection whose
+                # headword is a name ("hercle" -> "Hercules") isn't proper, but a proper adjective ("Atticus") is
+                contract_form = apply_contract_casing(
+                    word, is_proper_item(headword, (i["partOfSpeech"] for i in item_inflections)))
 
                 detail = {"form": contract_form, "item": item, "dictionaryRef": headword}
                 details.append(detail)
@@ -1159,20 +1155,28 @@ class MorphologicalDataValidator:
                 self._log_warning(line_num, 'verb', form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
 
     def _validate_casing_pos_gate(self):
-        """If one inflection or more have partOfSpeech 'noun', then we are allowed to
-        have capitalized 'form' values. Catches cases like 'Hercle' (interjection,
-        headword references Hercules but the word itself isn't a proper noun)."""
-        groups: Dict[Tuple[str, str], List[str | None]] = {}
+        """A form is capitalized exactly when its item is proper: a capitalized headword with a noun or adjective
+        inflection. Catches 'Hercle' capitalized (an interjection whose headword is Hercules) and a proper adjective
+        like 'atticus' left lowercase."""
+        refs: Dict[Tuple[str, str], str | None] = {}
+        with open(self.details_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                refs[(row['form'], row['item'])] = row.get('dictionaryRef')
 
+        groups: Dict[Tuple[str, str], List[str | None]] = {}
         with open(self.file_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 groups.setdefault((row['form'], row['item']), []).append(row.get('partOfSpeech'))
 
         for (form, item), pos_list in groups.items():
-            if form and form[0].isupper() and 'noun' not in pos_list:
+            ref = refs.get((form, item))
+            is_capitalized = bool(form) and form[0].isupper()
+            if is_capitalized != is_proper_item(ref, pos_list):
                 self._log_warning(0, 'casing', form,
-                                  f"item {item}: capitalized but no inflection is 'noun' (pos: {pos_list}).")
+                                  f"item {item}: {'capitalized' if is_capitalized else 'lowercase'} but headword "
+                                  f"'{ref}' with pos {pos_list} says otherwise.")
 
     def _validate_no_duplicate_details(self):
         """MorphologicalDetails rows must be unique on (form, item)."""
