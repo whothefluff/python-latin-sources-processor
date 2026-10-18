@@ -6,13 +6,16 @@ import shutil
 import tempfile
 from itertools import product
 from pathlib import Path
-from typing import Dict, List, Set, Any, Tuple, Callable
+from typing import Dict, List, NamedTuple, Set, Any, Tuple, Callable
 
 import requests
 from scripts.common.macrons import strip_macrons
 from scripts.common.publishing import publish, raise_for_publication_leftovers
 from scripts.common.services import MORPHEUS_URL
 from scripts.library.util.casing import apply_contract_casing, is_proper_item
+from scripts.library.util.proper_noun import ProperNounState
+from scripts.library.util.token_classification import TokenType
+from scripts.library.util.unambiguous_macronizations import lookup_key
 from scripts.morphological_analysis.process_morpheus_perseids_api_aux.overrides import (
     FORMS, NOT_WANTED_INFLECTIONS, FULL_OVERRIDES, ANALYSIS_ALIASES, FORMS_TO_IGNORE, IGNORED_DICT_REFS,
     DICT_REF_REPLACEMENTS, TRUE_ADVERB_FORMS
@@ -1232,10 +1235,98 @@ class MorphologicalDataValidator:
                 self._log_warning(0, 'ref-consistency', form,
                                   f"item {item}: dictionaryRef is null but has inflections.")
 
+_LONG_VOWELS = frozenset("āēīōūȳĀĒĪŌŪȲ")
+_VOWELS = _LONG_VOWELS | frozenset("aeiouyAEIOUY")
+
+
+class Reading(NamedTuple):
+    spelling: str
+    lemma: str
+
+
+class RuledOutReadings(NamedTuple):
+    """The readings that the macronizer's certain vowels rule out, in the library's word tokens. A reading is ruled out
+    when its spelling has the other length at one of them, as tibī is for the text's tibi."""
+    #: The tokens whose every reading is ruled out, by their macronization in lowercase
+    every_reading: Dict[str, List[str]]
+    #: The tokens that rule out a reading, by the reading
+    by_reading: Dict[Reading, List[str]]
+
+
+def _rules_out(spelling: str, macronized: str, certain_vowels: List[int]) -> bool:
+    """Whether the spelling has as many letters as the macronized word, and the other length at one of its certain
+    vowels."""
+    return len(spelling) == len(macronized) and any(
+        (spelling[i] in _LONG_VOWELS) != (macronized[i] in _LONG_VOWELS) for i in certain_vowels)
+
+
+def readings_ruled_out_by_certain_vowels(library_dir: Path, details_path: Path,
+                                         inflections_path: Path) -> RuledOutReadings:
+    """Returns the readings that certain vowels rule out, with the tokens that rule them out, each as its work's name
+    and its reference. The tokens are the words and those with an expansion, which is certain, and they get the
+    macronizations and readings that the reader gives them, before any reading is ruled out. A reading's spelling has
+    back an ending that Morpheus leaves out of it, such as an enclitic, and a spelling with more or fewer letters than
+    the token rules nothing out."""
+    with open(details_path, encoding="utf-8") as f:
+        lemmas = {(row["form"], row["item"]): row["dictionaryRef"] for row in csv.DictReader(f)}
+    readings_by_form: Dict[str, List[Reading]] = {}
+    with open(inflections_path, encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            spelling = row["stem"].replace("-", "") + row["suffix"]
+            ending = row["form"][len(spelling):]
+            readings_by_form.setdefault(row["form"], []).append(
+                Reading(spelling + ending if ending.lower() in MorphologicalAnalyzer.OMITTED_TAILS else spelling,
+                        lemmas[(row["form"], row["item"])]))
+    with open(library_dir / "works.csv", encoding="utf-8") as f:
+        work_names = {row["id"]: row["name"] for row in csv.DictReader(f)}
+    with open(library_dir / "unambiguous_macronizations.csv", encoding="utf-8") as f:
+        unambiguous_macronizations = {row["word"]: row["macronizedWord"] for row in csv.DictReader(f)}
+    with open(library_dir / "work_macronizations.csv", encoding="utf-8") as f:
+        work_macronizations = {(row["workId"], row["idx"]): (row["macronizedWord"], int(row["uncertaintyBitMask"]))
+                               for row in csv.DictReader(f)}
+
+    ruled_out = RuledOutReadings({}, {})
+    with open(library_dir / "work_contents.csv", encoding="utf-8") as f:
+        for token in csv.DictReader(f):
+            expansion = token["expansion"]
+            if not expansion and token["tokenType"] != str(TokenType.WORD.value):
+                continue
+            state = int(token["properNounState"]) if token["properNounState"] else None
+            if expansion:
+                word, macronized, mask = strip_macrons(expansion), expansion, 0
+            else:
+                word = token["word"]
+                key = lookup_key(word, TokenType.WORD, state, unambiguous_macronizations)
+                macronized, mask = work_macronizations.get(
+                    (token["workId"], token["idx"]),
+                    (unambiguous_macronizations[key], 0) if key is not None else (word, -1))
+            # A name's readings are under the capitalized word, other words' under the lowercase one, and a word that
+            # can be either has both
+            forms = {*([word.capitalize()] if state in (ProperNounState.YES, ProperNounState.EITHER) else []),
+                     *([word.lower()] if state != ProperNounState.YES else [])}
+            readings = {reading for form in forms for reading in readings_by_form.get(form, [])}
+            certain_vowels = [i for i, letter in enumerate(macronized) if letter in _VOWELS and (mask >> i) & 1 == 0]
+            ruled_out_readings = {reading for reading in readings
+                                  if _rules_out(reading.spelling, macronized, certain_vowels)}
+            reference = f"{work_names[token['workId']]} {token['sourceReference']}"
+            for reading in ruled_out_readings:
+                ruled_out.by_reading.setdefault(reading, []).append(reference)
+            if readings and ruled_out_readings == readings:
+                ruled_out.every_reading.setdefault(macronized.lower(), []).append(reference)
+    return ruled_out
+
+
+def _log_by_token_count(references_by_key: Dict[str, List[str]]):
+    """Logs each key with how many tokens it has, the most first, and the references of the first three."""
+    for key, references in sorted(references_by_key.items(), key=lambda item: (-len(item[1]), item[0])):
+        logging.info(f"  {key}: {len(references)}, such as {', '.join(list(dict.fromkeys(references))[:3])}")
+
+
 def analyze(project_root: str):
     """Adds the analyses of the library's new words to the output files when every word gets one and they pass
     validation. Otherwise raises, and the output files stay as they were. Doesn't start while a publication of the
-    library didn't finish or left a file it replaced."""
+    library didn't finish or left a file it replaced. Then logs the readings that the macronizer's certain vowels rule
+    out."""
     raise_for_publication_leftovers(Path(project_root) / "output" / "library")
     output_dir = Path(project_root) / "output" / "morphological_analysis"
     with tempfile.TemporaryDirectory() as working_dir:
@@ -1245,6 +1336,22 @@ def analyze(project_root: str):
         analyzer.process_words()
         MorphologicalDataValidator(analyzer.inflections_file, analyzer.details_file).validate()
         publish(Path(working_dir), output_dir)
+
+    library_dir = Path(project_root) / "output" / "library"
+    files = ("works.csv", "unambiguous_macronizations.csv", "work_macronizations.csv")
+    if all((library_dir / name).exists() for name in files):
+        ruled_out = readings_ruled_out_by_certain_vowels(library_dir, output_dir / "morphological_details.csv",
+                                                         output_dir / "morphological_detail_inflections.csv")
+        logging.info(f"{sum(map(len, ruled_out.every_reading.values()))} word tokens have certain vowels that rule out "
+                     f"every reading, by their macronization")
+        _log_by_token_count(ruled_out.every_reading)
+        logging.info(f"{len(ruled_out.by_reading)} readings are ruled out by the certain vowels of some tokens, by "
+                     f"their spelling and lemma")
+        _log_by_token_count({f"{reading.spelling} ({reading.lemma})": references
+                             for reading, references in ruled_out.by_reading.items()})
+    else:
+        logging.warning(f"The macronizations weren't checked against the readings: {library_dir} has no "
+                        f"{', '.join(files)}")
 
 
 def main():

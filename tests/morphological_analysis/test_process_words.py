@@ -9,7 +9,9 @@ import requests
 from scripts.common import publishing
 from scripts.common.publishing import UNFINISHED_PUBLICATION, publish
 from scripts.morphological_analysis import process_morpheus_perseids_api
-from scripts.morphological_analysis.process_morpheus_perseids_api import MorphologicalAnalyzer, WordsWithoutAnalysis
+from scripts.morphological_analysis.process_morpheus_perseids_api import (
+    MorphologicalAnalyzer, Reading, RuledOutReadings, WordsWithoutAnalysis,
+)
 
 
 def _verb(stem, suffix, person="3rd"):
@@ -214,3 +216,50 @@ def test_an_entry_that_both_spellings_give_is_kept_once(monkeypatch, tmp_path):
     assert _items_of(monkeypatch, tmp_path, "hercules", {"hercules": [_NOUN_HERCULES],
                                                          "Hercules": [_NOUN_HERCULES]}) == [
         ("Hercules", "0", "Hercules")]
+
+
+def _library_of_one_certain_est(project_root):
+    """Writes a library of one token, est, whose macronization ēst is certain."""
+    library = project_root / "output" / "library"
+    library.mkdir(parents=True)
+    pd.DataFrame({"workId": ["w"], "idx": [0], "word": ["est"], "sourceReference": ["1.1"], "properNounState": [0],
+                  "tokenType": [1], "enclitic": [""], "expansion": [""]}).to_csv(library / "work_contents.csv",
+                                                                                  index=False)
+    (library / "works.csv").write_text("id,name\nw,Carmen\n", encoding="utf-8")
+    (library / "unambiguous_macronizations.csv").write_text("word,macronizedWord\nest,ēst\n", encoding="utf-8")
+    (library / "work_macronizations.csv").write_text("workId,idx,macronizedWord,uncertaintyBitMask\n",
+                                                     encoding="utf-8")
+
+
+def test_a_run_logs_the_readings_that_certain_vowels_rule_out(morpheus, tmp_path, caplog):
+    _library_of_one_certain_est(tmp_path)
+
+    with caplog.at_level("INFO"):
+        process_morpheus_perseids_api.analyze(str(tmp_path))
+
+    assert [record.getMessage() for record in caplog.records][-4:] == [
+        "1 word tokens have certain vowels that rule out every reading, by their macronization",
+        "  ēst: 1, such as Carmen 1.1",
+        "1 readings are ruled out by the certain vowels of some tokens, by their spelling and lemma",
+        "  est (sum1): 1, such as Carmen 1.1",
+    ]
+
+
+def test_the_log_lists_the_most_tokens_first_with_three_places_each(monkeypatch, morpheus, tmp_path, caplog):
+    _library_of_one_certain_est(tmp_path)
+    many = ["Carmen 1.1", "Carmen 1.1", "Carmen 1.2", "Carmen 1.3", "Carmen 1.4"]
+    monkeypatch.setattr(process_morpheus_perseids_api, "readings_ruled_out_by_certain_vowels",
+                        lambda *_: RuledOutReadings({"mihi": ["Carmen 1.1"], "ego": ["Carmen 1.2"], "tibi": many},
+                                                    {Reading("tibī", "tu"): many}))
+
+    with caplog.at_level("INFO"):
+        process_morpheus_perseids_api.analyze(str(tmp_path))
+
+    assert [record.getMessage() for record in caplog.records][-6:] == [
+        "7 word tokens have certain vowels that rule out every reading, by their macronization",
+        "  tibi: 5, such as Carmen 1.1, Carmen 1.2, Carmen 1.3",
+        "  ego: 1, such as Carmen 1.2",
+        "  mihi: 1, such as Carmen 1.1",
+        "1 readings are ruled out by the certain vowels of some tokens, by their spelling and lemma",
+        "  tibī (tu): 5, such as Carmen 1.1, Carmen 1.2, Carmen 1.3",
+    ]

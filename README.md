@@ -86,6 +86,9 @@ Morpheus and the macronizer keep running. It has no display: pass the aggregate 
   the next run analyzes all the new words again
 - Doesn't start while a publication of the aggregate into `output/library/` didn't finish, or left a `.<name>.old`
   file
+- Logs, after publishing, the readings that the macronizer's certain vowels rule out, as the text's `tibi` rules out
+  Morpheus's `tibī`: the word tokens whose every reading is ruled out, and each reading that some token rules out, with
+  how many tokens and where
 
 Theoretically you can create multiple scripts that use different services for morphological analysis,
 but only one version will be used with the current db schema
