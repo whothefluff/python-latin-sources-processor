@@ -44,6 +44,13 @@ KNOWN_ABBREVIATIONS: set[str] = {
     *NOMINA.keys()
 }
 
+# A text splits into words and single punctuation marks
+_SEGMENT_PATTERN = r'\w+|[^\w\s]'
+
+#: Each known abbreviation as the segments that the text splits it into, such as M and ' for M'
+_ABBREVIATION_SEGMENTS: FrozenSet[Tuple[str, ...]] = frozenset(
+    tuple(re.findall(_SEGMENT_PATTERN, abbreviation)) for abbreviation in KNOWN_ABBREVIATIONS)
+
 CAPITALIZATION_RESET_PUNCTUATION = ".!?:—"
 
 # Punctuation that ends a grammatical sentence for sentenceIdx/wordIdx purposes.
@@ -589,20 +596,20 @@ def split_text_into_segments(text: str) -> list:
     # Normalize spaces and split text by words and punctuation
     text = text.strip()
     # Split text including em dash and other punctuation
-    raw_segments = re.findall(r'\w+|[^\w\s]', text, re.UNICODE)
+    raw_segments = re.findall(_SEGMENT_PATTERN, text, re.UNICODE)
 
-    # Re-attach a trailing period to a known abbreviation ["C", "."] -> ["C."]
-    # so get_token_type's abbreviation check (which needs the period) can fire.
+    # Put a known abbreviation back together with its period, ["M", "'", "."] -> ["M'."], so that get_token_type
+    # finds it by the period
     segments = []
     i = 0
     while i < len(raw_segments):
-        current = raw_segments[i]
-        if (current in KNOWN_ABBREVIATIONS and i + 1 < len(raw_segments)
-                and raw_segments[i + 1] == "."):
-            segments.append(current + ".")
-            i += 2
+        abbreviation = next((pieces for pieces in _ABBREVIATION_SEGMENTS
+                             if raw_segments[i:i + len(pieces) + 1] == [*pieces, "."]), None)
+        if abbreviation is not None:
+            segments.append("".join(abbreviation) + ".")
+            i += len(abbreviation) + 1
         else:
-            segments.append(current)
+            segments.append(raw_segments[i])
             i += 1
 
     normalized_segments = [normalize_digraphs(s) for s in segments]

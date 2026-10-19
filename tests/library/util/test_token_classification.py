@@ -32,7 +32,7 @@ class TestGetTokenType:
     ):
         assert get_token_type(input_word, inherent_state=inherent_state) == 1
 
-    @pytest.mark.parametrize("input_abbrev", ["M.", "C.", "Ti."])
+    @pytest.mark.parametrize("input_abbrev", ["M.", "C.", "Ti.", "Sex.", "Post.", "M'."])
     def test_token_type_is_2_for_abbreviations(self, input_abbrev):
         assert get_token_type(input_abbrev) == TokenType.ABBREVIATION
 

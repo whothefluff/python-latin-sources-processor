@@ -487,6 +487,21 @@ def test_a_common_word_that_a_verse_starts_with_a_capital_inside_a_sentence_is_c
         ("et", 0, ProperNounState.NO), ("levis", 0, ProperNounState.NO), (".", 0, pd.NA)]
 
 
+def test_known_abbreviations_of_any_length_keep_their_period_and_end_no_sentence(monkeypatch, tmp_path):
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+    xml = _carmina('<div type="textpart" subtype="poem" n="1"><l n="1">Sex. Roscius, M\'. Curius, C. Gracchus.</l>'
+                   '</div>')
+
+    process_work.process_verse(xml, tmp_path, _CARMEN_WORK)
+
+    contents = pd.read_csv(tmp_path / "work_contents.csv")
+    assert list(zip(contents["word"], contents["tokenType"], contents["sentenceIdx"])) == [
+        ("Sex.", TokenType.ABBREVIATION, 0), ("Roscius", TokenType.WORD, 0), (",", TokenType.PUNCTUATION, 0),
+        ("M'.", TokenType.ABBREVIATION, 0), ("Curius", TokenType.WORD, 0), (",", TokenType.PUNCTUATION, 0),
+        ("C.", TokenType.ABBREVIATION, 0), ("Gracchus", TokenType.WORD, 0), (".", TokenType.PUNCTUATION, 0)]
+
+
 def test_a_list_of_words_gets_the_macronizations_of_its_words_and_not_of_the_et_between_them(monkeypatch):
     _macronizer_answers(monkeypatch, [("et", "et", 0), (" ", " ", 0), ("Levis", "Lēvis", 0), (" ", " ", 0),
                                       ("et", "et", 0), (" ", " ", 0), ("Venere", "Venere", 2)])

@@ -42,7 +42,8 @@ def get_token_type(raw_token: str, inherent_state: int | None = None) -> TokenTy
         # We default to the word type meaning that, if wrong, it has to be overwritten in the specific work processor
         if inherent_state is None:
             return TokenType.NUMERAL
-    if raw_token.endswith(".") and len(raw_token) <= 3:
+    # Whatever its length: only a known abbreviation keeps its period when the text is split
+    if raw_token.endswith("."):
         return TokenType.ABBREVIATION
     if raw_token.isalpha():
         return TokenType.WORD
