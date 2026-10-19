@@ -56,7 +56,8 @@ This script requires two local APIs to be running on your machine. Please refer 
     -   Provides macronization (vowel length) analysis.
     -   **Repository**: [whothefluff/latin-macronizer](https://github.com/whothefluff/latin-macronizer)
 
-The script expects the Morpheus API to be available at `http://localhost:1501` and the Macronizer API at `http://localhost:8001`.
+The script expects the Morpheus API at port 1500 and the Macronizer API at port 8001, on `localhost` or on the host
+named in `SERVICES_HOST`.
 
 ## Input
 
