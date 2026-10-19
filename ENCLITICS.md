@@ -31,9 +31,9 @@ The list is deliberately a subset of Morpheus's `LatinSuff` (`src/anal/checkstri
 - **`ce`, `cine`:** Morpheus lists huiusce, hōsce, hīsce, hicine… as forms of `hic` and `ille`.
 - **`n` (viden, satin, ain):** cutting the string gives the wrong host (viden is vidēsne, not vide + n). These need
   lemma overrides, not splitting.
-- **`pte` (suopte, suapte):** a candidate, not added yet. Morpheus has no such forms, so they get no analysis at all.
-  Add it when a text has them, with a guard in the fallback that only accepts possessive hosts (suō, suā, meō, meā, tuō,
-  tuā). `pte` isn't in `LatinSuff`, so the comment on `SPLIT_ENCLITICS` changes too.
+- **`pte` (suopte, suapte):** the same as `met`. L&S has an entry for the ending, but Morpheus lists suōpte and suāpte
+  as whole forms of suus (`nom.latin.bas`, next to suōmet and suāmet), so they get its reading without splitting
+  anything (Catullus 51.10). Other hosts (meōpte, tuōpte) would need an analysis added, not splitting.
 
 ## How detection works
 
