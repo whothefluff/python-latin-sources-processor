@@ -1,9 +1,17 @@
 # README for process_work.py
 
 This module processes the TEI XML source text of a work. What is specific to the work's edition is in the work's own
-script in `scripts/library/item/`, which runs this module with it: the letters that the edition prints, the
-corrections that its tokens need, its author's abbreviations, and its about and image files. Phaedrus's Fables are
-`process_phaedrus.py`.
+script in `scripts/library/item/`, which runs this module with it: the edition's CTS URN, the letters that the edition
+prints, the corrections that its tokens need, its author's abbreviations, and its about and image files. Phaedrus's
+Fables are `process_phaedrus.py`.
+
+The ids are the same on every run, so that a run changes only the rows whose data changed: the work's comes from its
+edition's URN (`urn:cts:latinLit:phi0975.phi001.perseus-lat2`), which must be the edition's `n` when it has one, its
+author's from the URN's textgroup (`urn:cts:latinLit:phi0975`), which the author's other works share, and each
+subdivision's from the work's id and the type and count of each subdivision down to it (`BOOK 0/POEM 3/VERS 12`).
+So a subdivision's id follows its place, not its edition label: a verse added or removed moves the ids of the later
+subdivisions of its type next to it, and of what they hold. Another edition of a work is another work, with ids of its
+own.
 
 ## Overview
 

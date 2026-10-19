@@ -57,9 +57,10 @@ Morpheus and the macronizer keep running. It has no display: pass the aggregate 
   `work_contents.csv`, `work_content_subdivisions.csv`, `authors.csv` or `authors_and_works.csv`. A directory with any
   of the ten files is a work's. Otherwise it saves all of the files or none, with their columns in the order that the
   reader imports them by position
-- Refuses to save when a work is found twice (already aggregated, or in two directories), since every run of a work's
-  script gives it new ids
-- Lists an author of several works once, taking authors with the same name as one, under the id of the first work in
+- Refuses to save when a work is found twice by its author and name (already aggregated, in two directories, or in two
+  editions), or by its id (an edition processed again under another name)
+- Lists an author of several works once, taking authors with the same name as one. The works of one CTS textgroup give
+  their author the same id, and an author of another textgroup with the same name takes the id of the first work in
   path order. Refuses to save when that author's about, image or abbreviations differ from one work to another, or when
   an author id has more than one name
 - Gives a certain token its own macronization in `work_macronizations.csv`, with mask 0, when the reader would look it

@@ -98,7 +98,7 @@ def find_valid_work_dirs(base_dir):
 
 def works_of(works_df, authors_df, authors_and_works_df):
     """Return each work as (its author names, its name).
-    ID not used because it changes on every run."""
+    ID not used because two editions of a work have their own."""
     author_names = dict(zip(authors_df['id'], authors_df['name']))
     authors_by_work = {}
     for author_id, work_id in zip(authors_and_works_df['authorId'], authors_and_works_df['workId']):
@@ -114,6 +114,13 @@ def find_repeated_works(dfs_by_source):
              for dfs in dfs_by_source if all(f in dfs for f in file_names)
              for work in works_of(*(dfs[f] for f in file_names))]
     return sorted({work for work in works if works.count(work) > 1})
+
+
+def find_repeated_work_ids(dfs_by_source: List[Dict[str, pd.DataFrame]]) -> List[str]:
+    """Returns the work ids found more than once across the library files, such as an edition processed again under
+    another name, which keeps its id"""
+    work_ids = [cast(str, work_id) for dfs in dfs_by_source if 'works.csv' in dfs for work_id in dfs['works.csv']['id']]
+    return sorted({work_id for work_id in work_ids if work_ids.count(work_id) > 1})
 
 
 def merge_authors(authors: pd.DataFrame, authors_and_works: pd.DataFrame,
@@ -241,11 +248,18 @@ def aggregate(base_dir: Path, output_dir: Path = OUTPUT_DIR):
     # Library files by source, to find works aggregated twice
     dfs_by_source = read_library_files(output_dir, valid_work_dirs)
 
-    # check necessary because every run of a work script creates new ids
+    # by author and name, so that a work in two editions, whose ids differ, is found too
     repeated_works = find_repeated_works(dfs_by_source)
     if repeated_works:
         raise ValueError(f"Works found more than once: {repeated_works}. Nothing was saved. To process a work again, "
                          f"delete the aggregate files in {output_dir} and aggregate every work")
+
+    # and by id, which an edition keeps under another name
+    repeated_work_ids = find_repeated_work_ids(dfs_by_source)
+    if repeated_work_ids:
+        raise ValueError(f"Work ids found more than once: {repeated_work_ids}. Nothing was saved. An edition keeps its "
+                         f"id whatever its name: keep one directory for it, and to process it again, delete the "
+                         f"aggregate files in {output_dir} and aggregate every work")
 
     authors_that_differ = find_authors_that_differ(dfs_by_source)
     if authors_that_differ:

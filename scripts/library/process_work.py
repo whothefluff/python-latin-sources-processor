@@ -60,8 +60,11 @@ SENTENCE_TERMINATORS = ".!?"
 
 
 class WorkConfiguration(NamedTuple):
-    """The settings of a work's processing that depend on its edition: how it cites its text, the letters that it
-    prints, the corrections that its tokens need, and its author's abbreviations, about texts and image"""
+    """The settings of a work's processing that depend on its edition: its URN, how it cites its text, the letters that
+    it prints, the corrections that its tokens need, and its author's abbreviations, about texts and image"""
+    #: The edition's CTS URN, such as urn:cts:latinLit:phi0975.phi001.perseus-lat2, which gives the work, its author
+    #: and its subdivisions their ids
+    edition_urn: str
     #: The TEI subtypes of the divisions whose n is part of their tokens' references, as the edition cites them
     cited_division_subtypes: Tuple[str, ...]
     #: The subdivision types of the poems whose n isn't a poem's, such as prologus
@@ -588,8 +591,24 @@ def _different_macronizations_depending_on_status(words_state_2: Set[str]) -> Tu
     return uncertain, cap_unknown
 
 
-def generate_uuid():
-    return str(uuid.uuid4())
+#: An edition's CTS URN: its namespace and textgroup, then its work and version
+_EDITION_URN = re.compile(r'(urn:cts:[^:]+:[^.:]+)\.[^.:]+\.[^.:]+')
+
+
+class WorkIds(NamedTuple):
+    work_id: str
+    author_id: str
+
+
+def ids_of(edition_urn: str) -> WorkIds:
+    """Returns the ids of a work and its author, the same on every run: the work's from its edition's URN, and the
+    author's from the URN's textgroup, which the author's other works share, such as urn:cts:latinLit:phi0975 for
+    urn:cts:latinLit:phi0975.phi001.perseus-lat2. Raises when it isn't an edition's URN."""
+    urn = _EDITION_URN.fullmatch(edition_urn)
+    if urn is None:
+        raise ValueError(f"'{edition_urn}' isn't an edition's CTS URN, such as "
+                         f"urn:cts:latinLit:phi0975.phi001.perseus-lat2.")
+    return WorkIds(str(uuid.uuid5(uuid.NAMESPACE_URL, edition_urn)), str(uuid.uuid5(uuid.NAMESPACE_URL, urn.group(1))))
 
 
 def split_text_into_segments(text: str) -> list:
@@ -640,48 +659,52 @@ class _Numbering:
     next_block_starts_sentence: bool = False
     supplementary_counts: Dict[str, int] = field(default_factory=lambda: {"NOTE": 0, "GAP": 0, "ABBR": 0})
 
-    def add_parts(self, parts: Sequence[Division | TextBlock], parent: Division | None, parent_node: str | None):
+    def node_of(self, path: str | None) -> str | None:
+        """Returns the id of the subdivision at the path, the type and count of each subdivision down to it, such as
+        BOOK 0/POEM 3/VERS 12: the same on every run, and in no other work"""
+        return None if path is None else str(uuid.uuid5(uuid.UUID(self.work_id), path))
+
+    def add_parts(self, parts: Sequence[Division | TextBlock], parent: Division | None, parent_path: str | None):
         """Adds the rows of the parts of a division, or of the edition, each counted among its siblings of the same
         type"""
         counts: Dict[str, int] = defaultdict(int)
         for part in parts:
             cnt = counts[part.typ]
             counts[part.typ] += 1
+            path = f'{parent_path}/{part.typ} {cnt}' if parent_path else f'{part.typ} {cnt}'
             if isinstance(part, Division):
-                self.add_division(part, cnt, parent_node)
+                self.add_division(part, cnt, path, parent_path)
             else:
-                self.add_block(part, cnt, parent_node)
+                self.add_block(part, cnt, path, parent_path)
             if parent is not None and parent.typ == 'SPCH' and part.typ == 'TITL':
                 self.next_block_starts_sentence = True  # the speaker isn't part of what is said
 
-    def add_division(self, division: Division, cnt: int, parent_node: str | None):
+    def add_division(self, division: Division, cnt: int, path: str, parent_path: str | None):
         title = division.title
-        node = generate_uuid()
         from_index = self.next_index
-        row = [self.work_id, node, division.typ, cnt, title.printed_text if title else None, parent_node, from_index,
-               None, division.edition_label]
+        row = [self.work_id, self.node_of(path), division.typ, cnt, title.printed_text if title else None,
+               self.node_of(parent_path), from_index, None, division.edition_label]
         self.subdivisions.append(row)
         if division.typ in ('POEM', 'PROL', 'EPIL'):
             self.next_block_starts_sentence = True
-        self.add_parts(division.parts, division, node)
+        self.add_parts(division.parts, division, path)
         to_index = self.next_index - 1  # its last token
         row[7] = to_index
         for note in division.notes:
             self.add_supplementary("NOTE", from_index, to_index, note)
         print(f'Subdivision: {row}')
 
-    def add_block(self, block: TextBlock, cnt: int, parent_node: str | None):
+    def add_block(self, block: TextBlock, cnt: int, path: str, parent_path: str | None):
         segments: list = [segment for piece in block.pieces for segment in
                           ([None] if isinstance(piece, LostPassage) else split_text_into_segments(piece))]
-        node = generate_uuid()
         first, last = self.next_index, self.next_index + len(segments) - 1
         if block.deleted:
             self.add_supplementary("NOTE", first, last, 'marked for deletion')
         for position, segment in enumerate(segments):
             if segment is None:
                 self.add_supplementary("GAP", first + position, first + position, 'lost')
-        self.subdivisions.append([self.work_id, node, block.typ, cnt, block.text or None, parent_node, first, last,
-                                  block.edition_label])
+        self.subdivisions.append([self.work_id, self.node_of(path), block.typ, cnt, block.text or None,
+                                  self.node_of(parent_path), first, last, block.edition_label])
         self.lines_for_macronizer.append(' '.join(segment for segment in segments if segment))
         starts_new_sentence = self.starts_new_sentence or self.next_block_starts_sentence or block.typ == 'TITL'
         self.next_block_starts_sentence = False
@@ -716,7 +739,12 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
     work_abbreviations_data = []
     authors_and_works_data = []
 
-    work_id = generate_uuid()
+    # Perseus gives some editions their URN as n
+    edition = root.find('tei:text/tei:body/tei:div[@type="edition"]', namespaces)
+    edition_n = edition.get('n') if edition is not None else None
+    if edition_n is not None and edition_n != work.edition_urn:
+        raise ValueError(f"The edition is {edition_n}, but its configuration says {work.edition_urn}.")
+    work_id, author_id = ids_of(work.edition_urn)
     title_element = root.find('.//tei:title[@xml:lang="lat"]', namespaces)
     work_name = title_element.text if title_element is not None and title_element.text else 'Unknown Title'
     work_data = get_work_data(work_id, work_name, work)
@@ -725,7 +753,6 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
 
     author_element = root.find('.//tei:author', namespaces)
     author_name = author_element.text if author_element is not None and author_element.text else 'Unknown Author'
-    author_id = generate_uuid()
     author_data = get_author_data(author_id, author_name, work)
     authors_data.append(author_data)
     print(f'Author: {author_id}, {author_name}')

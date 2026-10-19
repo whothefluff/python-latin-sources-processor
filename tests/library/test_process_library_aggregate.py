@@ -118,6 +118,23 @@ def test_aggregating_the_same_works_again_raises_and_saves_nothing(aggregated):
     assert _files(aggregated) == before
 
 
+@pytest.mark.parametrize('runs', [['.'], ['carmina_prima', 'carmina_prima_emendata']],
+                         ids=['both at once', 'one after the other'])
+def test_an_edition_processed_again_under_another_name_raises_and_nothing_is_saved(tmp_path, runs):
+    works = _copy_of_both_works(tmp_path)
+    shutil.copytree(works / 'carmina_prima', works / 'carmina_prima_emendata')
+    _replace_rows(works / 'carmina_prima_emendata' / 'works.csv',
+                  [(CARMINA_PRIMA_ID, 'Carmina Prima Emendata', 'The first invented work.', 'uv', 'UV', 'i', 'I')])
+    *earlier_runs, last_run = runs
+    _aggregate_in_turn(works, earlier_runs, tmp_path / 'aggregate')
+    (tmp_path / 'aggregate').mkdir(exist_ok=True)
+    before = _files(tmp_path / 'aggregate')
+
+    with pytest.raises(ValueError, match=re.escape(f"Work ids found more than once: ['{CARMINA_PRIMA_ID}']")):
+        aggregate(works / last_run, tmp_path / 'aggregate')
+    assert _files(tmp_path / 'aggregate') == before
+
+
 def test_the_aggregate_keeps_the_reader_primary_keys_unique(aggregated):
     repeated = {file_name: _read(aggregated, file_name)[key].duplicated().sum()
                 for file_name, key in READER_PRIMARY_KEYS.items()}

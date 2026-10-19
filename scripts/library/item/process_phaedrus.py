@@ -49,6 +49,7 @@ def project_root( ):
 
 # noinspection SpellCheckingInspection
 PHAEDRUS = WorkConfiguration(
+    edition_urn='urn:cts:latinLit:phi0975.phi001.perseus-lat2',
     cited_division_subtypes=('book', 'poem'),
     poem_types_by_n={'prologus': 'PROL', 'epilogus': 'EPIL'},
     letter_convention=LETTER_CONVENTION,

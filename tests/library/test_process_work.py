@@ -16,6 +16,7 @@ _CARMEN_FILES = Path(__file__).parent / 'fixtures' / 'carmen'
 # u and v apart, i for both i and j
 _CARMEN_LETTERS = LetterConvention(uv_lowercase="uv", uv_capitals="UV", ij_lowercase="i", ij_capitals="I")
 _CARMEN_WORK = process_work.WorkConfiguration(
+    edition_urn='urn:cts:latinLit:fict001.fict001.fict-lat1',
     cited_division_subtypes=('book', 'poem'), poem_types_by_n={},
     letter_convention=_CARMEN_LETTERS, token_overrides={}, expansions={}, proper_noun_overrides={},
     author_abbreviations=('Fict.',), work_about_file=str(_CARMEN_FILES / 'work_about.txt'),
@@ -771,6 +772,67 @@ def test_a_work_gets_the_letters_corrections_author_and_about_texts_of_its_confi
     assert _rows(tmp_path / "authors.csv", "id") == [("Fictor", "An invented poet.", "Zml4dHVyZQ==")]
     assert _rows(tmp_path / "author_abbreviations.csv", "authorId") == [(0, "Fict.")]
     assert pd.read_csv(tmp_path / "work_contents.csv")["properNounState"][0] == ProperNounState.YES
+
+
+# The ids of urn:cts:latinLit:fict001.fict001.fict-lat1 and of its textgroup, urn:cts:latinLit:fict001
+_CARMEN_ID = "4851184b-35d9-5a99-b475-a9d4756e8150"
+_FICTOR_ID = "62fa5d21-59f8-5bd2-b3b3-943812c2170b"
+
+
+def test_a_work_its_author_and_its_subdivisions_get_the_ids_of_its_edition_urn(carmen):
+    assert pd.read_csv(carmen / "works.csv")["id"].tolist() == [_CARMEN_ID]
+    assert pd.read_csv(carmen / "authors.csv")["id"].tolist() == [_FICTOR_ID]
+    assert pd.read_csv(carmen / "authors_and_works.csv").values.tolist() == [[_FICTOR_ID, _CARMEN_ID]]
+    assert set(pd.read_csv(carmen / "work_contents.csv")["workId"]) == {_CARMEN_ID}
+    subdivisions = pd.read_csv(carmen / "work_content_subdivisions.csv", keep_default_na=False)
+    assert list(zip(subdivisions["workId"], subdivisions["node"], subdivisions["typ"], subdivisions["parent"])) == [
+        (_CARMEN_ID, "91848cbb-a219-599f-9971-33038bc971dd", "BOOK", ""),
+        (_CARMEN_ID, "89154572-d19f-5af8-81bb-948d2d7de0bb", "POEM", "91848cbb-a219-599f-9971-33038bc971dd"),
+        (_CARMEN_ID, "21706108-ebcd-5193-8be2-78bf983d4249", "VERS", "89154572-d19f-5af8-81bb-948d2d7de0bb"),
+        (_CARMEN_ID, "7ddd14b0-28f7-5c6e-9b57-6b4ff5889434", "VERS", "89154572-d19f-5af8-81bb-948d2d7de0bb"),
+        (_CARMEN_ID, "40c92b81-83b4-55d2-8a1d-89047373cbfd", "VERS", "89154572-d19f-5af8-81bb-948d2d7de0bb"),
+    ]
+
+
+def test_two_runs_of_a_work_write_the_same_files(monkeypatch, tmp_path):
+    _publish_carmen(monkeypatch, tmp_path / "first")
+    _publish_carmen(monkeypatch, tmp_path / "second")
+
+    assert {path.name: path.read_bytes() for path in (tmp_path / "first").iterdir()} == {
+        path.name: path.read_bytes() for path in (tmp_path / "second").iterdir()}
+
+
+def test_the_works_of_one_author_share_the_authors_id():
+    assert [process_work.ids_of(urn) for urn in ("urn:cts:latinLit:phi0975.phi001.perseus-lat2",
+                                                 "urn:cts:latinLit:phi0975.phi001.perseus-lat1",
+                                                 "urn:cts:latinLit:phi0472.phi001.perseus-lat2")] == [
+        ("e7276bd8-fcd0-5676-8e6d-ab421bbfd713", "4a682258-d132-5d4a-bd4b-16c022598baf"),
+        ("1ca63498-c4dc-5b15-8030-e9a769a4e27e", "4a682258-d132-5d4a-bd4b-16c022598baf"),
+        ("12dfa26f-8420-5a3f-b60a-791240c6d25c", "b2a008fd-7303-5122-91ee-4488ede21137"),
+    ]
+
+
+@pytest.mark.parametrize("urn", ["urn:cts:latinLit:phi0975.phi001", "urn:cts:latinLit:phi0975.phi001.perseus-lat2:1.1",
+                                 "phi0975.phi001.perseus-lat2"], ids=["a work's", "a passage's", "no URN"])
+def test_a_configuration_without_an_editions_urn_raises(monkeypatch, tmp_path, urn):
+    with pytest.raises(ValueError, match="isn't an edition's CTS URN"):
+        _process_carmen(monkeypatch, tmp_path, work=_CARMEN_WORK._replace(edition_urn=urn))
+
+
+@pytest.mark.parametrize("n, error", [("urn:cts:latinLit:fict001.fict001.fict-lat1", None),
+                                      ("urn:cts:latinLit:fict001.fict001.fict-lat2",
+                                       "The edition is urn:cts:latinLit:fict001.fict001.fict-lat2, but its "
+                                       "configuration says urn:cts:latinLit:fict001.fict001.fict-lat1.")],
+                         ids=["the configuration's", "another"])
+def test_an_edition_with_a_urn_must_have_its_configurations(monkeypatch, tmp_path, n, error):
+    xml = _CARMEN.replace('<div type="edition">', f'<div type="edition" n="{n}">')
+
+    if error is None:
+        _process_carmen(monkeypatch, tmp_path, xml=xml)
+        assert pd.read_csv(tmp_path / "works.csv")["id"].tolist() == [_CARMEN_ID]
+    else:
+        with pytest.raises(ValueError, match=re.escape(error)):
+            _process_carmen(monkeypatch, tmp_path, xml=xml)
 
 
 def test_a_work_that_fails_validation_raises_and_leaves_the_published_files_as_they_were(monkeypatch, tmp_path):
