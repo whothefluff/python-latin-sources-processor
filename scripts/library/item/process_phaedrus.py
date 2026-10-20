@@ -18,20 +18,12 @@ WORK_SPECIFIC_EXPANSIONS: Dict[int, str] = {
     # 107: "ūnum", # "I" used as an accusative numeral at fragment 107
 }
 
+# An override is for a word whose printed case looks it up wrong: tartareo, the adjective Tartareus printed lowercase,
+# which L&S and Morpheus have only capitalized.
+# A personification (Sol, Religio, Dolus) needs none: a capital inside a sentence on a common word makes it either,
+# which finds the common word and keeps the capital
 WORK_SPECIFIC_PROPER_NOUN_OVERRIDES: Dict[int, ProperNounState | None] = {
-    646: ProperNounState.NO, # 'Sol' for 'sol'
-    2236: ProperNounState.NO, # 'Religioni' for 'religioni'
-    6731: ProperNounState.NO, # 'Particulonem' for 'particulonem'
-    6798: ProperNounState.NO, # 'Particulo' for 'Particulo'
     7626: ProperNounState.YES, # 'tartareo' for 'Tartareo': the adjective Tartareus, which this edition prints lowercase for some reason
-    8016: ProperNounState.NO, # 'Religio' for 'religio'
-    9659: ProperNounState.NO, # 'Particulonem' for 'particulonem'
-    10829: ProperNounState.NO, # 'Temporis' for 'temporis'
-    11224: ProperNounState.NO, # 'Dolus' for 'dolus'
-    11238: ProperNounState.NO, # 'Veritatem' for 'veritatem'
-    11309: ProperNounState.NO, # 'Dolus' for 'dolus'
-    11345: ProperNounState.NO, # 'Veritas' for 'veritas'
-    11526: ProperNounState.NO, # 'Religio' for 'religio'
     13903: ProperNounState.NO, # Terraneola is not found in L&S, but it's just from terra + -olus
     13916: ProperNounState.NO, # terraneolam is not found in L&S, but it's just from terra + -olus
 }
