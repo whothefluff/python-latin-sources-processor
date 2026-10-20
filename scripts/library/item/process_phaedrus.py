@@ -23,6 +23,7 @@ WORK_SPECIFIC_PROPER_NOUN_OVERRIDES: Dict[int, ProperNounState | None] = {
     2236: ProperNounState.NO, # 'Religioni' for 'religioni'
     6731: ProperNounState.NO, # 'Particulonem' for 'particulonem'
     6798: ProperNounState.NO, # 'Particulo' for 'Particulo'
+    7626: ProperNounState.YES, # 'tartareo' for 'Tartareo': the adjective Tartareus, which this edition prints lowercase for some reason
     8016: ProperNounState.NO, # 'Religio' for 'religio'
     9659: ProperNounState.NO, # 'Particulonem' for 'particulonem'
     10829: ProperNounState.NO, # 'Temporis' for 'temporis'
