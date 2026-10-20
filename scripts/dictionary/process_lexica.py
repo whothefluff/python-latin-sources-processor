@@ -15,6 +15,10 @@ from scripts.dictionary.process_lexica_aux.pos_tags import pos_tags
 
 SUBSTITUTE_ABBREVIATIONS = True
 
+#: The XML has no URN, so we assign one based on its path in the Perseus lexica repository:
+#: CTS_XML_TEI/perseus/pdllex/lat/ls/lat.ls.perseus-eng2.xml
+LEWIS_AND_SHORT_URN = "urn:cts:pdllex:lat.ls.perseus-eng2"
+
 # noinspection SpellCheckingInspection
 PART_OF_SPEECH_BY_LEMMAS = {
     "Itys": "noun",
@@ -228,6 +232,11 @@ def part_of_speech_from_hi_tag( entry ):
     return ""
 
 
+def dictionary_id_of( urn: str ) -> str:
+    """Returns a stable dictionary ID derived from its URN."""
+    return str( uuid.uuid5( uuid.NAMESPACE_URL, urn ) )
+
+
 def file( ):
     file_name = "lat.ls.perseus-eng2.xml"
     script_dir = os.path.dirname( __file__ )
@@ -436,7 +445,7 @@ def parse_xml_and_write_csv( input_file, output_dir ):
     xml_bytes = xml_content.encode( "utf-8" )
     xml_file = io.BytesIO( xml_bytes )
 
-    dictionary_id = str( uuid.uuid4( ) )
+    dictionary_id = dictionary_id_of( LEWIS_AND_SHORT_URN )
 
     with open( dictionaries_file, "w", newline = "", encoding = "utf-8" ) as f:
         writer = csv.writer( f, lineterminator="\n" )
