@@ -257,6 +257,42 @@ def test_a_capitalized_headword_gains_only_the_readings_that_the_lowercase_answe
         [("Hercules", "1", "noun"), ("hercules", "0", "interjection")])
 
 
+def test_a_stem_that_differs_only_in_case_gives_no_second_reading(monkeypatch, tmp_path):
+    # Hymenaeus has a stem for the god and one for the song and the wedding
+    def noun(stem):
+        return {"term": {"stem": {"$": stem}, "suff": {"$": "us"}}, "pofs": {"$": "noun"}, "decl": {"$": "2nd"},
+                "case": {"$": "nominative"}, "gend": {"$": "masculine"}, "num": {"$": "singular"},
+                "stemtype": {"$": "us_i"}}
+
+    hymenaeus = {"hdwd": {"$": "Hymenaeus"}, "pofs": {"$": "noun"}, "decl": {"$": "2nd"}, "gend": {"$": "masculine"}}
+
+    assert _written(monkeypatch, tmp_path, "Hymenaeus", {
+        "hymenaeus": [{"dict": hymenaeus, "infl": noun("hyme^nae")}],
+        "Hymenaeus": [{"dict": hymenaeus, "infl": [noun("Hyme^nae"), noun("hyme^nae")]}]}) == (
+        [("Hymenaeus", "0", "Hymenaeus")],
+        [("Hymenaeus", "0", "noun")])
+
+
+def test_a_reading_that_another_headword_has_is_still_new_under_its_own(monkeypatch, tmp_path):
+    # A constructed answer: a common noun of the 4th declension, and a name spelled like it whose genitive the
+    # lowercase answer has too, so that only the case of their stems tells their nominatives apart
+    def noun(stem, suffix, case):
+        return {"term": {"stem": {"$": stem}, "suff": {"$": suffix}}, "pofs": {"$": "noun"}, "decl": {"$": "4th"},
+                "case": {"$": case}, "gend": {"$": "masculine"}, "num": {"$": "singular"},
+                "stemtype": {"$": "us_us"}}
+
+    def entry(headword, *inflections):
+        return {"dict": {"hdwd": {"$": headword}, "pofs": {"$": "noun"}, "decl": {"$": "4th"},
+                         "gend": {"$": "masculine"}},
+                "infl": list(inflections)}
+
+    assert _items_of(monkeypatch, tmp_path, "fluctus", {
+        "fluctus": [entry("fluctus", noun("fluct", "us", "nominative")),
+                    entry("Fluctus2", noun("fluct", "u_s", "genitive"))],
+        "Fluctus": [entry("Fluctus2", noun("Fluct", "us", "nominative"))]}) == [
+        ("Fluctus", "1", "Fluctus2"), ("Fluctus", "2", "Fluctus2"), ("fluctus", "0", "fluctus")]
+
+
 def test_a_lowercase_headword_has_only_the_readings_of_the_lowercase_answer(monkeypatch, tmp_path):
     adjective = {"term": {"stem": {"$": "nov"}, "suff": {"$": "ae"}}, "pofs": {"$": "adjective"},
                  "decl": {"$": "1st & 2nd"}, "case": {"$": "nominative"}, "gend": {"$": "feminine"},
