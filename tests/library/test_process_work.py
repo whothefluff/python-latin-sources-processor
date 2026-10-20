@@ -196,6 +196,22 @@ def test_a_word_that_morpheus_knows_whole_only_as_a_name_is_a_name(monkeypatch):
                                                                                                ProperNounState.YES)
 
 
+def test_an_adjective_from_a_name_that_the_edition_prints_lowercase_is_common(monkeypatch):
+    # Phaedrus 4.6.10, tartareo specu: Morpheus has only the proper adjective Tartareus, under its capitalized stem
+    _morpheus(monkeypatch, {"Tartareo": _entry("Tartareus", ("Tartare^", "o_"))})
+
+    assert process_work.determine_proper_noun_state("tartareo", False, False, _CARMEN_LETTERS) == (
+        ProperNounState.YES, ProperNounState.NO)
+
+
+def test_a_common_word_with_a_capital_inside_a_sentence_is_a_proper_use_of_it(monkeypatch):
+    # A personification, as Phaedrus's Religio at 4.11.4
+    _morpheus(monkeypatch, {"religio": _entry("religio", ("re^li^gi^", "o_"))})
+
+    assert process_work.determine_proper_noun_state("Religio", False, False, _CARMEN_LETTERS) == (
+        ProperNounState.NO, ProperNounState.EITHER)
+
+
 def test_a_word_that_morpheus_knows_whole_in_one_case_is_never_asked_for_without_an_ending(monkeypatch):
     asked = _morpheus(monkeypatch, _IOVE)
 
@@ -484,7 +500,7 @@ def test_a_common_word_that_a_verse_starts_with_a_capital_inside_a_sentence_is_c
 
     contents = pd.read_csv(tmp_path / "work_contents.csv", dtype={"properNounState": "Int64"})
     assert list(zip(contents["word"], contents["sentenceIdx"], contents["properNounState"])) == [
-        ("Roma", 0, pd.NA), ("est", 0, ProperNounState.NO), ("Levis", 0, ProperNounState.NO),
+        ("Roma", 0, ProperNounState.EITHER), ("est", 0, ProperNounState.NO), ("Levis", 0, ProperNounState.NO),
         ("et", 0, ProperNounState.NO), ("levis", 0, ProperNounState.NO), (".", 0, pd.NA)]
 
 
@@ -589,7 +605,10 @@ def test_verses_that_the_edition_numbers_with_a_gap_and_a_word_that_morpheus_doe
     verses = subdivisions[subdivisions["typ"] == "VERS"]
     assert list(zip(verses["cnt"], verses["editionLabel"])) == [(0, "1"), (1, "2"), (2, "4"), (3, "5")]
     assert [record.getMessage() for record in caplog.records if record.levelno >= logging.ERROR] == []
-    assert "'Fictor' at index 15" in caplog.text
+    assert "'Fictor' is morphologically un-analyzable" in caplog.text
+    contents = pd.read_csv(tmp_path / "work_contents.csv", dtype={"properNounState": "Int64"})
+    # Without an analysis, at the start of a verse, the capital may be the verse's
+    assert list(contents.loc[contents["word"] == "Fictor", "properNounState"]) == [ProperNounState.EITHER]
 
 
 def test_a_word_that_morpheus_cant_be_asked_about_raises_instead_of_getting_no_state(monkeypatch, tmp_path):
@@ -716,7 +735,8 @@ def test_books_poems_prologues_epilogues_and_verses_have_an_edition_label_and_ot
 
 
 @pytest.mark.parametrize("word, token_type, proper_noun_state, errors", [
-    ("Fictor", TokenType.WORD, None, []),
+    ("Fictor", TokenType.WORD, ProperNounState.EITHER, []),
+    ("Fictor", TokenType.WORD, None, ["Found 1 words without a properNounState: 'Fictor' at index 0"]),
     ("C.", TokenType.ABBREVIATION, ProperNounState.YES, []),
     ("C.", TokenType.ABBREVIATION, None, ["Found 1 abbreviations whose properNounState isn't 1: 'C.' at index 0"]),
     ("C.", TokenType.ABBREVIATION, ProperNounState.NO,
@@ -731,7 +751,7 @@ def test_books_poems_prologues_epilogues_and_verses_have_an_edition_label_and_ot
      ["Found 1 non-word tokens with a properNounState that should be NULL."]),
     ("Sex.", TokenType.OTHER, ProperNounState.YES,
      ["Found 1 non-word tokens with a properNounState that should be NULL."]),
-], ids=["a word without a state", "an abbreviation", "an abbreviation without a state",
+], ids=["a word without an analysis", "a word without a state", "an abbreviation", "an abbreviation without a state",
         "an abbreviation as a common word", "a numeral", "a numeral as a name", "punctuation",
         "punctuation with a state", "an editorial mark with a state", "another token with a state"])
 def test_abbreviations_numerals_and_other_tokens_have_their_proper_noun_states(word, token_type, proper_noun_state,

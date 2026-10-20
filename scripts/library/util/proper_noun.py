@@ -27,24 +27,18 @@ def compute_context_aware_state(
         inherent_state: ProperNounState | None,
         word_is_capitalized: bool,
         is_forgivable_context: bool,
-) -> ProperNounState | None:
-    """Refines the inherent state using sentence-start/capitalization data."""
-    if word_is_capitalized:
-        if inherent_state == ProperNounState.NO:  # Common word like "Fabula"
-            # Titles and such are editorial choice; otherwise typo or similar
-            return ProperNounState.NO if is_forgivable_context else None
-        elif inherent_state == ProperNounState.YES:  # Proper noun like "Caesar"
-            return ProperNounState.YES
-        elif inherent_state == ProperNounState.EITHER:  # Dubious word like "Venere" (venio, Venus)
-            # Capitalized mid-sentence is a proper noun; at start it's uncertain.
-            return ProperNounState.EITHER if is_forgivable_context else ProperNounState.YES
-        return None
-    else:
-        if inherent_state == ProperNounState.NO:  # "fabula"
-            return ProperNounState.NO
-        elif inherent_state == ProperNounState.YES:  # "caesar"
-            # Probably a typo or similar
-            return None
-        elif inherent_state == ProperNounState.EITHER:  # "venere"
-            return ProperNounState.NO
-        return None
+) -> ProperNounState:
+    """Refines the inherent state with the word's case and position, as editions use them.
+
+    A lowercase word is common, whatever Morpheus has for it. A capital inside a sentence makes a word proper; when
+    Morpheus has only a common word for it, the capital is a proper use of that word, such as a personification. Where
+    a verse or a sentence starts, or after a capitalized word, the capital may be the position's: then the analyses
+    decide, and without any, the word can be either."""
+    if not word_is_capitalized:
+        # "fabula", "venere" (venio, not Venus), and "tartareo", an adjective from a name printed lowercase
+        return ProperNounState.NO
+    if is_forgivable_context:
+        # "Fabula", "Caesar", "Venere" (venio or Venus), and a word without an analysis
+        return ProperNounState.EITHER if inherent_state is None else inherent_state
+    # "Religio" (religio), "Caesar", "Venere" (Venus), and a name without an analysis
+    return ProperNounState.EITHER if inherent_state == ProperNounState.NO else ProperNounState.YES

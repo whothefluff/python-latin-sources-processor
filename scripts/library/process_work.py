@@ -323,8 +323,9 @@ def determine_proper_noun_state(word_in_text: str, is_sentence_start: bool, prev
 
     It handles consecutive capitalized words as a sequence, aligning with *macronizer* logic.
 
-    Returns: A tuple of (inherent_state, context_aware_state) or None for non-alphabetic
-    tokens or words that cannot be analyzed at all
+    Returns: A tuple of (inherent_state, context_aware_state), both None for non-alphabetic
+    tokens. The inherent state is None for a word that cannot be analyzed at all; a word's
+    context-aware state is never None
     """
     if not word_in_text or not word_in_text.isalpha():
         return None, None
@@ -1214,15 +1215,13 @@ def validate_p_tags(errors, xml_string, subdivisions):
 
 
 def check_proper_noun_states(errors, work_contents_df):
-    """Every abbreviation must have the properNounState 1, every numeral 0, and punctuation, editorial marks and other
-    tokens none. A word without one is a word that Morpheus has no analysis for, which the reader looks up in both
-    cases: logged for review."""
+    """Every word must have a properNounState, which its case and position give it even without an analysis, every
+    abbreviation 1, every numeral 0, and punctuation, editorial marks and other tokens none."""
     words = work_contents_df[work_contents_df['tokenType'] == int(TokenType.WORD)]
     unknown = words[words['properNounState'].isnull()]
     if not unknown.empty:
-        logging.warning("Found %s words without a properNounState, which Morpheus has no analysis for: %s",
-                        len(unknown),
-                        ', '.join(f"'{word}' at index {idx}" for word, idx in zip(unknown['word'], unknown['idx'])))
+        errors.append(f"Found {len(unknown)} words without a properNounState: "
+                      + ', '.join(f"'{word}' at index {idx}" for word, idx in zip(unknown['word'], unknown['idx'])))
 
     for token_type, state, tokens_name in ((TokenType.ABBREVIATION, ProperNounState.YES, 'abbreviations'),
                                            (TokenType.NUMERAL, ProperNounState.NO, 'numerals')):
