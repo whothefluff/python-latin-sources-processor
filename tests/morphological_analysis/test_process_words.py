@@ -308,6 +308,22 @@ def test_a_lowercase_headword_has_only_the_readings_of_the_lowercase_answer(monk
         ("novae", "0", "novus")]
 
 
+def test_both_spellings_of_a_common_vowel_are_written(monkeypatch, tmp_path):
+    # Morpheus's answer for tibi, whose i is common: tibi and tibī
+    tibi = {"dict": {"hdwd": {"$": "tu"}, "pofs": {"$": "pronoun"}},
+            "infl": [{"term": {"stem": {"$": "tibi_^"}}, "pofs": {"$": "pronoun"}, "case": {"$": "dative"},
+                      "gend": {"$": gender}, "num": {"$": "singular"}, "stemtype": {"$": "pron2"},
+                      "morph": {"$": "indeclform"}} for gender in ("masculine", "feminine")]}
+
+    _written(monkeypatch, tmp_path, "tibi", {"tibi": [tibi]})
+
+    rows = pd.read_csv(tmp_path / "output" / "morphological_analysis" / "morphological_detail_inflections.csv",
+                       dtype=str, keep_default_na=False)
+    assert list(zip(rows["item"], rows["cnt"], rows["stem"], rows["gender"])) == [
+        ("0", "0", "tibi", "masculine"), ("0", "1", "tibī", "masculine"),
+        ("0", "2", "tibi", "feminine"), ("0", "3", "tibī", "feminine")]
+
+
 def _library_of_one_certain_est(project_root):
     """Writes a library of one token, est, whose macronization ēst is certain."""
     library = project_root / "output" / "library"

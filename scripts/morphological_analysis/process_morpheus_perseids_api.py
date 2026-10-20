@@ -2,6 +2,7 @@ import csv
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -90,18 +91,11 @@ class WordsWithoutAnalysis(Exception):
 
 
 class MorphologicalAnalyzer:
-    MACRON_MAP = {
-        "a_": "ā",
-        "e_": "ē",
-        "i_": "ī",
-        "o_": "ō",
-        "u_": "ū",
-        "A_": "Ā",
-        "E_": "Ē",
-        "I_": "Ī",
-        "O_": "Ō",
-        "U_": "Ū",
-    }
+    # What follows a vowel in Morpheus's notation: _ makes it long, ^ short, and both, in either order, common
+    _QUANTITY_MARKS = ("_^", "^_", "_", "^")
+    _LONG_VOWELS = str.maketrans("aeiouyAEIOUY", "āēīōūȳĀĒĪŌŪȲ")
+    # A mute (b, c, d, g, p, t, or ch, ph, th) and a liquid (l, r)
+    _MUTE_AND_LIQUID = re.compile(r"[bcdgpt]h?[lr]")
 
     # List of Latin enclitics, sorted by length descending to match longer ones first (e.g., "cumque" before "que")
     ENCLITICS = sorted([
@@ -111,7 +105,7 @@ class MorphologicalAnalyzer:
     # Endings that an analysis can leave out of the form, such as que in jubetque or cumque in qualecumque
     OMITTED_TAILS = (*ENCLITICS, "cumque")
 
-    _PLAIN_LETTERS = str.maketrans("", "", "_^:-*")
+    _PLAIN_LETTERS = str.maketrans("", "", "_^:-*+")
 
 
     def __init__(self, project_root: str, working_dir: str | None = None):
@@ -153,14 +147,28 @@ class MorphologicalAnalyzer:
             )
 
     @staticmethod
-    def macronize(text: str) -> str:
-        """Convert underscore notation to macrons"""
-        if not text:
-            return text
-        result = text
-        for underscore_vowel, macron_vowel in MorphologicalAnalyzer.MACRON_MAP.items():
-            result = result.replace(underscore_vowel, macron_vowel)
-        return result
+    def spellings(text: str) -> List[str]:
+        """Returns the spellings that a stem or suffix in Morpheus's notation stands for, long vowels with macrons. A
+        common vowel can be either, so it gives two spellings, the short one first: tibi_^ is tibi and tibī. Unless a
+        mute and a liquid follow it: then the mark is the syllable's, which they can lengthen, and the vowel is short,
+        as in pa_^tr for patrem. No ending starts with them. The diaeresis (+) is dropped."""
+        letters: List[List[str]] = []
+        position = 0
+        while position < len(text):
+            letter = text[position]
+            mark = next((m for m in MorphologicalAnalyzer._QUANTITY_MARKS if text.startswith(m, position + 1)), "")
+            position += 1 + len(mark)
+            if letter in "_^+":
+                continue
+            long = letter.translate(MorphologicalAnalyzer._LONG_VOWELS)
+            if long == letter or mark in ("", "^"):
+                letters.append([letter])
+            elif mark == "_":
+                letters.append([long])
+            else:
+                rest = text[position:].translate(MorphologicalAnalyzer._PLAIN_LETTERS).lower()
+                letters.append([letter] if MorphologicalAnalyzer._MUTE_AND_LIQUID.match(rest) else [letter, long])
+        return ["".join(spelling) for spelling in product(*letters)]
 
     def load_existing_forms(self):
         """Load already processed forms from existing morphological_details.csv"""
@@ -319,8 +327,13 @@ class MorphologicalAnalyzer:
                     pos_infl = infl.get("pofs", {}).get("$")
                     verb_form = infl.get("mood", {}).get("$")
                     gramm_case = infl.get("case", {}).get("$")
-                    suffix_aux = MorphologicalAnalyzer.macronize(term.get("suff", {}).get("$"))
-                    suffix = None if suffix_aux == "*" else None if suffix_aux is None else suffix_aux.replace("^", "")
+                    raw_suffix = term.get("suff", {}).get("$")
+                    suffixes = [None] if raw_suffix is None else [
+                        None if suffix == "*" else suffix for suffix in MorphologicalAnalyzer.spellings(raw_suffix)]
+                    raw_stem = term.get("stem", {}).get("$")
+                    stems = [stem.replace(":", "-") for stem in MorphologicalAnalyzer.spellings(raw_stem)]
+                    # The grammar is the same in every spelling
+                    suffix = suffixes[0]
                     decl = infl.get("decl", {}).get("$")
                     stem_type = infl.get("stemtype", {}).get("$")
                     degree = infl.get("comp", {}).get("$")
@@ -335,8 +348,10 @@ class MorphologicalAnalyzer:
                         "item": item,
                         "cnt": cnt,
                         "partOfSpeech": computed_pos,
-                        "stem": MorphologicalAnalyzer.macronize(term.get("stem", {}).get("$")).replace(":", "-").replace("^", ""),
+                        "stem": stems[0],
                         "suffix": suffix,
+                        # One inflection each, after the de-duplication below
+                        "spellings": list(product(stems, suffixes)),
                         "segmentsInfo": segments_info(computed_pos, verb_form, tense, stem_type, suffix, degree,
                                                       lookup_word),
                         "gender": None if gender == "adverbial" else "neuter" if verb_form == "infinitive" else "masculine/feminine/neuter" if gender is None and decl == "3rd" else gender,
@@ -412,7 +427,8 @@ class MorphologicalAnalyzer:
         # De-duplication and re-indexing
         # The API sometimes returns the same grammatical inflection twice
         # with different stem notation. Collapse those (preferring the
-        # hyphenated stem) then repack 'cnt' with no gaps
+        # hyphenated stem), give each kept one its spellings, then repack
+        # 'cnt' with no gaps
         if not inflections:
             return details, inflections
 
@@ -436,6 +452,7 @@ class MorphologicalAnalyzer:
                 signature_dict = infl.copy()
                 signature_dict.pop('stem', None)
                 signature_dict.pop('cnt', None)
+                signature_dict.pop('spellings', None)
                 signature = frozenset(signature_dict.items())
 
                 if signature not in signature_to_index:
@@ -455,9 +472,13 @@ class MorphologicalAnalyzer:
                         # This maintains the original position.
                         ordered_unique_inflections[existing_index] = infl
 
-            # Now that we have the final, de-duplicated list for this item in the correct order,
-            # re-index the 'cnt' and add them to the final results.
-            for new_cnt, final_infl in enumerate(ordered_unique_inflections):
+            # Now that we have the final, de-duplicated list for this item in the correct order, make one
+            # inflection per spelling of each (a duplicate that replaced one brings its own), re-index the 'cnt'
+            # and add them to the final results.
+            spelled = [{**infl, "stem": stem, "suffix": suffix}
+                       for infl in ordered_unique_inflections for stem, suffix in infl["spellings"]]
+            for new_cnt, final_infl in enumerate(spelled):
+                final_infl.pop('spellings')
                 final_infl['cnt'] = new_cnt
                 final_inflections.append(final_infl)
 

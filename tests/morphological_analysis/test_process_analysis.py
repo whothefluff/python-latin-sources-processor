@@ -73,6 +73,16 @@ def test_an_analysis_that_the_overrides_ignore_is_dropped_without_failing(monkey
         [(0, "volo1")], [(0, 0, "voluit")])
 
 
+@pytest.mark.parametrize("notation, spellings", [
+    ("a_mo^", ["āmo"]), ("gy_r", ["gȳr"]), ("tibi_^", ["tibi", "tibī"]), ("i^bi^_", ["ibi", "ibī"]),
+    ("A_^s", ["As", "Ās"]), ("pa_^tr", ["patr"]), ("sa^_cr", ["sacr"]), ("ca^the_^dr", ["cathedr"]),
+    ("Thre_i+ss", ["Thrēiss"]),
+], ids=["long and short", "long y", "common", "common written ^_", "capital", "common before a mute and a liquid",
+        "the same written ^_", "the same after a short vowel", "diaeresis"])
+def test_morpheus_notation_gives_long_vowels_macrons_and_common_ones_both_spellings(notation, spellings):
+    assert MorphologicalAnalyzer.spellings(notation) == spellings
+
+
 def _inflection(pos, stem, suffix=None, stemtype="", **tags):
     """Returns one of Morpheus's inflections, with its part of speech, stem, suffix and other tags."""
     term = {"stem": {"$": stem}} | ({"suff": {"$": suffix}} if suffix else {})
@@ -92,6 +102,41 @@ _ATTICUS = _inflection("adjective", "Attic", "us", "us_a_um", gend="masculine", 
                        decl="1st & 2nd")
 _ATTICE = _inflection("adverb", "Attic", "e_")
 _HERCLE = ("Hercules", "exclamation", [_inflection("exclamation", "hercle")])
+
+
+_TIBI = ("tu", "pronoun", [_inflection("pronoun", "tibi_^", None, "pron2", case="dative", gend=gender,
+                                       num="singular", morph="indeclform") for gender in ("masculine", "feminine")])
+
+
+def test_a_common_vowel_gives_each_inflection_both_spellings():
+    _, inflections = MorphologicalAnalyzer.process_analysis("tibi", _entries(_TIBI))
+
+    assert [(i["cnt"], i["stem"], i["gender"]) for i in inflections] == [
+        (0, "tibi", "masculine"), (1, "tibī", "masculine"), (2, "tibi", "feminine"), (3, "tibī", "feminine")]
+
+
+def test_the_overrides_still_count_morpheus_inflections_not_spellings(monkeypatch):
+    monkeypatch.setattr(process_morpheus_perseids_api, "NOT_WANTED_INFLECTIONS", {"tibi_0_1"})
+
+    _, inflections = MorphologicalAnalyzer.process_analysis("tibi", _entries(_TIBI))
+
+    assert [(i["cnt"], i["stem"], i["gender"]) for i in inflections] == [
+        (0, "tibi", "masculine"), (1, "tibī", "masculine")]
+
+
+@pytest.mark.parametrize("stems, spellings", [
+    (["tibi_", "tibi_^"], ["tibī"]), (["tibi_^", "tibi_"], ["tibi", "tibī"]),
+    (["tibi_^", "ti:bi_"], ["ti-bī"]), (["tibi_", "ti:bi_^"], ["ti-bi", "ti-bī"]),
+], ids=["long first", "common first", "a hyphenated long one after a common one",
+        "a hyphenated common one after a long one"])
+def test_a_reading_with_the_grammar_of_one_before_is_dropped_with_all_its_spellings(stems, spellings):
+    # As Morpheus gives one inflection twice, but for its stem's notation; the hyphenated stem is kept
+    tibi = ("tu", "pronoun", [_inflection("pronoun", stem, None, "pron2", case="dative", gend="masculine",
+                                          num="singular", morph="indeclform") for stem in stems])
+
+    _, inflections = MorphologicalAnalyzer.process_analysis("tibi", _entries(tibi))
+
+    assert [(i["cnt"], i["stem"]) for i in inflections] == list(enumerate(spellings))
 
 
 def _items(details):
