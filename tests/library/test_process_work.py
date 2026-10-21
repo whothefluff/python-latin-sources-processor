@@ -589,6 +589,32 @@ def test_a_word_is_covered_by_the_unambiguous_macronization_that_the_reader_look
     assert found == errors
 
 
+@pytest.mark.parametrize("macronized, mask, errors", [
+    ("Thrēissa", 128, []),
+    ("Fictor", 63, []),
+    ("Threissa", 256, ["Found 1 macronizations with an uncertain bit past their word's letters: "
+                       "'Threissa' at index 0, mask 256"]),
+], ids=["the last letter", "every letter of an unknown word", "a ninth letter of eight"])
+def test_an_uncertainty_mask_marks_only_letters_of_its_word(macronized, mask, errors):
+    found = []
+
+    process_work.check_masks_within_their_words(
+        found, pd.DataFrame({"workId": ["w"], "idx": [0], "macronizedWord": [macronized],
+                             "uncertaintyBitMask": [mask]}))
+
+    assert found == errors
+
+
+def test_a_macronizer_answer_whose_mask_is_past_its_word_fails_validation(monkeypatch, tmp_path):
+    iam_with_a_fourth_letter_uncertain = [("iam", "iam", 8) if word == "iam" else (word, macronized, mask)
+                                          for word, macronized, mask in _CARMEN_MACRONIZED]
+    _process_carmen(monkeypatch, tmp_path, macronized=iam_with_a_fourth_letter_uncertain)
+
+    with pytest.raises(ValueError, match="1 macronizations with an uncertain bit past their word's letters: "
+                                         "'jam' at index 13, mask 8"):
+        process_work.validate_csv_files(_CARMEN, tmp_path, _CARMEN_WORK)
+
+
 # The edition skips verse 3, and Morpheus has no analysis for Fictor
 _CARMEN_WITH_A_GAP = _CARMEN.replace('<l n="3">iacere et iacere iam.</l>',
                                      '<l n="4">iacere et iacere iam.</l>\n    <l n="5">Fictor est.</l>')

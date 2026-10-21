@@ -982,6 +982,7 @@ def validate_csv_files(xml_string, output_dir, work: WorkConfiguration):
     validate_p_tags(errors, xml_string, work_content_subdivisions_df.to_dict('records'))
     check_proper_noun_states(errors, work_contents_df)
     check_macronization_coverage(errors, work_contents_df, work_macronizations_df, unambiguous_macronizations_df)
+    check_masks_within_their_words(errors, work_macronizations_df)
     check_expansion_completeness(errors, work_contents_df)
     check_sentence_and_word_idx(errors, work_contents_df)
     check_letters_against_morpheus(errors, work_contents_df, work.letter_convention)
@@ -1316,6 +1317,18 @@ def check_macronization_coverage(errors, work_contents_df, work_macronizations_d
         )
         errors.append(error_msg)
 
+
+
+def check_masks_within_their_words(errors, work_macronizations_df):
+    """Every bit of an uncertainty mask must be a letter of its word: bit N is the Nth letter, so a bit past the last
+    one marks none, and the letter that is uncertain looks certain."""
+    past = [(word, idx, mask) for idx, word, mask in zip(work_macronizations_df['idx'],
+                                                         work_macronizations_df['macronizedWord'],
+                                                         work_macronizations_df['uncertaintyBitMask'])
+            if int(mask) >> len(word) != 0]
+    if past:
+        errors.append(f"Found {len(past)} macronizations with an uncertain bit past their word's letters: "
+                      + ', '.join(f"'{word}' at index {idx}, mask {mask}" for word, idx, mask in past))
 
 
 def check_expansion_completeness(errors, work_contents_df):
