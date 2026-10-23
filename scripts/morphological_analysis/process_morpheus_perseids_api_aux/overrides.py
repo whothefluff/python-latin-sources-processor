@@ -1,13 +1,11 @@
+from typing import Dict, FrozenSet, Iterable, Mapping, NamedTuple
+
 # Key: incorrect ref from API, Value: correct ref to use.
 DICT_REF_REPLACEMENTS = {
 }
 
-# A set of {form}_{item} keys to completely ignore
-FORMS_TO_IGNORE = {
-}
-
-# A set of entries to completely ignore
-IGNORED_DICT_REFS = {
+# Headwords whose analyses are ignored: for the words given, or for every word when none are
+IGNORED_DICT_REFS: Dict[str, FrozenSet[str]] = {
 }
 
 # Maps a word to a different word that should be used for the API query
@@ -38,120 +36,59 @@ FULL_OVERRIDES = {
     **DETACHED_ENCLITICS,
 }
 
-FORMS = {
-    "fas_0_0": {
-        "partOfSpeech": "noun",
-        "gender": "neuter",
-        "number": "singular",
-        "case": ["nominative", "accusative"],
-    },
-    "circumeunti_0_0": {
-        "gender": ["masculine", "feminine", "neuter"],
-    },
-    "eunti_0_0": {
-        "gender": ["masculine", "feminine", "neuter"],
-    },
-    "altiore_1_0": {
-        "gender": ["masculine", "feminine", "neuter"],
-        "declension": "3rd",
-    },
-    "altiore_0_0": {
-        "gender": ["masculine", "feminine", "neuter"],
-        "declension": "3rd",
-    },
-    "doctiorem_0_0": {
-        "gender": ["masculine", "feminine"],
-        "declension": "3rd",
-    },
-    "doctiorem_0_1": {
-        "gender": ["masculine", "feminine"],
-        "declension": "3rd",
-    },
-    "plus_0_0": {
-        "gender": "neuter",
-    },
-    "plus_0_1": {
-        "gender": "neuter",
-    },
-    "satis_1_1": {
-        "partOfSpeech": "adjective",
-        "gender": None,
-    },
-    "ferret_0_0": {
-        "verbForm": "subjunctive",
-        "partOfSpeech": "verb",
-    },
-    "ferrem_0_0": {
-        "verbForm": "subjunctive",
-        "partOfSpeech": "verb",
-    },
-    "referret_0_0": {
-        "verbForm": "subjunctive",
-        "partOfSpeech": "verb",
-    },
-    "referret_0_1": {
-        "verbForm": "subjunctive",
-        "partOfSpeech": "verb",
-    },
-    "constantior_0_0": {
-        "declension": "3rd",
-        "partOfSpeech": "adjective",
-        "segmentsInfo": "ior, -ius",
-    },
-    "constantior_0_1": {
-        "declension": "3rd",
-        "partOfSpeech": "adjective",
-        "segmentsInfo": "ior, -ius",
-    },
-    "constantior_0_2": {
-        "declension": "3rd",
-        "partOfSpeech": "adjective",
-        "segmentsInfo": "ior, -ius",
-    },
-    "constantior_0_3": {
-        "declension": "3rd",
-        "partOfSpeech": "adjective",
-        "segmentsInfo": "ior, -ius",
-    },
-    "diligentius_1_1": {
-        "declension": "3rd",
-        "partOfSpeech": "adjective",
-        "segmentsInfo": "ior, -ius",
-    },
-    "diligentius_1_2": {
-        "declension": "3rd",
-        "partOfSpeech": "adjective",
-        "segmentsInfo": "ior, -ius",
-    },
-    "diligentius_1_3": {
-        "declension": "3rd",
-        "partOfSpeech": "adjective",
-        "segmentsInfo": "ior, -ius",
-    },
-    "jactantiorem_0_0": {
-        "declension": "3rd",
-        "partOfSpeech": "adjective",
-        "segmentsInfo": "ior, -ius",
-    },
-    "jactantiorem_0_1": {
-        "declension": "3rd",
-        "partOfSpeech": "adjective",
-        "segmentsInfo": "ior, -ius",
-    },
-    "celeri_0_0": {
-        "segmentsInfo": ", -is, -e",
-    },
-    "celeri_0_1": {
-        "segmentsInfo": ", -is, -e",
-    },
-    "celeri_0_2": {
-        "segmentsInfo": ", -is, -e",
-    },
-}
 
-NOT_WANTED_INFLECTIONS = {
-    # keep exclusively to the last index just in case
-}
+class ReadingRule(NamedTuple):
+    """A fix for the inflections of Morpheus's answers that have every value in match."""
+    headword: str  # as dictionaryRef has it
+    match: Mapping[str, str]  # the inflection's elements, as Morpheus names them
+    changes: Mapping[str, object] | None  # output fields, a list giving one inflection per value; None drops it
+    words: FrozenSet[str] = frozenset()  # the words it's for; none: every word with the reading
+
+
+# The elements of Morpheus's inflections that a rule can match, and the output fields that it can change
+MATCHABLE_ELEMENTS = frozenset({"pofs", "decl", "case", "gend", "num", "mood", "pers", "tense", "voice", "comp",
+                                "stemtype", "derivtype", "morph", "dial"})
+CHANGEABLE_FIELDS = frozenset({"partOfSpeech", "segmentsInfo", "gender", "number", "declension", "case", "verbForm",
+                               "tense", "voice", "person"})
+
+
+def check_rules(rules: Iterable[ReadingRule]):
+    """Raises when a rule matches an element that Morpheus doesn't give, changes a field that the output doesn't have,
+    or changes no field."""
+    for rule in rules:
+        unknown = sorted(set(rule.match) - MATCHABLE_ELEMENTS) + sorted(set(rule.changes or {}) - CHANGEABLE_FIELDS)
+        if unknown:
+            raise ValueError(f"{rule} has elements or fields that no inflection has: {unknown}")
+        if rule.changes is not None and not rule.changes:
+            raise ValueError(f"{rule} changes no field; a rule that drops a reading has changes None")
+
+
+FORMS = (
+    # Morpheus gives fas, a neuter noun in L&S, no part of speech, gender, number or case
+    ReadingRule(headword="fas", match={"stemtype": "indecl"},
+                changes={"partOfSpeech": "noun", "gender": "neuter", "number": "singular",
+                         "case": ["nominative", "accusative"]},
+                words=frozenset({"fas"})),
+    # Morpheus gives eunti and circumeunti, datives of present participles, no gender
+    ReadingRule(headword="circumeo", match={"mood": "participle", "tense": "present"},
+                changes={"gender": ["masculine", "feminine", "neuter"]}, words=frozenset({"circumeunti"})),
+    ReadingRule(headword="eo1", match={"mood": "participle", "tense": "present"},
+                changes={"gender": ["masculine", "feminine", "neuter"]}, words=frozenset({"eunti"})),
+    # Morpheus gives altiore, an ablative comparative, no gender
+    ReadingRule(headword="alo", match={"stemtype": "pp4", "comp": "comparative"},
+                changes={"gender": ["masculine", "feminine", "neuter"]}, words=frozenset({"altiore"})),
+    ReadingRule(headword="altus1", match={"comp": "comparative"},
+                changes={"gender": ["masculine", "feminine", "neuter"]}, words=frozenset({"altiore"})),
+    # Morpheus gives the adjective plus no gender, and in the singular it's neuter
+    ReadingRule(headword="multus", match={"stemtype": "irreg_adj3"}, changes={"gender": "neuter"},
+                words=frozenset({"plus"})),
+    # Morpheus gives the indeclinable satis as a neuter, which would be a noun; L&S has an adjective without gender
+    ReadingRule(headword="satis", match={"stemtype": "indecl"}, changes={"partOfSpeech": "adjective", "gender": None}),
+    # Morpheus's stem type for celer, celeris, celere gives no segments
+    ReadingRule(headword="celer1", match={"stemtype": "0_adj3"}, changes={"segmentsInfo": ", -is, -e"},
+                words=frozenset({"celeri"})),
+)
+check_rules(FORMS)
 
 # Whitelist (many errors in morpheus with fake adverbs)
 TRUE_ADVERB_FORMS = {

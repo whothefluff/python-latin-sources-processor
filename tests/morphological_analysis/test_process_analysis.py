@@ -1,7 +1,10 @@
+import re
+
 import pytest
 
 from scripts.morphological_analysis import process_morpheus_perseids_api
-from scripts.morphological_analysis.process_morpheus_perseids_api import MorphologicalAnalyzer
+from scripts.morphological_analysis.process_morpheus_perseids_api import MorphologicalAnalyzer, RulesThatChangeNothing
+from scripts.morphological_analysis.process_morpheus_perseids_api_aux.overrides import ReadingRule, check_rules
 
 
 def _verb(stem, suffix):
@@ -64,13 +67,14 @@ def test_an_analysis_without_a_headword_raises(malformed):
         MorphologicalAnalyzer.process_analysis("voluit", analysis)
 
 
-@pytest.mark.parametrize("override, ignored", [("FORMS_TO_IGNORE", {"voluit_0"}), ("IGNORED_DICT_REFS", {"volvo"})],
-                         ids=["the word's first analysis", "the dictionary entry"])
-def test_an_analysis_that_the_overrides_ignore_is_dropped_without_failing(monkeypatch, override, ignored):
-    monkeypatch.setattr(process_morpheus_perseids_api, override, ignored)
+@pytest.mark.parametrize("ignored, kept", [
+    ({"volvo": frozenset({"voluit"})}, [(0, "volo1")]), ({"volvo": frozenset()}, [(0, "volo1")]),
+    ({"volvo": frozenset({"volvit"})}, [(0, "volvo"), (1, "volo1")]),
+], ids=["for the word", "for every word", "for another word"])
+def test_an_analysis_that_the_overrides_ignore_is_dropped_without_failing(monkeypatch, ignored, kept):
+    monkeypatch.setattr(process_morpheus_perseids_api, "IGNORED_DICT_REFS", ignored)
 
-    assert _process("voluit", ("volvo", [_verb("volu", "it")]), ("volo1", [_verb("volu", "it")])) == (
-        [(0, "volo1")], [(0, 0, "voluit")])
+    assert _process("voluit", ("volvo", [_verb("volu", "it")]), ("volo1", [_verb("volu", "it")]))[0] == kept
 
 
 @pytest.mark.parametrize("notation, spellings", [
@@ -115,8 +119,9 @@ def test_a_common_vowel_gives_each_inflection_both_spellings():
         (0, "tibi", "masculine"), (1, "tibī", "masculine"), (2, "tibi", "feminine"), (3, "tibī", "feminine")]
 
 
-def test_the_overrides_still_count_morpheus_inflections_not_spellings(monkeypatch):
-    monkeypatch.setattr(process_morpheus_perseids_api, "NOT_WANTED_INFLECTIONS", {"tibi_0_1"})
+def test_a_rule_that_drops_a_reading_drops_all_its_spellings(monkeypatch):
+    monkeypatch.setattr(process_morpheus_perseids_api, "FORMS", (
+        ReadingRule(headword="tu", match={"gend": "feminine"}, changes=None, words=frozenset({"tibi"})),))
 
     _, inflections = MorphologicalAnalyzer.process_analysis("tibi", _entries(_TIBI))
 
@@ -163,7 +168,9 @@ def test_an_interjection_whose_headword_is_a_name_stays_lowercase():
 
 
 def test_an_override_that_makes_an_inflection_a_noun_capitalizes_the_item(monkeypatch):
-    monkeypatch.setitem(process_morpheus_perseids_api.FORMS, "hercle_0_0", {"partOfSpeech": "noun"})
+    monkeypatch.setattr(process_morpheus_perseids_api, "FORMS", (ReadingRule(
+        headword="Hercules", match={"pofs": "exclamation"}, changes={"partOfSpeech": "noun"},
+        words=frozenset({"hercle"})),))
 
     details, _ = MorphologicalAnalyzer.process_analysis("hercle", _entries(_HERCLE))
 
@@ -171,7 +178,8 @@ def test_an_override_that_makes_an_inflection_a_noun_capitalizes_the_item(monkey
 
 
 def test_an_excluded_adjective_inflection_does_not_capitalize_the_item(monkeypatch):
-    monkeypatch.setitem(process_morpheus_perseids_api.NOT_WANTED_INFLECTIONS, "attice_0_0", True)
+    monkeypatch.setattr(process_morpheus_perseids_api, "FORMS", (
+        ReadingRule(headword="Atticus", match={"pofs": "adjective"}, changes=None, words=frozenset({"attice"})),))
 
     details, inflections = MorphologicalAnalyzer.process_analysis(
         "attice", _entries(("Atticus", "adjective", [_ATTICUS, _ATTICE])))
@@ -179,6 +187,93 @@ def test_an_excluded_adjective_inflection_does_not_capitalize_the_item(monkeypat
     assert _items(details) == [("attice", 0, "Atticus")]
     assert [i["partOfSpeech"] for i in inflections] == ["adverb"]
 
+
+
+_SATIS_READINGS = [_inflection("adverb", "satis", None, "adverb", morph="indeclform"),
+                   _inflection("irregular", "satis", None, "indecl", gend="neuter", morph="indeclform")]
+_SATIN_READINGS = [_inflection("adverb", "sa^ti^n", None, "adverb", morph="indeclform"),
+                   _inflection("irregular", "sa^ti^n", None, "indecl", gend="neuter", morph="indeclform")]
+_SATA = ("sata", "noun", [_inflection("noun", "sa^t", "i_s", "us_i", case="dative", gend="neuter", num="plural")])
+
+
+@pytest.mark.parametrize("word, entries, item", [
+    ("satis", (_SATA, ("satis", "adverb", _SATIS_READINGS)), 1), ("satin", (("satis", "adverb", _SATIN_READINGS),), 0),
+    ("satisque", (("satis", "adverb", _SATIS_READINGS),), 0),
+], ids=["satis", "satin, its -ne cut short", "satisque, answered with satis's readings"])
+def test_the_indeclinable_satis_is_an_adjective_without_gender(word, entries, item):
+    details, inflections = MorphologicalAnalyzer.process_analysis(word, _entries(*entries))
+
+    assert _items(details)[item] == (word, item, "satis")
+    assert [(i["partOfSpeech"], i["gender"]) for i in inflections if i["item"] == item] == [
+        ("adverb", None), ("adjective", None)]
+
+
+def _satis_readings(monkeypatch, *rules):
+    """Returns the part of speech and gender of satis's two readings under the rules given."""
+    monkeypatch.setattr(process_morpheus_perseids_api, "FORMS", rules)
+    _, inflections = MorphologicalAnalyzer.process_analysis("satis", _entries(("satis", "adverb", _SATIS_READINGS)))
+    return [(i["partOfSpeech"], i["gender"]) for i in inflections]
+
+
+_ADJECTIVE = {"partOfSpeech": "adjective", "gender": None}
+
+
+@pytest.mark.parametrize("rule", [
+    ReadingRule(headword="satum", match={"stemtype": "indecl"}, changes=_ADJECTIVE),
+    ReadingRule(headword="satis", match={"stemtype": "indecl", "gend": "feminine"}, changes=_ADJECTIVE),
+    ReadingRule(headword="satis", match={"stemtype": "indecl"}, changes=_ADJECTIVE, words=frozenset({"satin"})),
+], ids=["another headword", "another value", "another word"])
+def test_a_rule_changes_only_the_readings_of_its_headword_with_its_values_in_its_words(monkeypatch, rule):
+    assert _satis_readings(monkeypatch, rule) == [("adverb", None), ("noun", "neuter")]
+
+
+def test_a_word_that_none_of_its_readings_has_a_rule_for_raises(monkeypatch):
+    monkeypatch.setattr(process_morpheus_perseids_api, "FORMS", (ReadingRule(
+        headword="volo1", match={"tense": "present"}, changes={"person": "1st"}, words=frozenset({"voluit"})),))
+
+    with pytest.raises(RulesThatChangeNothing, match=re.escape(
+            "Rules in FORMS change nothing for 'voluit': volo1 {'tense': 'present'}: none of the word's readings has")):
+        _process("voluit", ("volo1", [_verb("volu", "it")]))
+
+
+@pytest.mark.parametrize("changes, field", [
+    ({"partOfSpeech": "adjective", "gender": None, "segmentsInfo": "indeclinable"}, "segmentsInfo"),
+    ({"partOfSpeech": "adjective", "number": [None]}, "number"),
+], ids=["a value the script gives", "a list of only that value"])
+def test_a_rule_that_sets_a_field_to_the_value_it_has_already_raises(monkeypatch, changes, field):
+    with pytest.raises(RulesThatChangeNothing, match=re.escape(f"every reading it matches has its {field} already")):
+        _satis_readings(monkeypatch, ReadingRule(headword="satis", match={"stemtype": "indecl"}, changes=changes))
+
+
+def test_a_rule_whose_readings_are_the_ones_the_word_has_already_raises(monkeypatch):
+    # The masculine dative made masculine and feminine, as the feminine one is already
+    monkeypatch.setattr(process_morpheus_perseids_api, "FORMS", (ReadingRule(
+        headword="tu", match={"gend": "masculine"}, changes={"gender": ["masculine", "feminine"]},
+        words=frozenset({"tibi"})),))
+
+    with pytest.raises(RulesThatChangeNothing,
+                       match=re.escape("tu {'gend': 'masculine'}: it changes none of the word's readings")):
+        MorphologicalAnalyzer.process_analysis("tibi", _entries(_TIBI))
+
+
+def test_a_reading_that_two_rules_are_for_raises(monkeypatch):
+    with pytest.raises(ValueError, match="an inflection of satis has 2 rules in FORMS"):
+        _satis_readings(monkeypatch, ReadingRule(headword="satis", match={"stemtype": "indecl"}, changes=_ADJECTIVE),
+                        ReadingRule(headword="satis", match={"pofs": "irregular"}, changes={"gender": None}))
+
+
+@pytest.mark.parametrize("rule, unknown", [
+    (ReadingRule(headword="satis", match={"gender": "neuter"}, changes=_ADJECTIVE), "['gender']"),
+    (ReadingRule(headword="satis", match={"gend": "neuter"}, changes={"gend": None}), "['gend']"),
+], ids=["a match by an output field", "a change to one of Morpheus's elements"])
+def test_a_rule_with_an_element_or_field_that_no_inflection_has_is_refused(rule, unknown):
+    with pytest.raises(ValueError, match=re.escape(f"has elements or fields that no inflection has: {unknown}")):
+        check_rules([rule])
+
+
+def test_a_rule_that_changes_no_field_is_refused():
+    with pytest.raises(ValueError, match="changes no field; a rule that drops a reading has changes None"):
+        check_rules([ReadingRule(headword="satis", match={"stemtype": "indecl"}, changes={})])
 
 
 def test_an_inflection_whose_part_of_speech_has_no_rule_in_its_entry_says_which(caplog):

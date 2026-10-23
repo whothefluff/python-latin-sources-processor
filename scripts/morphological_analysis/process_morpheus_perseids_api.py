@@ -19,8 +19,7 @@ from scripts.library.util.proper_noun import ProperNounState
 from scripts.library.util.token_classification import TokenType
 from scripts.library.util.unambiguous_macronizations import lookup_key
 from scripts.morphological_analysis.process_morpheus_perseids_api_aux.overrides import (
-    FORMS, NOT_WANTED_INFLECTIONS, FULL_OVERRIDES, ANALYSIS_ALIASES, FORMS_TO_IGNORE, IGNORED_DICT_REFS,
-    DICT_REF_REPLACEMENTS, TRUE_ADVERB_FORMS
+    FORMS, FULL_OVERRIDES, ANALYSIS_ALIASES, IGNORED_DICT_REFS, DICT_REF_REPLACEMENTS, TRUE_ADVERB_FORMS, ReadingRule
 )
 
 
@@ -33,7 +32,7 @@ def _merge_bodies(analysis_lower: Dict, analysis_title: Dict) -> List[Dict]:
     headword is capitalized (Hercules's noun), and is dropped when it isn't: a lowercase headword's readings are the
     lowercase answer's. An inflection is new when its headword doesn't have it yet, a stem that differs only in case
     aside: Hymenaeus has the god's stem and the song's, Hymenae and hymenae, and the capitalized answer gives both,
-    which read the same. Lowercase-sourced bodies come first so existing FORMS/FORMS_TO_IGNORE indices stay stable."""
+    which read the same. Lowercase-sourced bodies come first."""
     def get_bodies(analysis):
         if not analysis or "RDF" not in analysis or "Body" not in analysis["RDF"]["Annotation"]:
             return []
@@ -88,6 +87,16 @@ class WordsWithoutAnalysis(Exception):
         self.reasons_by_word = reasons_by_word
         super().__init__(f"{len(reasons_by_word)} words have no analysis written: "
                          + ", ".join(f"'{word}' ({reason})" for word, reason in reasons_by_word.items()))
+
+
+class RulesThatChangeNothing(ValueError):
+    """Rules in FORMS that change nothing in a word's readings, each with why."""
+    NO_READING = "none of the word's readings has its values"
+
+    def __init__(self, word: str, why_by_rule: List[Tuple[ReadingRule, str]]):
+        self.why_by_rule = why_by_rule
+        super().__init__(f"Rules in FORMS change nothing for '{word}': "
+                         + "; ".join(f"{rule.headword} {dict(rule.match)}: {why}" for rule, why in why_by_rule))
 
 
 class MorphologicalAnalyzer:
@@ -270,18 +279,18 @@ class MorphologicalAnalyzer:
 
         item = 0
 
-        # Use enumerate to get the ORIGINAL index, which is needed for the FORMS_TO_IGNORE check.
+        rules_used: List[ReadingRule] = []
+        rules_that_change_readings: List[ReadingRule] = []
+        fields_changed: List[Tuple[ReadingRule, str]] = []
+
+        # The analysis's place in Morpheus's answer, for the messages
         for original_item_index, body in enumerate(bodies):
             # Filters
             try:
                 headword = body["rest"]["entry"]["dict"]["hdwd"]["$"]
-                # Check FORMS_TO_IGNORE using the original index from enumerate.
-                form_key_to_ignore = f"{word}_{original_item_index}"
-                if form_key_to_ignore in FORMS_TO_IGNORE:
-                    logging.info(f"Ignoring form '{form_key_to_ignore}' based on FORMS_TO_IGNORE list.")
-                    continue # Skip to the next body without incrementing final_item_index
                 # Check IGNORED_DICT_REFS.
-                if headword in IGNORED_DICT_REFS:
+                ignored_for = IGNORED_DICT_REFS.get(headword)
+                if ignored_for is not None and (not ignored_for or word in ignored_for):
                     logging.info(f"Ignoring form '{word}_{original_item_index}' due to unwanted dictionary reference '{headword}'.")
                     continue # Skip to the next body without incrementing final_item_index
             except KeyError as e:
@@ -298,7 +307,6 @@ class MorphologicalAnalyzer:
                     infl_list = [infl_list]
 
                 # Inflections spelled with other letters are skipped below, such as volvo's volv-it for voluit.
-                # cnt keeps Morpheus's numbering, because FORMS keys use it
                 spelled_like = {cnt: MorphologicalAnalyzer._spelled_like((analyzed_as or word).lower(),
                                                                           MorphologicalAnalyzer._spelling_of(infl))
                                 for cnt, infl in enumerate(infl_list)}
@@ -317,6 +325,8 @@ class MorphologicalAnalyzer:
                     lookup_word = word
 
                 item_inflections = []
+                # Each reading a rule matches: the rule, the reading the script gave, and the readings it became
+                readings_of_rules: List[Tuple[ReadingRule, Dict, List[Dict]]] = []
 
                 for cnt, infl in enumerate(infl_list):
                     if spelled_like[cnt] is False:
@@ -370,13 +380,19 @@ class MorphologicalAnalyzer:
                         #"gend": gender,
                     }
 
-                    key = f"{word}_{item}_{cnt}"
-
-                    if key in NOT_WANTED_INFLECTIONS:
+                    rule = MorphologicalAnalyzer._rule_for(word, headword, infl)
+                    if rule is None:
+                        item_inflections.append(inflection)
                         continue
+                    rules_used.append(rule)
+                    given = inflection.copy()
+                    first = len(item_inflections)
 
-                    if key in FORMS:
-                        override = FORMS[key]
+                    override = rule.changes
+                    if override is not None:
+                        fields_changed.extend(
+                            (rule, field) for field, value in override.items()
+                            if set(value if isinstance(value, list) else [value]) != {inflection[field]})
 
                         # A list means that this field has multiple possible values.
                         # Expand the single Morpheus inflection into one inflection per
@@ -402,8 +418,17 @@ class MorphologicalAnalyzer:
                         else:
                             inflection.update(override)
                             item_inflections.append(inflection)
-                    else:
-                        item_inflections.append(inflection)
+                    readings_of_rules.append((rule, given, item_inflections[first:]))
+
+                # A rule changes the item when its readings differ from those with the script's in place of the rule's
+                readings = {MorphologicalAnalyzer._signature(i) for i in item_inflections}
+                for rule in [rule for rule in FORMS if any(rule == used for used, _, _ in readings_of_rules)]:
+                    made = [id(i) for used, _, became in readings_of_rules if used == rule for i in became]
+                    script_readings = [reading for used, reading, _ in readings_of_rules if used == rule]
+                    without = {MorphologicalAnalyzer._signature(i)
+                               for i in [i for i in item_inflections if id(i) not in made] + script_readings}
+                    if without != readings:
+                        rules_that_change_readings.append(rule)
 
                 # Judged on the inflections the item keeps, after overrides and exclusions. An interjection whose
                 # headword is a name ("hercle" -> "Hercules") isn't proper, but a proper adjective ("Atticus") is
@@ -420,6 +445,19 @@ class MorphologicalAnalyzer:
                 item += 1
             except KeyError as e:
                 raise ValueError(f"Analysis {original_item_index} of '{word}' has no {e}") from e
+
+        # A word without readings is asked for again without its enclitic, so only one with readings is checked here
+        rules_that_change_nothing = [(rule, RulesThatChangeNothing.NO_READING) for rule in FORMS
+                                     if inflections and word in rule.words and rule not in rules_used]
+        for rule in [rule for rule in FORMS if rule in rules_used]:
+            unchanged = [field for field in rule.changes or {} if (rule, field) not in fields_changed]
+            if rule not in rules_that_change_readings:
+                rules_that_change_nothing.append((rule, "it changes none of the word's readings"))
+            elif unchanged:
+                rules_that_change_nothing.append(
+                    (rule, f"every reading it matches has its {', '.join(unchanged)} already"))
+        if rules_that_change_nothing:
+            raise RulesThatChangeNothing(word, rules_that_change_nothing)
 
         if spellings_not_compared:
             logging.warning(f"'{word}' kept analyses whose letters weren't compared, review them: {sorted(spellings_not_compared)}")
@@ -448,12 +486,7 @@ class MorphologicalAnalyzer:
             signature_to_index: Dict[frozenset, int] = {}
 
             for infl in item_inflections:
-                # Create a signature for the inflection, excluding fields that vary for duplicates
-                signature_dict = infl.copy()
-                signature_dict.pop('stem', None)
-                signature_dict.pop('cnt', None)
-                signature_dict.pop('spellings', None)
-                signature = frozenset(signature_dict.items())
+                signature = MorphologicalAnalyzer._signature(infl)
 
                 if signature not in signature_to_index:
                     # First time seeing this unique inflection. Add it to our ordered list.
@@ -483,6 +516,21 @@ class MorphologicalAnalyzer:
                 final_inflections.append(final_infl)
 
         return details, final_inflections
+
+    @staticmethod
+    def _signature(infl: Dict) -> frozenset:
+        """Returns an inflection's fields but those that vary for duplicates: its stem, cnt and spellings."""
+        return frozenset((field, value) for field, value in infl.items() if field not in ("stem", "cnt", "spellings"))
+
+    @staticmethod
+    def _rule_for(word: str, headword: str, infl: Dict) -> ReadingRule | None:
+        """Returns the rule in FORMS for one of Morpheus's inflections of word under headword, or None. Raises when
+        several rules are for it."""
+        rules = [rule for rule in FORMS if rule.headword == headword and (not rule.words or word in rule.words)
+                 and all(infl.get(element, {}).get("$") == value for element, value in rule.match.items())]
+        if len(rules) > 1:
+            raise ValueError(f"'{word}': an inflection of {headword} has {len(rules)} rules in FORMS: {rules}")
+        return rules[0] if rules else None
 
     def write_results(self, source_word: str, details: List[Dict], inflections: List[Dict]):
         """Write one result batch for a source word."""
@@ -636,6 +684,11 @@ class MorphologicalAnalyzer:
                                 details = retry_details
                                 inflections = retry_inflections
                                 break  # Success, exit enclitic loop
+
+                rules_that_change_nothing = [(rule, RulesThatChangeNothing.NO_READING) for rule in FORMS
+                                             if word in rule.words]
+                if not inflections and rules_that_change_nothing:
+                    raise RulesThatChangeNothing(word, rules_that_change_nothing)
 
                 # After all attempts, write the result (success, retry-success, or failure)
                 if details:

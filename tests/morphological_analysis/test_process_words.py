@@ -12,6 +12,7 @@ from scripts.morphological_analysis import process_morpheus_perseids_api
 from scripts.morphological_analysis.process_morpheus_perseids_api import (
     MorphologicalAnalyzer, Reading, RuledOutReadings, ValidationFailed, WordsWithoutAnalysis,
 )
+from scripts.morphological_analysis.process_morpheus_perseids_api_aux.overrides import ReadingRule
 
 
 def _verb(stem, suffix, person="3rd"):
@@ -92,6 +93,32 @@ def test_the_words_without_an_analysis_written_fail_the_run_after_the_last_word(
     }
     assert sorted(map(tuple, pd.read_csv(analyzer.details_file, dtype=str, keep_default_na=False).values)) == [
         ("est", "0", "sum1"), ("fictum", "0", "")]
+
+
+def test_a_word_that_a_rule_is_for_and_that_gets_no_reading_fails_the_run(monkeypatch, morpheus, tmp_path):
+    monkeypatch.setattr(process_morpheus_perseids_api, "FORMS", (ReadingRule(
+        headword="fingo", match={"stemtype": "pp4"}, changes={"gender": "neuter"}, words=frozenset({"fictum"})),))
+    _library(tmp_path, ["est", "fictum"])
+    analyzer = MorphologicalAnalyzer(str(tmp_path))
+
+    with pytest.raises(WordsWithoutAnalysis) as raised:
+        analyzer.process_words()
+
+    assert raised.value.reasons_by_word == {
+        "fictum": "Rules in FORMS change nothing for 'fictum': fingo {'stemtype': 'pp4'}: none of the word's readings "
+                  "has its values"}
+    assert sorted(map(tuple, pd.read_csv(analyzer.details_file, dtype=str, keep_default_na=False).values)) == [
+        ("est", "0", "sum1")]
+
+
+def test_a_rule_for_a_word_whose_readings_are_its_hosts_without_the_enclitic_finds_them_there(monkeypatch, tmp_path):
+    monkeypatch.setattr(process_morpheus_perseids_api, "FORMS", (ReadingRule(
+        headword="volo1", match={"tense": "present"}, changes={"person": "1st"}, words=frozenset({"voluitque"})),))
+    volvo = {"dict": {"hdwd": {"$": "volvo"}, "pofs": {"$": "verb"}}, "infl": _verb("volv", "it")}
+    volo = {"dict": {"hdwd": {"$": "volo1"}, "pofs": {"$": "verb"}}, "infl": _verb("volu", "it")}
+
+    assert _written(monkeypatch, tmp_path, "voluitque", {"voluitque": [volvo], "voluit": [volo]}) == (
+        [("voluitque", "0", "volo1")], [("voluitque", "0", "verb")])
 
 
 def test_morpheus_is_given_10_seconds_to_answer(monkeypatch):
