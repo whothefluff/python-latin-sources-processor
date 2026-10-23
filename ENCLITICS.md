@@ -29,8 +29,19 @@ The list is deliberately a subset of Morpheus's `LatinSuff` (`src/anal/checkstri
   under `nos` instead of `ego`: a fix for the fork, not a reason to split.
 - **`cum` (mēcum, tēcum, sēcum, nōbīscum):** L&S headwords, and Morpheus lists them as forms of the personal pronouns.
 - **`ce`, `cine`:** Morpheus lists huiusce, hōsce, hīsce, hicine… as forms of `hic` and `ille`.
-- **`n` (viden, satin, ain):** cutting the string gives the wrong host (viden is vidēsne, not vide + n). These need
-  lemma overrides, not splitting.
+- **`n` (viden, satin, tun, ain, scin, vin…):** -ne cut short to n, in place of a final s (vidēsne, satisne) or
+  after a vowel (tūne, cēnāvīne); L&S's -ne entry: "also apocopated n' and only n". Cutting the string gives the
+  wrong host (vide, sati), and Morpheus guesses at a final n when the word has no analysis of its own
+  (`checkstring.c`), with the n as s and without it. The guess is right for some, which keep it (ten is tē, egon
+  ego), and wrong for most: viden got the imperative vidē too, satin sata, satum and sero's satī and satīs, vin the
+  noun vīs. Those are whole forms in the Morpheus fork, spelled as the word with its quantities (sătĭn, vīn, scīn)
+  and answered with their own readings alone (satin with satis's adverb and indeclinable). A few words that Morpheus
+  reads in their own right are a word of this kind in some tokens, and keep their readings beside the whole form: in,
+  quin and eon are also isne and īsne, quīne and eōne. Every kind has a line in the macronizer's lexicon. A vowel that
+  can be either length is common, so the text leaves it uncertain: viden's, abin's and iuben's last, which iambic
+  shortening can shorten. So is a vowel that the readings disagree on (mean's a, short in the nominative and common
+  in the ablative; in's i, short in the preposition and long in īsne). The fork's
+  `tests/latin_assertions_ne_cut_short.txt` lists every kind. The -ne isn't shown.
 - **`pte` (suopte, suapte):** the same as `met`. L&S has an entry for the ending, but Morpheus lists suōpte and suāpte
   as whole forms of suus (`nom.latin.bas`, next to suōmet and suāmet), so they get its reading without splitting
   anything (Catullus 51.10). Other hosts (meōpte, tuōpte) would need an analysis added, not splitting.
