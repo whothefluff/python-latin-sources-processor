@@ -483,9 +483,9 @@ def _consume_clitic_tokens(word: str, api_tokens: List[TokenResult], cursor: int
     reconstructed, macronized, mask = "", "", 0
     while cursor < len(api_tokens) and len(reconstructed) < len(word):
         token = api_tokens[cursor]
+        mask |= token['uncertainty_mask'] << len(reconstructed)
         reconstructed += token['word']
         macronized += token['macronized']
-        mask |= token['uncertainty_mask']
         cursor += 1
     if reconstructed != word:
         raise RuntimeError(

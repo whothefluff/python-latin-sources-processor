@@ -546,6 +546,17 @@ def test_macronizer_results_for_a_list_of_words_that_dont_match_it_raise(monkeyp
         process_work._get_macronization_data_from_api(words)
 
 
+@pytest.mark.parametrize("word, parts, expected", [
+    ("Venereque", [("Venere", "Venere", 0b10), ("que", "que", 0)], ("Venereque", 0b10)),
+    ("respublica", [("res", "rēs", 0), ("publica", "pūblica", 0b1000000)], ("rēspūblica", 0b1000000000)),
+], ids=["the host of an enclitic", "the second word of a compound"])
+def test_each_part_of_a_word_that_the_macronizer_splits_keeps_its_uncertain_letters(monkeypatch, word, parts,
+                                                                                     expected):
+    _macronizer_answers(monkeypatch, [("et", "et", 0)] + parts)
+
+    assert process_work._get_macronization_data_from_api({word}) == {word: expected}
+
+
 # A capitalized i ("go!") mid-sentence, which the reader looks up as I before i, and the numeral I
 _CARMEN_WITH_I = _CARMEN.replace('</l>\n  </div>', '</l>\n    <l n="4">et I et I.</l>\n  </div>')
 _CARMEN_WITH_I_MACRONIZED = _CARMEN_MACRONIZED + [("et", "et", 0), ("I", "Ī", 0), ("et", "et", 0), ("I", "I", 0),
