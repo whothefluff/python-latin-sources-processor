@@ -8,7 +8,7 @@ import sys
 import tempfile
 from itertools import product
 from pathlib import Path
-from typing import Dict, List, NamedTuple, Set, Any, Tuple, Callable
+from typing import Dict, List, NamedTuple, Set, Any, Tuple, Callable, cast
 
 import requests
 from scripts.common.macrons import strip_macrons
@@ -397,7 +397,8 @@ class MorphologicalAnalyzer:
                     if override is not None:
                         fields_changed.extend(
                             (rule, field) for field, value in override.items()
-                            if set(value if isinstance(value, list) else [value]) != {inflection[field]})
+                            if set(value if isinstance(value, list) else [value])
+                               != {cast(str | None, inflection[field])})
 
                         # A list means that this field has multiple possible values.
                         # Expand the single Morpheus inflection into one inflection per
