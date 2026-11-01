@@ -92,7 +92,7 @@ def test_the_words_without_an_analysis_written_fail_the_run_after_the_last_word(
         "fuit": "Morpheus's answer for 'fuit' has no annotation: {'error': {'$': 'Morpheus crashed'}}",
     }
     assert sorted(map(tuple, pd.read_csv(analyzer.details_file, dtype=str, keep_default_na=False).values)) == [
-        ("est", "0", "sum1"), ("fictum", "0", "")]
+        ("est", "0", "sum1", ""), ("fictum", "0", "", "")]
 
 
 def test_a_word_that_a_rule_is_for_and_that_gets_no_reading_fails_the_run(monkeypatch, morpheus, tmp_path):
@@ -108,7 +108,7 @@ def test_a_word_that_a_rule_is_for_and_that_gets_no_reading_fails_the_run(monkey
         "fictum": "Rules in FORMS change nothing for 'fictum': fingo {'stemtype': 'pp4'}: none of the word's readings "
                   "has its values"}
     assert sorted(map(tuple, pd.read_csv(analyzer.details_file, dtype=str, keep_default_na=False).values)) == [
-        ("est", "0", "sum1")]
+        ("est", "0", "sum1", "")]
 
 
 def test_a_rule_for_a_word_whose_readings_are_its_hosts_without_the_enclitic_finds_them_there(monkeypatch, tmp_path):
@@ -118,7 +118,7 @@ def test_a_rule_for_a_word_whose_readings_are_its_hosts_without_the_enclitic_fin
     volo = {"dict": {"hdwd": {"$": "volo1"}, "pofs": {"$": "verb"}}, "infl": _verb("volu", "it")}
 
     assert _written(monkeypatch, tmp_path, "voluitque", {"voluitque": [volvo], "voluit": [volo]}) == (
-        [("voluitque", "0", "volo1")], [("voluitque", "0", "verb")])
+        [("voluitque", "0", "volo1", "")], [("voluitque", "0", "verb")])
 
 
 def test_morpheus_is_given_10_seconds_to_answer(monkeypatch):
@@ -151,7 +151,7 @@ def test_a_run_adds_the_new_words_analyses_to_the_outputs(morpheus, tmp_path):
     assert sorted(_outputs(tmp_path)) == ["morphological_detail_inflections.csv", "morphological_details.csv"]
     assert sorted(map(tuple, pd.read_csv(tmp_path / "output" / "morphological_analysis" / "morphological_details.csv",
                                          dtype=str, keep_default_na=False).values)) == [
-        ("est", "0", "sum1"), ("fictum", "0", "")]
+        ("est", "0", "sum1", ""), ("fictum", "0", "", "")]
 
 
 @pytest.mark.parametrize("word, error, message", [
@@ -218,15 +218,20 @@ _NOUN_HERCULES = {"dict": {"hdwd": {"$": "Hercules"}, "pofs": {"$": "noun"}, "de
                            "num": {"$": "singular"}, "stemtype": {"$": "es_is"}}}
 
 
-def _written(monkeypatch, tmp_path, word, entries_by_spelling):
-    """Returns the items written for word, and each reading's form, item and part of speech, when Morpheus answers
-    each spelling with its entries, each body with an id of its own."""
+def _morpheus_answering(monkeypatch, entries_by_spelling):
+    """Makes Morpheus answer each spelling with its entries, each body with an id of its own."""
     def get(url, params, timeout):
         entries = entries_by_spelling.get(params["word"], [])
         return _Response(201, _answer(*({"about": f"urn:uuid:{params['word']}{i}", "rest": {"entry": entry}}
                                         for i, entry in enumerate(entries))))
 
     monkeypatch.setattr(process_morpheus_perseids_api.requests, "get", get)
+
+
+def _written(monkeypatch, tmp_path, word, entries_by_spelling):
+    """Returns the items written for word, and each reading's form, item and part of speech, when Morpheus answers
+    each spelling with its entries."""
+    _morpheus_answering(monkeypatch, entries_by_spelling)
     _library(tmp_path, [word])
     analyzer = MorphologicalAnalyzer(str(tmp_path))
     analyzer.process_words()
@@ -243,7 +248,7 @@ def _items_of(monkeypatch, tmp_path, word, entries_by_spelling):
 def test_entries_of_the_two_spellings_that_only_share_a_headword_are_both_kept(monkeypatch, tmp_path):
     assert _items_of(monkeypatch, tmp_path, "hercules", {"hercules": [_EXCLAMATION_HERCULES],
                                                          "Hercules": [_NOUN_HERCULES]}) == [
-        ("Hercules", "1", "Hercules"), ("hercules", "0", "Hercules")]
+        ("Hercules", "1", "Hercules", ""), ("hercules", "0", "Hercules", "")]
 
 
 def test_an_entry_under_a_headword_that_only_the_capitalized_answer_has_is_kept_whole(monkeypatch, tmp_path):
@@ -264,14 +269,14 @@ def test_an_entry_under_a_headword_that_only_the_capitalized_answer_has_is_kept_
                       "num": {"$": "singular"}, "stemtype": {"$": "us_eris"}}}
 
     assert _written(monkeypatch, tmp_path, "venere", {"venere": [venio, venor], "Venere": [venus]}) == (
-        [("Venere", "2", "Venus"), ("venere", "0", "venio"), ("venere", "1", "venor")],
+        [("Venere", "2", "Venus", ""), ("venere", "0", "venio", ""), ("venere", "1", "venor", "")],
         [("Venere", "2", "noun"), ("venere", "0", "verb"), ("venere", "1", "verb")])
 
 
 def test_an_entry_that_both_spellings_give_is_kept_once(monkeypatch, tmp_path):
     assert _items_of(monkeypatch, tmp_path, "hercules", {"hercules": [_NOUN_HERCULES],
                                                          "Hercules": [_NOUN_HERCULES]}) == [
-        ("Hercules", "0", "Hercules")]
+        ("Hercules", "0", "Hercules", "")]
 
 
 def test_a_capitalized_headword_gains_only_the_readings_that_the_lowercase_answer_lacks(monkeypatch, tmp_path):
@@ -280,7 +285,7 @@ def test_a_capitalized_headword_gains_only_the_readings_that_the_lowercase_answe
 
     assert _written(monkeypatch, tmp_path, "hercules", {"hercules": [_EXCLAMATION_HERCULES],
                                                         "Hercules": [noun_and_exclamation]}) == (
-        [("Hercules", "1", "Hercules"), ("hercules", "0", "Hercules")],
+        [("Hercules", "1", "Hercules", ""), ("hercules", "0", "Hercules", "")],
         [("Hercules", "1", "noun"), ("hercules", "0", "interjection")])
 
 
@@ -296,7 +301,7 @@ def test_a_stem_that_differs_only_in_case_gives_no_second_reading(monkeypatch, t
     assert _written(monkeypatch, tmp_path, "Hymenaeus", {
         "hymenaeus": [{"dict": hymenaeus, "infl": noun("hyme^nae")}],
         "Hymenaeus": [{"dict": hymenaeus, "infl": [noun("Hyme^nae"), noun("hyme^nae")]}]}) == (
-        [("Hymenaeus", "0", "Hymenaeus")],
+        [("Hymenaeus", "0", "Hymenaeus", "")],
         [("Hymenaeus", "0", "noun")])
 
 
@@ -317,7 +322,7 @@ def test_a_reading_that_another_headword_has_is_still_new_under_its_own(monkeypa
         "fluctus": [entry("fluctus", noun("fluct", "us", "nominative")),
                     entry("Fluctus2", noun("fluct", "u_s", "genitive"))],
         "Fluctus": [entry("Fluctus2", noun("Fluct", "us", "nominative"))]}) == [
-        ("Fluctus", "1", "Fluctus2"), ("Fluctus", "2", "Fluctus2"), ("fluctus", "0", "fluctus")]
+        ("Fluctus", "1", "Fluctus2", ""), ("Fluctus", "2", "Fluctus2", ""), ("fluctus", "0", "fluctus", "")]
 
 
 def test_a_lowercase_headword_has_only_the_readings_of_the_lowercase_answer(monkeypatch, tmp_path):
@@ -332,7 +337,66 @@ def test_a_lowercase_headword_has_only_the_readings_of_the_lowercase_answer(monk
     assert _items_of(monkeypatch, tmp_path, "novae", {
         "novae": [novus],
         "Novae": [{"dict": {"hdwd": {"$": "novus"}, "pofs": {"$": "noun"}}, "infl": [adjective, shops]}]}) == [
-        ("novae", "0", "novus")]
+        ("novae", "0", "novus", "")]
+
+
+#: The case and number of each reading in ae of a feminine of the 1st declension
+_READINGS_IN_AE = [("genitive", "singular"), ("dative", "singular"), ("nominative", "plural"), ("vocative", "plural")]
+
+
+def _first_declension_entry(headword, stem, readings, sublemma=""):
+    """Returns one of Morpheus's entries of a feminine noun of the 1st declension, with a reading in ae for each case
+    and number, and the sublemma of a word that L&S gives inside the headword's entry."""
+    return {"dict": {"hdwd": {"$": headword}, **({"sublemma": {"$": sublemma}} if sublemma else {}),
+                     "pofs": {"$": "noun"}, "decl": {"$": "1st"}, "gend": {"$": "feminine"}},
+            "infl": [{"term": {"stem": {"$": stem}, "suff": {"$": "ae"}}, "pofs": {"$": "noun"}, "decl": {"$": "1st"},
+                      "case": {"$": case}, "gend": {"$": "feminine"}, "num": {"$": number}, "stemtype": {"$": "a_ae"}}
+                     for case, number in readings]}
+
+
+def _inflections_written(project_root):
+    """Returns each reading's form, item, stem, case and number in the output files, in their order."""
+    inflections = pd.read_csv(project_root / "output" / "morphological_analysis" /
+                              "morphological_detail_inflections.csv", dtype=str, keep_default_na=False)
+    return list(zip(inflections["form"], inflections["item"], inflections["stem"], inflections["case"],
+                    inflections["number"]))
+
+
+def test_a_capitalized_sublemma_that_only_the_capitalized_answer_has_is_kept_whole(monkeypatch, tmp_path):
+    # Morpheus's answers: the form horae is hora1's, the hour, and Horae is also a form of Hora2 and Ora2, two
+    # entries of Hersilia as a goddess, and of the Hours, a word inside hora1's entry. A lowercase horae in a text is
+    # the hour alone
+    hora = _first_declension_entry("hora1", "ho_r", _READINGS_IN_AE)
+    _morpheus_answering(monkeypatch, {
+        "horae": [hora],
+        "Horae": [_first_declension_entry("Hora2", "Ho_^r", _READINGS_IN_AE),
+                  _first_declension_entry("Ora2", "Ho^r", _READINGS_IN_AE), hora,
+                  _first_declension_entry("hora1", "Ho_r", _READINGS_IN_AE[2:], sublemma="Horae")]})
+    _library(tmp_path, ["horae"])
+
+    process_morpheus_perseids_api.analyze(str(tmp_path))
+
+    assert sorted(map(tuple, pd.read_csv(tmp_path / "output" / "morphological_analysis" / "morphological_details.csv",
+                                         dtype=str, keep_default_na=False).values)) == [
+        ("Horae", "1", "Hora2", ""), ("Horae", "2", "Ora2", ""), ("Horae", "3", "hora1", "Horae"),
+        ("horae", "0", "hora1", "")]
+    assert [reading for reading in _inflections_written(tmp_path) if reading[1] in ("0", "3")] == [
+        ("horae", "0", "hōr", "genitive", "singular"), ("horae", "0", "hōr", "dative", "singular"),
+        ("horae", "0", "hōr", "nominative", "plural"), ("horae", "0", "hōr", "vocative", "plural"),
+        ("Horae", "3", "Hōr", "nominative", "plural"), ("Horae", "3", "Hōr", "vocative", "plural")]
+
+
+def test_a_capitalized_sublemma_gains_only_the_readings_that_the_lowercase_answer_lacks(monkeypatch, tmp_path):
+    # A constructed answer: Horae with hora1's lowercase stem, so that both answers have it. Only the capitalized one
+    # gives it the vocative, which the lowercase one gives hora1's own word
+    hora = _first_declension_entry("hora1", "ho_r", _READINGS_IN_AE)
+
+    assert _items_of(monkeypatch, tmp_path, "horae", {
+        "horae": [hora, _first_declension_entry("hora1", "ho_r", _READINGS_IN_AE[2:3], sublemma="Horae")],
+        "Horae": [hora, _first_declension_entry("hora1", "ho_r", _READINGS_IN_AE[2:], sublemma="Horae")]}) == [
+        ("Horae", "1", "hora1", "Horae"), ("Horae", "2", "hora1", "Horae"), ("horae", "0", "hora1", "")]
+    assert [reading for reading in _inflections_written(tmp_path) if reading[0] == "Horae"] == [
+        ("Horae", "1", "hōr", "nominative", "plural"), ("Horae", "2", "hōr", "vocative", "plural")]
 
 
 def test_both_spellings_of_a_common_vowel_are_written(monkeypatch, tmp_path):
@@ -351,21 +415,22 @@ def test_both_spellings_of_a_common_vowel_are_written(monkeypatch, tmp_path):
         ("0", "2", "tibi", "feminine"), ("0", "3", "tibī", "feminine")]
 
 
-def _library_of_one_certain_est(project_root):
-    """Writes a library of one token, est, whose macronization ēst is certain."""
+def _library_of_one_certain_token(project_root, word, proper_noun_state, macronized):
+    """Writes a library of one token, word, in the work Carmen at 1.1, whose macronization is certain."""
     library = project_root / "output" / "library"
     library.mkdir(parents=True)
-    pd.DataFrame({"workId": ["w"], "idx": [0], "word": ["est"], "sourceReference": ["1.1"], "properNounState": [0],
-                  "tokenType": [1], "enclitic": [""], "expansion": [""]}).to_csv(library / "work_contents.csv",
-                                                                                  index=False)
+    pd.DataFrame({"workId": ["w"], "idx": [0], "word": [word], "sourceReference": ["1.1"],
+                  "properNounState": [proper_noun_state], "tokenType": [1], "enclitic": [""],
+                  "expansion": [""]}).to_csv(library / "work_contents.csv", index=False)
     (library / "works.csv").write_text("id,name\nw,Carmen\n", encoding="utf-8")
-    (library / "unambiguous_macronizations.csv").write_text("word,macronizedWord\nest,ēst\n", encoding="utf-8")
+    (library / "unambiguous_macronizations.csv").write_text(f"word,macronizedWord\n{word},{macronized}\n",
+                                                            encoding="utf-8")
     (library / "work_macronizations.csv").write_text("workId,idx,macronizedWord,uncertaintyBitMask\n",
                                                      encoding="utf-8")
 
 
 def test_a_run_logs_the_readings_that_certain_vowels_rule_out(morpheus, tmp_path, caplog):
-    _library_of_one_certain_est(tmp_path)
+    _library_of_one_certain_token(tmp_path, "est", 0, "ēst")
 
     with caplog.at_level("INFO"):
         process_morpheus_perseids_api.analyze(str(tmp_path))
@@ -379,11 +444,11 @@ def test_a_run_logs_the_readings_that_certain_vowels_rule_out(morpheus, tmp_path
 
 
 def test_the_log_lists_the_most_tokens_first_with_three_places_each(monkeypatch, morpheus, tmp_path, caplog):
-    _library_of_one_certain_est(tmp_path)
+    _library_of_one_certain_token(tmp_path, "est", 0, "ēst")
     many = ["Carmen 1.1", "Carmen 1.1", "Carmen 1.2", "Carmen 1.3", "Carmen 1.4"]
     monkeypatch.setattr(process_morpheus_perseids_api, "readings_ruled_out_by_certain_vowels",
                         lambda *_: RuledOutReadings({"mihi": ["Carmen 1.1"], "ego": ["Carmen 1.2"], "tibi": many},
-                                                    {Reading("tibī", "tu"): many}))
+                                                    {Reading("tibī", "tu", ""): many}))
 
     with caplog.at_level("INFO"):
         process_morpheus_perseids_api.analyze(str(tmp_path))
@@ -395,6 +460,32 @@ def test_the_log_lists_the_most_tokens_first_with_three_places_each(monkeypatch,
         "  mihi: 1, such as Carmen 1.1",
         "1 readings are ruled out by the certain vowels of some tokens, by their spelling and lemma",
         "  tibī (tu): 5, such as Carmen 1.1, Carmen 1.2, Carmen 1.3",
+    ]
+
+
+def test_the_log_keeps_apart_the_words_of_one_entry_that_share_a_form(monkeypatch, tmp_path, caplog):
+    # Morpheus's answer to Dardaniae, a form of Dardania under Dardani, and of Dardania and Dardanius under Dardanus1.
+    # A constructed macronization, Dardāniae, is certain of a long a that the three words' readings have short
+    _morpheus_answering(monkeypatch, {"Dardaniae": [
+        _first_declension_entry("Dardani", "Darda^ni", _READINGS_IN_AE[:2], sublemma="Dardania"),
+        _first_declension_entry("Dardanus1", "Darda^ni", _READINGS_IN_AE[:2], sublemma="Dardania"),
+        {"dict": {"hdwd": {"$": "Dardanus1"}, "sublemma": {"$": "Dardanius"}, "pofs": {"$": "adjective"},
+                  "decl": {"$": "1st & 2nd"}},
+         "infl": [{"term": {"stem": {"$": "Darda^n"}, "suff": {"$": "iae"}}, "pofs": {"$": "adjective"},
+                   "decl": {"$": "1st & 2nd"}, "case": {"$": case}, "gend": {"$": "feminine"}, "num": {"$": number},
+                   "stemtype": {"$": "ius_ia_ium"}} for case, number in _READINGS_IN_AE]}]})
+    _library_of_one_certain_token(tmp_path, "Dardaniae", 1, "Dardāniae")
+
+    with caplog.at_level("INFO"):
+        process_morpheus_perseids_api.analyze(str(tmp_path))
+
+    assert [record.getMessage() for record in caplog.records][-6:] == [
+        "1 word tokens have certain vowels that rule out every reading, by their macronization",
+        "  dardāniae: 1, such as Carmen 1.1",
+        "3 readings are ruled out by the certain vowels of some tokens, by their spelling and lemma",
+        "  Dardaniae (Dardania under Dardani): 1, such as Carmen 1.1",
+        "  Dardaniae (Dardania under Dardanus1): 1, such as Carmen 1.1",
+        "  Dardaniae (Dardanius under Dardanus1): 1, such as Carmen 1.1",
     ]
 
 

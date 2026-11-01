@@ -23,8 +23,8 @@ def _ruled_out(tmp_path, tokens, unambiguous_macronizations, work_macronizations
     _write(tmp_path / "unambiguous_macronizations.csv", ["word", "macronizedWord"], unambiguous_macronizations.items())
     _write(tmp_path / "work_macronizations.csv", ["workId", "idx", "macronizedWord", "uncertaintyBitMask"],
            ([_WORK, idx, macronized, mask] for idx, (macronized, mask) in work_macronizations.items()))
-    _write(tmp_path / "morphological_details.csv", ["form", "item", "dictionaryRef"],
-           ([form, item, lemma] for item, (form, _, _, lemma) in enumerate(readings)))
+    _write(tmp_path / "morphological_details.csv", ["form", "item", "dictionaryRef", "sublemma"],
+           ([form, item, lemma, ""] for item, (form, _, _, lemma) in enumerate(readings)))
     _write(tmp_path / "morphological_detail_inflections.csv", ["form", "item", "cnt", "stem", "suffix"],
            ([form, item, 0, stem, suffix] for item, (form, stem, suffix, _) in enumerate(readings)))
     return readings_ruled_out_by_certain_vowels(tmp_path, tmp_path / "morphological_details.csv",
@@ -43,7 +43,7 @@ def _word(word, state: int | None = 0, enclitic=""):
 
 def test_a_certain_vowel_rules_out_a_reading_of_the_other_length(tmp_path):
     assert _counts(_ruled_out(tmp_path, [_word("tibi"), _word("tibi")], {"tibi": "tibi"}, {},
-                              [("tibi", "tib", "ī", "tu")])) == ({"tibi": 2}, {("tibī", "tu"): 2})
+                              [("tibi", "tib", "ī", "tu")])) == ({"tibi": 2}, {("tibī", "tu", ""): 2})
 
 
 def test_each_token_is_referred_to_by_its_works_name_and_its_reference(tmp_path):
@@ -51,26 +51,26 @@ def test_each_token_is_referred_to_by_its_works_name_and_its_reference(tmp_path)
                            [("tibi", "tib", "ī", "tu")])
 
     assert ruled_out.every_reading == {"tibi": ["Carmen 1.0", "Carmen 1.1"]}
-    assert ruled_out.by_reading == {("tibī", "tu"): ["Carmen 1.0", "Carmen 1.1"]}
+    assert ruled_out.by_reading == {("tibī", "tu", ""): ["Carmen 1.0", "Carmen 1.1"]}
 
 
 def test_a_reading_that_another_reading_of_the_token_agrees_with_is_listed_alone(tmp_path):
     assert _counts(_ruled_out(tmp_path, [_word("serpens")], {"serpens": "serpēns"}, {},
                               [("serpens", "serp", "ens", "serpens"), ("serpens", "serp", "ēns", "serpo")])) == (
-        {}, {("serpens", "serpens"): 1})
+        {}, {("serpens", "serpens", ""): 1})
 
 
 def test_a_token_rules_out_a_reading_once_however_many_inflections_spell_it(tmp_path):
     assert _counts(_ruled_out(tmp_path, [_word("tibi")], {"tibi": "tibi"}, {},
                               [("tibi", "tib", "ī", "tu"), ("tibi", "tib", "ī", "tu")])) == (
-        {"tibi": 1}, {("tibī", "tu"): 1})
+        {"tibi": 1}, {("tibī", "tu", ""): 1})
 
 
 def test_tokens_are_counted_by_their_macronization_in_lowercase(tmp_path):
     assert _counts(_ruled_out(tmp_path, [_word("Consilio"), _word("consilio")], {},
                               {0: ("Cōnsiliō", 0), 1: ("cōnsiliō", 0)},
                               [("consilio", "consili", "ō", "consilium")])) == (
-        {"cōnsiliō": 2}, {("consiliō", "consilium"): 2})
+        {"cōnsiliō": 2}, {("consiliō", "consilium", ""): 2})
 
 
 def test_a_word_without_readings_is_left_out(tmp_path):
@@ -80,7 +80,7 @@ def test_a_word_without_readings_is_left_out(tmp_path):
 def test_the_work_macronization_comes_before_the_unambiguous_one(tmp_path):
     assert _counts(_ruled_out(tmp_path, [_word("consilio")], {"consilio": "consiliō"}, {0: ("cōnsiliō", 0)},
                               [("consilio", "consili", "ō", "consilium")])) == (
-        {"cōnsiliō": 1}, {("consiliō", "consilium"): 1})
+        {"cōnsiliō": 1}, {("consiliō", "consilium", ""): 1})
 
 
 def test_an_uncertain_vowel_rules_out_nothing(tmp_path):
@@ -99,7 +99,7 @@ def test_a_reading_with_other_letters_rules_out_nothing(tmp_path):
 
 def test_the_enclitic_that_morpheus_leaves_out_is_put_back(tmp_path):
     assert _counts(_ruled_out(tmp_path, [_word("arvaque", enclitic="que")], {}, {0: ("arvāque", 0)},
-                              [("arvaque", "arv", "a", "arvum")])) == ({"arvāque": 1}, {("arvaque", "arvum"): 1})
+                              [("arvaque", "arv", "a", "arvum")])) == ({"arvāque": 1}, {("arvaque", "arvum", ""): 1})
 
 
 def test_only_the_length_of_a_certain_vowel_is_compared(tmp_path):
@@ -113,24 +113,24 @@ _VENIO = [("Venere", "Vener", "e", "Venus"), ("venere", "vēn", "ēre", "venio")
 
 def test_a_name_has_only_the_capitalized_readings(tmp_path):
     assert _counts(_ruled_out(tmp_path, [_word("Venere", state=1)], {"Venere": "Venere"}, {}, _VENERE)) == (
-        {"venere": 1}, {("Vēnere", "Venus"): 1})
+        {"venere": 1}, {("Vēnere", "Venus", ""): 1})
 
 
 def test_a_common_word_has_only_the_lowercase_readings(tmp_path):
     assert _counts(_ruled_out(tmp_path, [_word("Venere", state=0)], {"venere": "venere"}, {}, _VENIO)) == (
-        {"venere": 1}, {("vēnēre", "venio"): 1})
+        {"venere": 1}, {("vēnēre", "venio", ""): 1})
 
 
 def test_a_word_that_can_be_either_has_both(tmp_path):
     assert _counts(_ruled_out(tmp_path, [_word("Venere", state=2)], {"Venere": "Venere"}, {}, _VENERE)) == (
-        {}, {("Vēnere", "Venus"): 1})
+        {}, {("Vēnere", "Venus", ""): 1})
     assert _counts(_ruled_out(tmp_path, [_word("Venere", state=2)], {"Venere": "Venere"}, {}, _VENIO)) == (
-        {}, {("vēnēre", "venio"): 1})
+        {}, {("vēnēre", "venio", ""): 1})
 
 
 def test_a_word_of_unknown_state_has_the_lowercase_readings(tmp_path):
     assert _counts(_ruled_out(tmp_path, [_word("Venere", state=None)], {"venere": "venere"}, {}, _VENIO)) == (
-        {"venere": 1}, {("vēnēre", "venio"): 1})
+        {"venere": 1}, {("vēnēre", "venio", ""): 1})
 
 
 def test_only_an_ending_that_morpheus_leaves_out_is_put_back(tmp_path):
@@ -141,7 +141,8 @@ def test_only_an_ending_that_morpheus_leaves_out_is_put_back(tmp_path):
 def test_a_token_with_an_expansion_has_its_readings_and_its_certain_macrons(tmp_path):
     assert _counts(_ruled_out(tmp_path, [("V", 0, 3, "", "quīnque"), ("M.", 1, 2, "", "Mārcus")], {}, {},
                               [("quinque", "quinqu", "e", "quinque"), ("Marcus", "Mārc", "us", "Marcus"),
-                               ("marcus", "marc", "us", "marcus")])) == ({"quīnque": 1}, {("quinque", "quinque"): 1})
+                               ("marcus", "marc", "us", "marcus")])) == (
+        {"quīnque": 1}, {("quinque", "quinque", ""): 1})
 
 
 def test_a_token_that_is_neither_a_word_nor_expanded_is_left_out(tmp_path):

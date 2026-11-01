@@ -24,15 +24,15 @@ class TestApplyContractCasing:
 class TestIsProperItem:
 
     @pytest.mark.parametrize("parts_of_speech", [["noun"], ["adjective"], ["interjection", "noun"]])
-    def test_a_capitalized_headword_with_a_noun_or_adjective_is_proper(self, parts_of_speech):
+    def test_a_capitalized_word_with_a_noun_or_adjective_is_proper(self, parts_of_speech):
         assert is_proper_item("Atticus", parts_of_speech)
 
 
     @pytest.mark.parametrize("parts_of_speech", [["interjection"], ["adverb"], []])
-    def test_a_capitalized_headword_without_a_noun_or_adjective_is_not_proper(self, parts_of_speech):
+    def test_a_capitalized_word_without_a_noun_or_adjective_is_not_proper(self, parts_of_speech):
         assert not is_proper_item("Hercules", parts_of_speech)
 
 
-    @pytest.mark.parametrize("headword", ["fabula", "", None])
-    def test_a_headword_that_is_not_capitalized_is_not_proper(self, headword):
-        assert not is_proper_item(headword, ["noun", "adjective"])
+    @pytest.mark.parametrize("word", ["fabula", "", None])
+    def test_a_word_that_is_not_capitalized_is_not_proper(self, word):
+        assert not is_proper_item(word, ["noun", "adjective"])

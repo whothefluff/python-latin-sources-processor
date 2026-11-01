@@ -102,6 +102,17 @@ def _entries(*entries):
     ]}}}
 
 
+def _words(*words):
+    """Returns Morpheus's JSON with one body for each headword, sublemma, part of speech and inflections. An entry's own
+    word has an empty sublemma, and Morpheus gives it none."""
+    return {"RDF": {"Annotation": {"Body": [
+        {"rest": {"entry": {"dict": {"hdwd": {"$": headword}, **({"sublemma": {"$": sublemma}} if sublemma else {}),
+                                     "pofs": {"$": pos}},
+                            "infl": inflections}}}
+        for headword, sublemma, pos, inflections in words
+    ]}}}
+
+
 _ATTICUS = _inflection("adjective", "Attic", "us", "us_a_um", gend="masculine", num="singular", case="nominative",
                        decl="1st & 2nd")
 _ATTICE = _inflection("adverb", "Attic", "e_")
@@ -145,7 +156,7 @@ def test_a_reading_with_the_grammar_of_one_before_is_dropped_with_all_its_spelli
 
 
 def _items(details):
-    return [(detail["form"], detail["item"], detail["dictionaryRef"]) for detail in details]
+    return [(detail["form"], detail["item"], detail["dictionaryRef"], detail["sublemma"]) for detail in details]
 
 
 def _readings(inflections):
@@ -157,14 +168,14 @@ def test_a_proper_adjective_is_capitalized_and_stays_an_adjective():
     details, inflections = MorphologicalAnalyzer.process_analysis(
         "atticus", _entries(("Atticus", "adjective", [_ATTICUS])))
 
-    assert _items(details) == [("Atticus", 0, "Atticus")]
+    assert _items(details) == [("Atticus", 0, "Atticus", "")]
     assert _readings(inflections) == [("Atticus", 0, 0, "adjective", "Atticus", "nominative")]
 
 
 def test_an_interjection_whose_headword_is_a_name_stays_lowercase():
     details, _ = MorphologicalAnalyzer.process_analysis("hercle", _entries(_HERCLE))
 
-    assert _items(details) == [("hercle", 0, "Hercules")]
+    assert _items(details) == [("hercle", 0, "Hercules", "")]
 
 
 def test_an_override_that_makes_an_inflection_a_noun_capitalizes_the_item(monkeypatch):
@@ -174,7 +185,7 @@ def test_an_override_that_makes_an_inflection_a_noun_capitalizes_the_item(monkey
 
     details, _ = MorphologicalAnalyzer.process_analysis("hercle", _entries(_HERCLE))
 
-    assert _items(details) == [("Hercle", 0, "Hercules")]
+    assert _items(details) == [("Hercle", 0, "Hercules", "")]
 
 
 def test_an_excluded_adjective_inflection_does_not_capitalize_the_item(monkeypatch):
@@ -184,8 +195,32 @@ def test_an_excluded_adjective_inflection_does_not_capitalize_the_item(monkeypat
     details, inflections = MorphologicalAnalyzer.process_analysis(
         "attice", _entries(("Atticus", "adjective", [_ATTICUS, _ATTICE])))
 
-    assert _items(details) == [("attice", 0, "Atticus")]
+    assert _items(details) == [("attice", 0, "Atticus", "")]
     assert [i["partOfSpeech"] for i in inflections] == ["adverb"]
+
+
+def _feminines_in_ae(pos, stem, suffix, stemtype, decl, readings):
+    """Returns Morpheus's feminine inflections of a stem with a suffix in ae, one for each case and number."""
+    return [_inflection(pos, stem, suffix, stemtype, case=case, gend="feminine", num=num, decl=decl)
+            for case, num in readings]
+
+
+_GENITIVE_AND_DATIVE = [("genitive", "singular"), ("dative", "singular")]
+_NOMINATIVE_AND_VOCATIVE = [("nominative", "plural"), ("vocative", "plural")]
+
+
+def test_a_form_of_three_words_has_an_item_for_each_with_its_sublemma():
+    # Morpheus's answer to Dardaniae, a form of Dardania under Dardani, and of Dardania and Dardanius under Dardanus1
+    dardania = _feminines_in_ae("noun", "Darda^ni", "ae", "a_ae", "1st", _GENITIVE_AND_DATIVE)
+    dardanius = _feminines_in_ae("adjective", "Darda^n", "iae", "ius_ia_ium", "1st & 2nd",
+                                 _GENITIVE_AND_DATIVE + _NOMINATIVE_AND_VOCATIVE)
+
+    details, _ = MorphologicalAnalyzer.process_analysis("dardaniae", _words(
+        ("Dardani", "Dardania", "noun", dardania), ("Dardanus1", "Dardania", "noun", dardania),
+        ("Dardanus1", "Dardanius", "adjective", dardanius)))
+
+    assert _items(details) == [("Dardaniae", 0, "Dardani", "Dardania"), ("Dardaniae", 1, "Dardanus1", "Dardania"),
+                               ("Dardaniae", 2, "Dardanus1", "Dardanius")]
 
 
 
@@ -203,7 +238,7 @@ _SATA = ("sata", "noun", [_inflection("noun", "sa^t", "i_s", "us_i", case="dativ
 def test_the_indeclinable_satis_is_an_adjective_without_gender(word, entries, item):
     details, inflections = MorphologicalAnalyzer.process_analysis(word, _entries(*entries))
 
-    assert _items(details)[item] == (word, item, "satis")
+    assert _items(details)[item] == (word, item, "satis", "")
     assert [(i["partOfSpeech"], i["gender"]) for i in inflections if i["item"] == item] == [
         ("adverb", None), ("adjective", None)]
 
@@ -225,6 +260,25 @@ _ADJECTIVE = {"partOfSpeech": "adjective", "gender": None}
 ], ids=["another headword", "another value", "another word"])
 def test_a_rule_changes_only_the_readings_of_its_headword_with_its_values_in_its_words(monkeypatch, rule):
     assert _satis_readings(monkeypatch, rule) == [("adverb", None), ("noun", "neuter")]
+
+
+@pytest.mark.parametrize("sublemma, readings", [
+    ("", [(0, "adjective", "genitive"), (0, "adjective", "dative"), (0, "adjective", "vocative"),
+          (1, "noun", "nominative"), (1, "noun", "vocative")]),
+    ("bonae", [(0, "adjective", "genitive"), (0, "adjective", "dative"), (0, "adjective", "nominative"),
+               (0, "adjective", "vocative"), (1, "noun", "vocative")]),
+], ids=["for the entry's own word", "for a word inside the entry"])
+def test_a_rule_changes_only_the_readings_of_its_word(monkeypatch, sublemma, readings):
+    # Morpheus's answer to bonae: the adjective bonus, and bonae, the good women, a word inside its entry
+    monkeypatch.setattr(process_morpheus_perseids_api, "FORMS", (
+        ReadingRule(headword="bonus", match={"case": "nominative"}, changes=None, sublemma=sublemma),))
+
+    _, inflections = MorphologicalAnalyzer.process_analysis("bonae", _words(
+        ("bonus", "", "adjective", _feminines_in_ae("adjective", "bo^n", "ae", "us_a_um", "1st & 2nd",
+                                                    _GENITIVE_AND_DATIVE + _NOMINATIVE_AND_VOCATIVE)),
+        ("bonus", "bonae", "noun", _feminines_in_ae("noun", "bo^n", "ae", "a_ae", "1st", _NOMINATIVE_AND_VOCATIVE))))
+
+    assert [(i["item"], i["partOfSpeech"], i["case"]) for i in inflections] == readings
 
 
 def test_a_word_that_none_of_its_readings_has_a_rule_for_raises(monkeypatch):

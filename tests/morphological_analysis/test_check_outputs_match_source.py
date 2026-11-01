@@ -11,7 +11,7 @@ def _write(path, text):
 def test_outputs_built_from_another_source_are_refused(tmp_path):
     _write(tmp_path / "output" / "library" / "work_contents.csv", "word\njam\n")
     _write(tmp_path / "output" / "morphological_analysis" / "morphological_details.csv",
-           "form,item,dictionaryRef\niam,0,jam\n")
+           "form,item,dictionaryRef,sublemma\niam,0,jam,\n")
 
     with pytest.raises(ValueError, match="iam"):
         MorphologicalAnalyzer(str(tmp_path))
@@ -20,7 +20,7 @@ def test_outputs_built_from_another_source_are_refused(tmp_path):
 def test_outputs_missing_forms_of_the_source_are_extended(tmp_path):
     _write(tmp_path / "output" / "library" / "work_contents.csv", "word\njam\nest\n")
     _write(tmp_path / "output" / "morphological_analysis" / "morphological_details.csv",
-           "form,item,dictionaryRef\nest,0,sum1\n")
+           "form,item,dictionaryRef,sublemma\nest,0,sum1,\n")
 
     analyzer = MorphologicalAnalyzer(str(tmp_path))
 

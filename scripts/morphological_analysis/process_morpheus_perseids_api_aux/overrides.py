@@ -15,19 +15,19 @@ ANALYSIS_ALIASES = {
 #: Detached enclitics: the ne of tune is -ne, apart from the word ne
 DETACHED_ENCLITICS = {
     "-que": (
-        [{"form": "-que", "item": 0, "dictionaryRef": "que"}],
+        [{"form": "-que", "item": 0, "dictionaryRef": "que", "sublemma": ""}],
         [{"form": "-que", "item": 0, "cnt": 0, "partOfSpeech": "conjunction", "stem": "que"}],
     ),
     "-ne": (
-        [{"form": "-ne", "item": 0, "dictionaryRef": "ne2"}],
+        [{"form": "-ne", "item": 0, "dictionaryRef": "ne2", "sublemma": ""}],
         [{"form": "-ne", "item": 0, "cnt": 0, "partOfSpeech": "adverb", "stem": "ne"}],
     ),
     "-ve": (
-        [{"form": "-ve", "item": 0, "dictionaryRef": "ve1"}],
+        [{"form": "-ve", "item": 0, "dictionaryRef": "ve1", "sublemma": ""}],
         [{"form": "-ve", "item": 0, "cnt": 0, "partOfSpeech": "conjunction", "stem": "ve"}],
     ),
     "-dum": (
-        [{"form": "-dum", "item": 0, "dictionaryRef": "dum"}],
+        [{"form": "-dum", "item": 0, "dictionaryRef": "dum", "sublemma": ""}],
         [{"form": "-dum", "item": 0, "cnt": 0, "partOfSpeech": "adverb", "stem": "dum"}],
     ),
 }
@@ -43,6 +43,7 @@ class ReadingRule(NamedTuple):
     match: Mapping[str, str]  # the inflection's elements, as Morpheus names them
     changes: Mapping[str, object] | None  # output fields, a list giving one inflection per value; None drops it
     words: FrozenSet[str] = frozenset()  # the words it's for; none: every word with the reading
+    sublemma: str = ""  # the word in the headword's entry it's for, as sublemma has it; "": the entry's own word
 
 
 # The elements of Morpheus's inflections that a rule can match, and the output fields that it can change

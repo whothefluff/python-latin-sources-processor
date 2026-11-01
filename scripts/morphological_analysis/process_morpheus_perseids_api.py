@@ -24,23 +24,26 @@ from scripts.morphological_analysis.process_morpheus_perseids_api_aux.overrides 
 
 
 def _merge_bodies(analysis_lower: Dict, analysis_title: Dict) -> List[Dict]:
-    """Merge Body entries from lowercase + Title-case queries. Morpheus answers a lowercase word with its lowercase
-    analyses only, so proper-noun-only entries (e.g. 'Athena') never surface there. A capitalized word it answers with
-    those analyses too, grouped with the capitalized ones under their headword: 'Hercules' gives one entry with the
-    noun and the exclamation that 'hercules' gives. So an entry of the capitalized answer is kept whole under a headword
-    that the lowercase answer doesn't have. Under one it has, the entry keeps the inflections that are new when its
-    headword is capitalized (Hercules's noun), and is dropped when it isn't: a lowercase headword's readings are the
-    lowercase answer's. An inflection is new when its headword doesn't have it yet, a stem that differs only in case
-    aside: Hymenaeus has the god's stem and the song's, Hymenae and hymenae, and the capitalized answer gives both,
-    which read the same. Lowercase-sourced bodies come first."""
+    """Merge Body entries from lowercase + Title-case queries. Morpheus answers a lowercase query with its lowercase
+    analyses only, so proper-noun-only entries (e.g. 'Athena') never surface there. A capitalized query it answers with
+    those analyses too, grouped with the capitalized ones under their word: 'Hercules' gives one entry with the noun
+    and the exclamation that 'hercules' gives. An entry's word is its headword, with the sublemma that Morpheus gives a
+    word that L&S lists inside the headword's entry (Horae in hora1's). So an entry of the capitalized answer is kept
+    whole under a word that the lowercase answer doesn't have, as Horae is. Under one it has, the entry keeps the
+    inflections that are new when the word is capitalized (Hercules's noun), and is dropped when it isn't: a lowercase
+    word's readings are the lowercase answer's. A word is capitalized when its sublemma is, or its headword when it has
+    none. An inflection is new when its word doesn't have it yet, a stem that differs only in case aside: Hymenaeus has
+    the god's stem and the song's, Hymenae and hymenae, and the capitalized answer gives both, which read the same.
+    Lowercase-sourced bodies come first."""
     def get_bodies(analysis):
         if not analysis or "RDF" not in analysis or "Body" not in analysis["RDF"]["Annotation"]:
             return []
         bodies = analysis["RDF"]["Annotation"]["Body"]
         return bodies if isinstance(bodies, list) else [bodies]
 
-    def headword_of(body):
-        return body.get("rest", {}).get("entry", {}).get("dict", {}).get("hdwd", {}).get("$")
+    def word_of(body):
+        dictionary = body.get("rest", {}).get("entry", {}).get("dict", {})
+        return dictionary.get("hdwd", {}).get("$"), dictionary.get("sublemma", {}).get("$")
 
     def inflections_of(body):
         inflections = body.get("rest", {}).get("entry", {}).get("infl", [])
@@ -54,21 +57,22 @@ def _merge_bodies(analysis_lower: Dict, analysis_title: Dict) -> List[Dict]:
         return json.dumps(inflection, sort_keys=True)
 
     merged = list(get_bodies(analysis_lower))
-    headwords = {headword_of(body) for body in merged}
-    known = {(headword_of(body), reading_of(inflection)) for body in merged for inflection in inflections_of(body)}
+    words = {word_of(body) for body in merged}
+    known = {(word_of(body), reading_of(inflection)) for body in merged for inflection in inflections_of(body)}
     for body in get_bodies(analysis_title):
-        headword = headword_of(body)
-        if headword is not None and headword in headwords:
-            if not headword[0].isupper():
+        word = word_of(body)
+        headword, sublemma = word
+        if headword is not None and word in words:
+            if not (sublemma or headword)[0].isupper():
                 continue
             new = [inflection for inflection in inflections_of(body)
-                   if (headword, reading_of(inflection)) not in known]
+                   if (word, reading_of(inflection)) not in known]
             if not new:
                 continue
             body = {**body, "rest": {**body["rest"], "entry": {**body["rest"]["entry"], "infl": new}}}
-        headwords.add(headword)
+        words.add(word)
         merged.append(body)
-        known.update((headword, reading_of(inflection)) for inflection in inflections_of(body))
+        known.update((word, reading_of(inflection)) for inflection in inflections_of(body))
     return merged
 
 
@@ -270,7 +274,7 @@ class MorphologicalAnalyzer:
             or "RDF" not in analysis
             or "Body" not in analysis["RDF"]["Annotation"]
         ):
-            details.append({"form": word, "item": 0, "dictionaryRef": None})
+            details.append({"form": word, "item": 0, "dictionaryRef": None, "sublemma": None})
             return details, inflections
 
         bodies = analysis["RDF"]["Annotation"]["Body"]
@@ -301,6 +305,7 @@ class MorphologicalAnalyzer:
                 dict_info = entry["dict"]
                 headword = dict_info["hdwd"]["$"].replace("^", "")
                 headword = DICT_REF_REPLACEMENTS.get(headword, headword)
+                sublemma = dict_info.get("sublemma", {}).get("$", "")
 
                 infl_list = entry.get("infl", [])
                 if not isinstance(infl_list, list):
@@ -380,7 +385,7 @@ class MorphologicalAnalyzer:
                         #"gend": gender,
                     }
 
-                    rule = MorphologicalAnalyzer._rule_for(word, headword, infl)
+                    rule = MorphologicalAnalyzer._rule_for(word, headword, sublemma, infl)
                     if rule is None:
                         item_inflections.append(inflection)
                         continue
@@ -430,12 +435,13 @@ class MorphologicalAnalyzer:
                     if without != readings:
                         rules_that_change_readings.append(rule)
 
-                # Judged on the inflections the item keeps, after overrides and exclusions. An interjection whose
-                # headword is a name ("hercle" -> "Hercules") isn't proper, but a proper adjective ("Atticus") is
+                # Judged by the item's word, its sublemma or else its headword, and by the inflections it keeps, after
+                # overrides and exclusions. An interjection whose headword is a name ("hercle" -> "Hercules") isn't
+                # proper, but a proper adjective ("Atticus") is, and so is Horae, a word inside hora1's entry
                 contract_form = apply_contract_casing(
-                    word, is_proper_item(headword, (i["partOfSpeech"] for i in item_inflections)))
+                    word, is_proper_item(sublemma or headword, (i["partOfSpeech"] for i in item_inflections)))
 
-                detail = {"form": contract_form, "item": item, "dictionaryRef": headword}
+                detail = {"form": contract_form, "item": item, "dictionaryRef": headword, "sublemma": sublemma}
                 details.append(detail)
 
                 for inflection in item_inflections:
@@ -523,10 +529,11 @@ class MorphologicalAnalyzer:
         return frozenset((field, value) for field, value in infl.items() if field not in ("stem", "cnt", "spellings"))
 
     @staticmethod
-    def _rule_for(word: str, headword: str, infl: Dict) -> ReadingRule | None:
-        """Returns the rule in FORMS for one of Morpheus's inflections of word under headword, or None. Raises when
-        several rules are for it."""
-        rules = [rule for rule in FORMS if rule.headword == headword and (not rule.words or word in rule.words)
+    def _rule_for(word: str, headword: str, sublemma: str, infl: Dict) -> ReadingRule | None:
+        """Returns the rule in FORMS for one of Morpheus's inflections of word under headword and sublemma, or None.
+        Raises when several rules are for it."""
+        rules = [rule for rule in FORMS if rule.headword == headword and rule.sublemma == sublemma
+                 and (not rule.words or word in rule.words)
                  and all(infl.get(element, {}).get("$") == value for element, value in rule.match.items())]
         if len(rules) > 1:
             raise ValueError(f"'{word}': an inflection of {headword} has {len(rules)} rules in FORMS: {rules}")
@@ -580,6 +587,7 @@ class MorphologicalAnalyzer:
                 "form",
                 "item",
                 "dictionaryRef",
+                "sublemma",
             ]
 
             inflections_fieldnames = [
@@ -1286,14 +1294,15 @@ class MorphologicalDataValidator:
                 self._log_warning(line_num, 'verb', form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
 
     def _validate_casing_pos_gate(self):
-        """A form is capitalized exactly when its item is proper: a capitalized headword with a noun or adjective
-        inflection. Catches 'Hercle' capitalized (an interjection whose headword is Hercules) and a proper adjective
-        like 'atticus' left lowercase."""
-        refs: Dict[Tuple[str, str], str | None] = {}
+        """A form is capitalized exactly when its item is proper: a capitalized word, its sublemma or else its
+        headword, with a noun or adjective inflection. Catches 'Hercle' capitalized (an interjection whose headword is
+        Hercules), a proper adjective like 'atticus' left lowercase, and 'horae' for Horae, a word inside hora1's
+        entry."""
+        words: Dict[Tuple[str, str], str | None] = {}
         with open(self.details_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                refs[(row['form'], row['item'])] = row.get('dictionaryRef')
+                words[(row['form'], row['item'])] = row['sublemma'] or row.get('dictionaryRef')
 
         groups: Dict[Tuple[str, str], List[str | None]] = {}
         with open(self.file_path, 'r', encoding='utf-8') as f:
@@ -1302,12 +1311,12 @@ class MorphologicalDataValidator:
                 groups.setdefault((row['form'], row['item']), []).append(row.get('partOfSpeech'))
 
         for (form, item), pos_list in groups.items():
-            ref = refs.get((form, item))
+            word = words.get((form, item))
             is_capitalized = bool(form) and form[0].isupper()
-            if is_capitalized != is_proper_item(ref, pos_list):
+            if is_capitalized != is_proper_item(word, pos_list):
                 self._log_warning(0, 'casing', form,
-                                  f"item {item}: {'capitalized' if is_capitalized else 'lowercase'} but headword "
-                                  f"'{ref}' with pos {pos_list} says otherwise.")
+                                  f"item {item}: {'capitalized' if is_capitalized else 'lowercase'} but word "
+                                  f"'{word}' with pos {pos_list} says otherwise.")
 
     def _validate_no_duplicate_details(self):
         """MorphologicalDetails rows must be unique on (form, item)."""
@@ -1366,6 +1375,7 @@ _VOWELS = _LONG_VOWELS | frozenset("aeiouyAEIOUY")
 class Reading(NamedTuple):
     spelling: str
     lemma: str
+    sublemma: str
 
 
 class RuledOutReadings(NamedTuple):
@@ -1392,15 +1402,17 @@ def readings_ruled_out_by_certain_vowels(library_dir: Path, details_path: Path,
     back an ending that Morpheus leaves out of it, such as an enclitic, and a spelling with more or fewer letters than
     the token rules nothing out."""
     with open(details_path, encoding="utf-8") as f:
-        lemmas = {(row["form"], row["item"]): row["dictionaryRef"] for row in csv.DictReader(f)}
+        lemma_and_sublemma = {(row["form"], row["item"]): (row["dictionaryRef"], row["sublemma"])
+                              for row in csv.DictReader(f)}
     readings_by_form: Dict[str, List[Reading]] = {}
     with open(inflections_path, encoding="utf-8") as f:
         for row in csv.DictReader(f):
             spelling = row["stem"].replace("-", "") + row["suffix"]
             ending = row["form"][len(spelling):]
+            lemma, sublemma = lemma_and_sublemma[(row["form"], row["item"])]
             readings_by_form.setdefault(row["form"], []).append(
                 Reading(spelling + ending if ending.lower() in MorphologicalAnalyzer.OMITTED_TAILS else spelling,
-                        lemmas[(row["form"], row["item"])]))
+                        lemma, sublemma))
     with open(library_dir / "works.csv", encoding="utf-8") as f:
         work_names = {row["id"]: row["name"] for row in csv.DictReader(f)}
     with open(library_dir / "unambiguous_macronizations.csv", encoding="utf-8") as f:
@@ -1440,6 +1452,13 @@ def readings_ruled_out_by_certain_vowels(library_dir: Path, details_path: Path,
     return ruled_out
 
 
+def _name_of(reading: Reading) -> str:
+    """Returns a reading's spelling and its word, as the log names them: Dardaniae (Dardanius under Dardanus1), and
+    est (sum1) for an entry's own word."""
+    return (f"{reading.spelling} ({reading.sublemma} under {reading.lemma})" if reading.sublemma
+            else f"{reading.spelling} ({reading.lemma})")
+
+
 def _log_by_token_count(references_by_key: Dict[str, List[str]]):
     """Logs each key with how many tokens it has, the most first, and the references of the first three."""
     for key, references in sorted(references_by_key.items(), key=lambda item: (-len(item[1]), item[0])):
@@ -1471,8 +1490,7 @@ def analyze(project_root: str):
         _log_by_token_count(ruled_out.every_reading)
         logging.info(f"{len(ruled_out.by_reading)} readings are ruled out by the certain vowels of some tokens, by "
                      f"their spelling and lemma")
-        _log_by_token_count({f"{reading.spelling} ({reading.lemma})": references
-                             for reading, references in ruled_out.by_reading.items()})
+        _log_by_token_count({_name_of(reading): references for reading, references in ruled_out.by_reading.items()})
     else:
         logging.warning(f"The macronizations weren't checked against the readings: {library_dir} has no "
                         f"{', '.join(files)}")
