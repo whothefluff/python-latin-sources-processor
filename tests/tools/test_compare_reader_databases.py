@@ -76,11 +76,15 @@ ITALIAM = ('1.1.3', 'Italiam fato profugus .')
 
 
 def _database_with_new_ids(path: Path, *works: _Work, candidate_table='CountableWordCandidateAnalyses',
-                           with_edition_labels=True) -> Path:
+                           with_edition_labels=True, with_sublemmas=True) -> Path:
+    """Writes the works into a database at path. A token's lemmas are dictionaryRefs, or (dictionaryRef, sublemma)
+    pairs, which a database without sublemmas stores by its dictionaryRef."""
     db = sqlite3.connect(path)
     db.executescript(READER_TABLES_THAT_THE_COMPARISON_READS)
     if with_edition_labels:
         db.execute('ALTER TABLE WorkContentSubdivisions ADD COLUMN editionLabel TEXT')
+    if with_sublemmas:
+        db.execute("ALTER TABLE MorphologicalDetails ADD COLUMN sublemma TEXT NOT NULL DEFAULT ''")
     db.execute(CANDIDATE_TABLE.format(candidate_table, ', cnt INTEGER' if 'Inflections' in candidate_table else ''))
     for work in works:
         work_id = str(uuid.uuid4())
@@ -101,9 +105,13 @@ def _database_with_new_ids(path: Path, *works: _Work, candidate_table='Countable
                 sentence_idx, word_idx = sentence_idx + 1, 0
             for component_ordinal, lemmas in token['lemmas_by_component_ordinal'].items():
                 for lemma in lemmas:
-                    db.execute('INSERT OR IGNORE INTO MorphologicalDetails VALUES ( ?, 0, ? )', (lemma, lemma))
+                    dictionary_ref, sublemma = lemma if isinstance(lemma, tuple) else (lemma, '')
+                    form = f'{dictionary_ref} {sublemma}'.strip()  # one analysis per lemma
+                    db.execute('INSERT OR IGNORE INTO MorphologicalDetails VALUES ( '
+                               + ('?, 0, ?, ? )' if with_sublemmas else '?, 0, ? )'),
+                               (form, dictionary_ref, *([sublemma] if with_sublemmas else [])))
                     db.execute(f'INSERT INTO {candidate_table}( workId, idx, componentOrdinal, form, item ) '
-                               f'VALUES ( ?, ?, ?, ?, 0 )', (work_id, idx, component_ordinal, lemma))
+                               f'VALUES ( ?, ?, ?, ?, 0 )', (work_id, idx, component_ordinal, form))
         subdivisions = cast(List[SubdivisionRow], work.subdivisions)
         nodes = [str(uuid.uuid4()) for _ in subdivisions]
         for node, row in zip(nodes, subdivisions):
@@ -262,6 +270,36 @@ def test_candidate_lemmas_are_compared_per_component(compared):
             for name, pairs in diff.changed_token_pairs_by_field.items()} == {
         'candidate lemmas of the lookup form': [(frozenset({'sui'}), frozenset({'que'}))],
         'candidate lemmas of the enclitic': [(frozenset({'que'}), frozenset({'sui'}))]}
+
+
+def _bonis_read_as(*lemmas):
+    return _Work([_token('1.1.1', 'bonis', lemmas_by_component_ordinal={0: set(lemmas)}), _token('1.1.1', '.')])
+
+
+def test_the_lemmas_of_one_entry_are_told_apart(compared):
+    diff = compared([_bonis_read_as('bonus')], [_bonis_read_as('bonus', ('bonus', 'bonae'))]).work_diffs[0]
+
+    name = 'candidate lemmas of the lookup form'
+    assert [(pair.old.compared_values[name], pair.new.compared_values[name])
+            for pair in diff.changed_token_pairs_by_field[name]] == [
+        (frozenset({'bonus'}), frozenset({'bonus', 'bonae under bonus'}))]
+
+
+@pytest.mark.parametrize('old_has_them, new_has_them, note', [
+    (False, True, 'Sublemmas not compared: the old database has none'),
+    (True, False, 'Sublemmas not compared: the new database has none'),
+    (False, False, 'Sublemmas not compared: neither database has them'),
+], ids=['old', 'new', 'both'])
+def test_sublemmas_arent_compared_when_a_database_has_none_and_the_report_says_so(tmp_path, old_has_them,
+                                                                                    new_has_them, note):
+    old = _database_with_new_ids(tmp_path / 'old.db', _bonis_read_as('bonus'), with_sublemmas=old_has_them)
+    new = _database_with_new_ids(tmp_path / 'new.db', _bonis_read_as(('bonus', 'bonae')),
+                                 with_sublemmas=new_has_them)
+
+    comparison = compare(old, new)
+
+    assert not comparison.differs
+    assert report(comparison)[-2:] == [note, 'No differences']
 
 
 def test_a_moved_sentence_end_is_one_sentence_start(compared):

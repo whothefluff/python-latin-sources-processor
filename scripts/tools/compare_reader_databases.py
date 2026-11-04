@@ -157,19 +157,27 @@ def _identities_by_work_id(db: sqlite3.Connection, path: Path) -> Dict[str, Work
     return identities
 
 
-def _candidate_lemmas_by_token(db: sqlite3.Connection, candidate_table: str) -> Dict[Tuple[str, int], Dict]:
+def _candidate_lemmas_by_token(db: sqlite3.Connection, candidate_table: str,
+                               reads_sublemmas: bool) -> Dict[Tuple[str, int], Dict]:
+    """Returns each token's candidate lemmas by component, named as the morphology log names them: a sublemma as
+    "Dardania under Dardani", and the entry's own lemma as its dictionaryRef. Without `reads_sublemmas`, each lemma is
+    named by its dictionaryRef."""
+    sublemma_sql = 'Details.sublemma' if reads_sublemmas else "''"
     lemmas = defaultdict(lambda: defaultdict(set))
-    for work_id, idx, component_ordinal, dictionary_ref in db.execute(
-            f'''SELECT Candidates.workId, Candidates.idx, Candidates.componentOrdinal, Details.dictionaryRef
+    for work_id, idx, component_ordinal, dictionary_ref, sublemma in db.execute(
+            f'''SELECT Candidates.workId, Candidates.idx, Candidates.componentOrdinal, Details.dictionaryRef,
+                       {sublemma_sql}
                     FROM "{candidate_table}" AS Candidates
                     INNER JOIN MorphologicalDetails AS Details
                         ON Details.form = Candidates.form AND Details.item = Candidates.item'''):
-        lemmas[(work_id, idx)][component_ordinal].add(dictionary_ref)
+        lemmas[(work_id, idx)][component_ordinal].add(
+            f'{sublemma} under {dictionary_ref}' if sublemma else dictionary_ref)
     return lemmas
 
 
-def _tokens_by_work_id(db: sqlite3.Connection, candidate_table: str) -> Dict[str, List[Token]]:
-    lemmas = _candidate_lemmas_by_token(db, candidate_table)
+def _tokens_by_work_id(db: sqlite3.Connection, candidate_table: str,
+                       reads_sublemmas: bool) -> Dict[str, List[Token]]:
+    lemmas = _candidate_lemmas_by_token(db, candidate_table, reads_sublemmas)
     tokens = defaultdict(list)
     tokens_so_far_by_reference = defaultdict(int)
     previous_sentence_idx_by_work_id = {}
@@ -201,6 +209,14 @@ def has_edition_labels(path: Path) -> bool:
         db.close()
 
 
+def has_sublemmas(path: Path) -> bool:
+    db = _connect(path)
+    try:
+        return any(column == 'sublemma' for _, column, *_ in db.execute('PRAGMA table_info( MorphologicalDetails )'))
+    finally:
+        db.close()
+
+
 def _subdivisions_by_work_id(db: sqlite3.Connection) -> Dict[str, List[Subdivision]]:
     edition_label = 'editionLabel' if _has_edition_labels(db) else 'NULL'
     rows = db.execute(f'''SELECT workId, node, parent, typ, cnt, name, fromIndex, toIndex, {edition_label}
@@ -218,7 +234,7 @@ def _subdivisions_by_work_id(db: sqlite3.Connection) -> Dict[str, List[Subdivisi
     return subdivisions
 
 
-def read_works(path: Path) -> Dict[WorkIdentity, Work]:
+def read_works(path: Path, reads_sublemmas: bool) -> Dict[WorkIdentity, Work]:
     db = _connect(path)
     try:
         table_names = set(_table_names_without_shadow_tables(db))
@@ -227,7 +243,7 @@ def read_works(path: Path) -> Dict[WorkIdentity, Work]:
             [] if candidate_table else [' or '.join(CANDIDATE_TABLE_NAMES)])
         if candidate_table is None or missing:
             raise ComparisonError(f'{path} has no {", ".join(missing)}: is it a reader database?')
-        tokens = _tokens_by_work_id(db, candidate_table)
+        tokens = _tokens_by_work_id(db, candidate_table, reads_sublemmas)
         subdivisions = _subdivisions_by_work_id(db)
         return {identity: Work(identity, tokens[work_id], subdivisions[work_id])
                 for work_id, identity in _identities_by_work_id(db, path).items()}
@@ -344,6 +360,8 @@ class Comparison:
     new_row_counts_by_table: Dict[str, int]
     old_has_edition_labels: bool
     new_has_edition_labels: bool
+    old_has_sublemmas: bool
+    new_has_sublemmas: bool
     allow_added_works: bool = False
 
     @property
@@ -381,7 +399,9 @@ def _new_identity_by_old_identity(old_works: Dict[WorkIdentity, Work], new_works
 
 def compare(old_path: Path, new_path: Path, same_works: Sequence[Tuple[str, str]] = (),
             allow_added_works: bool = False) -> Comparison:
-    old_works, new_works = read_works(old_path), read_works(new_path)
+    old_has_sublemmas, new_has_sublemmas = has_sublemmas(old_path), has_sublemmas(new_path)
+    compares_sublemmas = old_has_sublemmas and new_has_sublemmas
+    old_works, new_works = read_works(old_path, compares_sublemmas), read_works(new_path, compares_sublemmas)
     counterparts = _new_identity_by_old_identity(old_works, new_works, same_works)
     old_has_edition_labels, new_has_edition_labels = has_edition_labels(old_path), has_edition_labels(new_path)
     compares_edition_labels = old_has_edition_labels and new_has_edition_labels
@@ -394,6 +414,8 @@ def compare(old_path: Path, new_path: Path, same_works: Sequence[Tuple[str, str]
         new_row_counts_by_table=count_rows_by_table(new_path),
         old_has_edition_labels=old_has_edition_labels,
         new_has_edition_labels=new_has_edition_labels,
+        old_has_sublemmas=old_has_sublemmas,
+        new_has_sublemmas=new_has_sublemmas,
         allow_added_works=allow_added_works,
     )
 
@@ -406,6 +428,13 @@ def _shown(value) -> str:
     if isinstance(value, frozenset):
         return '{' + ', '.join(sorted(ref or "''" for ref in value)) + '}'
     return str(value)
+
+
+def _not_compared(what: str, old_has_them: bool, new_has_them: bool) -> List[str]:
+    """Returns the report's line on something compared only when both databases have it, if one doesn't."""
+    without = [which for which, has_them in (('old', old_has_them), ('new', new_has_them)) if not has_them]
+    return [f'{what} not compared: ' + (f'the {without[0]} database has none' if len(without) == 1
+                                        else 'neither database has them')] if without else []
 
 
 def _section(title: str, count: int, items: List[str], examples: int) -> List[str]:
@@ -468,12 +497,8 @@ def report(comparison: Comparison, examples: int = 10) -> List[str]:
                       if old_counts.get(name) != new_counts.get(name)]
     if changed_counts:
         lines += ['Row counts that changed (for information)', *changed_counts]
-    without_edition_labels = [which for which, has_them in (('old', comparison.old_has_edition_labels),
-                                                            ('new', comparison.new_has_edition_labels)) if not has_them]
-    if without_edition_labels:
-        lines.append('Edition labels not compared: ' + (f'the {without_edition_labels[0]} database has none'
-                                                        if len(without_edition_labels) == 1
-                                                        else 'neither database has them'))
+    lines += _not_compared('Edition labels', comparison.old_has_edition_labels, comparison.new_has_edition_labels)
+    lines += _not_compared('Sublemmas', comparison.old_has_sublemmas, comparison.new_has_sublemmas)
     return lines + ['Differences found' if comparison.differs else 'No differences']
 
 
