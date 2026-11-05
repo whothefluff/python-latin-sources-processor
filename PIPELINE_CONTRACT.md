@@ -15,18 +15,18 @@ In `work_contents.csv`, the `word` and `macronizedWord` columns MUST have identi
 Any time a base/dictionary form is exported (specifically `form` and `macronizedForm` in the `MorphologicalDetails` and
 `MorphologicalDetailInflections` CSVs), it MUST follow a strict 2-shape casing rule:
 
-* If its item is proper: `Capitalized` (Title Case). An item is proper when its word, its `sublemma` or else its
+* If its item is proper: `Capitalized` (Title Case). An item is proper when its lemma, its `sublemma` or else its
   headword (`dictionaryRef`), is capitalized and at least one of the inflections it keeps (after overrides and
   exclusions) is a `noun` or an `adjective`. Proper adjectives (`Atticus`, `Thessala`) are capitalized and keep
-  `partOfSpeech = adjective`. The items of `Horae`, a word inside the entry of `hora1`, are capitalized too.
+  `partOfSpeech = adjective`. The items of `Horae`, a sublemma in the entry of `hora1`, are capitalized too.
 * Otherwise: `lowercase`. An interjection whose headword is a name (`hercle` → `Hercules`) is not proper.
 
 One word can therefore have items under both shapes (`hercules`, the interjection, and `Hercules`, the noun).
 
-**Words Inside an Entry:** `morphological_details.csv` ends with `sublemma`: the word that an item belongs to when L&S
-gives that word inside the entry of its headword, and empty for the entry's own word. `dictionaryRef` and `sublemma`
-together are the word. The form `Dardaniae` belongs to three words, with an item for each: Dardania under `Dardani`, and
-Dardania and Dardanius under `Dardanus1`.
+**Sublemmas:** `morphological_details.csv` ends with `sublemma`: the lemma that an item belongs to when L&S gives it
+inside the entry of its headword, and empty for the entry's own lemma. `dictionaryRef` and `sublemma` together are the
+lemma. The form `Dardaniae` belongs to three lemmas, with an item for each: Dardania under `Dardani`, and Dardania and
+Dardanius under `Dardanus1`.
 
 **Uniqueness Guarantee:** The morphological pipeline analyzes unique word formations based on this canonical casing. It
 will *never* export separate duplicate rows for surface casing variations (e.g., `fabula` vs `FABULA`). The downstream

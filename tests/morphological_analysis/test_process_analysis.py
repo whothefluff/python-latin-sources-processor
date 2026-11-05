@@ -102,14 +102,14 @@ def _entries(*entries):
     ]}}}
 
 
-def _words(*words):
+def _lemmas(*lemmas):
     """Returns Morpheus's JSON with one body for each headword, sublemma, part of speech and inflections. An entry's own
-    word has an empty sublemma, and Morpheus gives it none."""
+    lemma has an empty sublemma, and Morpheus gives it none."""
     return {"RDF": {"Annotation": {"Body": [
         {"rest": {"entry": {"dict": {"hdwd": {"$": headword}, **({"sublemma": {"$": sublemma}} if sublemma else {}),
                                      "pofs": {"$": pos}},
                             "infl": inflections}}}
-        for headword, sublemma, pos, inflections in words
+        for headword, sublemma, pos, inflections in lemmas
     ]}}}
 
 
@@ -209,13 +209,13 @@ _GENITIVE_AND_DATIVE = [("genitive", "singular"), ("dative", "singular")]
 _NOMINATIVE_AND_VOCATIVE = [("nominative", "plural"), ("vocative", "plural")]
 
 
-def test_a_form_of_three_words_has_an_item_for_each_with_its_sublemma():
+def test_a_form_of_three_lemmas_has_an_item_for_each_with_its_sublemma():
     # Morpheus's answer to Dardaniae, a form of Dardania under Dardani, and of Dardania and Dardanius under Dardanus1
     dardania = _feminines_in_ae("noun", "Darda^ni", "ae", "a_ae", "1st", _GENITIVE_AND_DATIVE)
     dardanius = _feminines_in_ae("adjective", "Darda^n", "iae", "ius_ia_ium", "1st & 2nd",
                                  _GENITIVE_AND_DATIVE + _NOMINATIVE_AND_VOCATIVE)
 
-    details, _ = MorphologicalAnalyzer.process_analysis("dardaniae", _words(
+    details, _ = MorphologicalAnalyzer.process_analysis("dardaniae", _lemmas(
         ("Dardani", "Dardania", "noun", dardania), ("Dardanus1", "Dardania", "noun", dardania),
         ("Dardanus1", "Dardanius", "adjective", dardanius)))
 
@@ -267,13 +267,13 @@ def test_a_rule_changes_only_the_readings_of_its_headword_with_its_values_in_its
           (1, "noun", "nominative"), (1, "noun", "vocative")]),
     ("bonae", [(0, "adjective", "genitive"), (0, "adjective", "dative"), (0, "adjective", "nominative"),
                (0, "adjective", "vocative"), (1, "noun", "vocative")]),
-], ids=["for the entry's own word", "for a word inside the entry"])
-def test_a_rule_changes_only_the_readings_of_its_word(monkeypatch, sublemma, readings):
-    # Morpheus's answer to bonae: the adjective bonus, and bonae, the good women, a word inside its entry
+], ids=["for the entry's own lemma", "for a sublemma"])
+def test_a_rule_changes_only_the_readings_of_its_lemma(monkeypatch, sublemma, readings):
+    # Morpheus's answer to bonae: the adjective bonus, and bonae, the good women, a sublemma in its entry
     monkeypatch.setattr(process_morpheus_perseids_api, "FORMS", (
         ReadingRule(headword="bonus", match={"case": "nominative"}, changes=None, sublemma=sublemma),))
 
-    _, inflections = MorphologicalAnalyzer.process_analysis("bonae", _words(
+    _, inflections = MorphologicalAnalyzer.process_analysis("bonae", _lemmas(
         ("bonus", "", "adjective", _feminines_in_ae("adjective", "bo^n", "ae", "us_a_um", "1st & 2nd",
                                                     _GENITIVE_AND_DATIVE + _NOMINATIVE_AND_VOCATIVE)),
         ("bonus", "bonae", "noun", _feminines_in_ae("noun", "bo^n", "ae", "a_ae", "1st", _NOMINATIVE_AND_VOCATIVE))))

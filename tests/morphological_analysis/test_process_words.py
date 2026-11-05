@@ -346,7 +346,7 @@ _READINGS_IN_AE = [("genitive", "singular"), ("dative", "singular"), ("nominativ
 
 def _first_declension_entry(headword, stem, readings, sublemma=""):
     """Returns one of Morpheus's entries of a feminine noun of the 1st declension, with a reading in ae for each case
-    and number, and the sublemma of a word that L&S gives inside the headword's entry."""
+    and number, and its sublemma when L&S gives it inside the headword's entry."""
     return {"dict": {"hdwd": {"$": headword}, **({"sublemma": {"$": sublemma}} if sublemma else {}),
                      "pofs": {"$": "noun"}, "decl": {"$": "1st"}, "gend": {"$": "feminine"}},
             "infl": [{"term": {"stem": {"$": stem}, "suff": {"$": "ae"}}, "pofs": {"$": "noun"}, "decl": {"$": "1st"},
@@ -364,7 +364,7 @@ def _inflections_written(project_root):
 
 def test_a_capitalized_sublemma_that_only_the_capitalized_answer_has_is_kept_whole(monkeypatch, tmp_path):
     # Morpheus's answers: the form horae is hora1's, the hour, and Horae is also a form of Hora2 and Ora2, two
-    # entries of Hersilia as a goddess, and of the Hours, a word inside hora1's entry. A lowercase horae in a text is
+    # entries of Hersilia as a goddess, and of the Hours, a sublemma in hora1's entry. A lowercase horae in a text is
     # the hour alone
     hora = _first_declension_entry("hora1", "ho_r", _READINGS_IN_AE)
     _morpheus_answering(monkeypatch, {
@@ -388,7 +388,7 @@ def test_a_capitalized_sublemma_that_only_the_capitalized_answer_has_is_kept_who
 
 def test_a_capitalized_sublemma_gains_only_the_readings_that_the_lowercase_answer_lacks(monkeypatch, tmp_path):
     # A constructed answer: Horae with hora1's lowercase stem, so that both answers have it. Only the capitalized one
-    # gives it the vocative, which the lowercase one gives hora1's own word
+    # gives it the vocative, which the lowercase one gives hora1's own lemma
     hora = _first_declension_entry("hora1", "ho_r", _READINGS_IN_AE)
 
     assert _items_of(monkeypatch, tmp_path, "horae", {
@@ -463,9 +463,9 @@ def test_the_log_lists_the_most_tokens_first_with_three_places_each(monkeypatch,
     ]
 
 
-def test_the_log_keeps_apart_the_words_of_one_entry_that_share_a_form(monkeypatch, tmp_path, caplog):
+def test_the_log_keeps_apart_the_lemmas_of_one_entry_that_share_a_form(monkeypatch, tmp_path, caplog):
     # Morpheus's answer to Dardaniae, a form of Dardania under Dardani, and of Dardania and Dardanius under Dardanus1.
-    # A constructed macronization, Dardāniae, is certain of a long a that the three words' readings have short
+    # A constructed macronization, Dardāniae, is certain of a long a that the three lemmas' readings have short
     _morpheus_answering(monkeypatch, {"Dardaniae": [
         _first_declension_entry("Dardani", "Darda^ni", _READINGS_IN_AE[:2], sublemma="Dardania"),
         _first_declension_entry("Dardanus1", "Darda^ni", _READINGS_IN_AE[:2], sublemma="Dardania"),

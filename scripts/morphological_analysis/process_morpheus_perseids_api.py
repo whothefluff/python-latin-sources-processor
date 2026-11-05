@@ -26,14 +26,14 @@ from scripts.morphological_analysis.process_morpheus_perseids_api_aux.overrides 
 def _merge_bodies(analysis_lower: Dict, analysis_title: Dict) -> List[Dict]:
     """Merge Body entries from lowercase + Title-case queries. Morpheus answers a lowercase query with its lowercase
     analyses only, so proper-noun-only entries (e.g. 'Athena') never surface there. A capitalized query it answers with
-    those analyses too, grouped with the capitalized ones under their word: 'Hercules' gives one entry with the noun
-    and the exclamation that 'hercules' gives. An entry's word is its headword, with the sublemma that Morpheus gives a
-    word that L&S lists inside the headword's entry (Horae in hora1's). So an entry of the capitalized answer is kept
-    whole under a word that the lowercase answer doesn't have, as Horae is. Under one it has, the entry keeps the
-    inflections that are new when the word is capitalized (Hercules's noun), and is dropped when it isn't: a lowercase
-    word's readings are the lowercase answer's. A word is capitalized when its sublemma is, or its headword when it has
-    none. An inflection is new when its word doesn't have it yet, a stem that differs only in case aside: Hymenaeus has
-    the god's stem and the song's, Hymenae and hymenae, and the capitalized answer gives both, which read the same.
+    those analyses too, grouped with the capitalized ones under their lemma: 'Hercules' gives one entry with the noun
+    and the exclamation that 'hercules' gives. An entry's lemma is its headword, with the sublemma that Morpheus gives a
+    lemma that L&S lists inside the headword's entry (Horae in hora1's). So an entry of the capitalized answer is kept
+    whole under a lemma that the lowercase answer doesn't have, as Horae is. Under one it has, the entry keeps the
+    inflections that are new when the lemma is capitalized (Hercules's noun), and is dropped when it isn't: a lowercase
+    lemma's readings are the lowercase answer's. A lemma is capitalized when its sublemma is, or its headword when it
+    has none. An inflection is new when its lemma doesn't have it yet, a stem that differs only in case aside: Hymenaeus
+    has the god's stem and the song's, Hymenae and hymenae, and the capitalized answer gives both, which read the same.
     Lowercase-sourced bodies come first."""
     def get_bodies(analysis):
         if not analysis or "RDF" not in analysis or "Body" not in analysis["RDF"]["Annotation"]:
@@ -41,7 +41,7 @@ def _merge_bodies(analysis_lower: Dict, analysis_title: Dict) -> List[Dict]:
         bodies = analysis["RDF"]["Annotation"]["Body"]
         return bodies if isinstance(bodies, list) else [bodies]
 
-    def word_of(body):
+    def lemma_of(body):
         dictionary = body.get("rest", {}).get("entry", {}).get("dict", {})
         return dictionary.get("hdwd", {}).get("$"), dictionary.get("sublemma", {}).get("$")
 
@@ -57,22 +57,22 @@ def _merge_bodies(analysis_lower: Dict, analysis_title: Dict) -> List[Dict]:
         return json.dumps(inflection, sort_keys=True)
 
     merged = list(get_bodies(analysis_lower))
-    words = {word_of(body) for body in merged}
-    known = {(word_of(body), reading_of(inflection)) for body in merged for inflection in inflections_of(body)}
+    lemmas = {lemma_of(body) for body in merged}
+    known = {(lemma_of(body), reading_of(inflection)) for body in merged for inflection in inflections_of(body)}
     for body in get_bodies(analysis_title):
-        word = word_of(body)
-        headword, sublemma = word
-        if headword is not None and word in words:
+        lemma = lemma_of(body)
+        headword, sublemma = lemma
+        if headword is not None and lemma in lemmas:
             if not (sublemma or headword)[0].isupper():
                 continue
             new = [inflection for inflection in inflections_of(body)
-                   if (word, reading_of(inflection)) not in known]
+                   if (lemma, reading_of(inflection)) not in known]
             if not new:
                 continue
             body = {**body, "rest": {**body["rest"], "entry": {**body["rest"]["entry"], "infl": new}}}
-        words.add(word)
+        lemmas.add(lemma)
         merged.append(body)
-        known.update((word, reading_of(inflection)) for inflection in inflections_of(body))
+        known.update((lemma, reading_of(inflection)) for inflection in inflections_of(body))
     return merged
 
 
@@ -436,9 +436,9 @@ class MorphologicalAnalyzer:
                     if without != readings:
                         rules_that_change_readings.append(rule)
 
-                # Judged by the item's word, its sublemma or else its headword, and by the inflections it keeps, after
+                # Judged by the item's lemma, its sublemma or else its headword, and by the inflections it keeps, after
                 # overrides and exclusions. An interjection whose headword is a name ("hercle" -> "Hercules") isn't
-                # proper, but a proper adjective ("Atticus") is, and so is Horae, a word inside hora1's entry
+                # proper, but a proper adjective ("Atticus") is, and so is Horae, a sublemma in hora1's entry
                 contract_form = apply_contract_casing(
                     word, is_proper_item(sublemma or headword, (i["partOfSpeech"] for i in item_inflections)))
 
@@ -1295,15 +1295,15 @@ class MorphologicalDataValidator:
                 self._log_warning(line_num, 'verb', form, f"Field '{field}' must be empty, but is '{row.get(field)}'.")
 
     def _validate_casing_pos_gate(self):
-        """A form is capitalized exactly when its item is proper: a capitalized word, its sublemma or else its
+        """A form is capitalized exactly when its item is proper: a capitalized lemma, its sublemma or else its
         headword, with a noun or adjective inflection. Catches 'Hercle' capitalized (an interjection whose headword is
-        Hercules), a proper adjective like 'atticus' left lowercase, and 'horae' for Horae, a word inside hora1's
+        Hercules), a proper adjective like 'atticus' left lowercase, and 'horae' for Horae, a sublemma in hora1's
         entry."""
-        words: Dict[Tuple[str, str], str | None] = {}
+        spellings: Dict[Tuple[str, str], str | None] = {}
         with open(self.details_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                words[(row['form'], row['item'])] = row['sublemma'] or row.get('dictionaryRef')
+                spellings[(row['form'], row['item'])] = row['sublemma'] or row.get('dictionaryRef')
 
         groups: Dict[Tuple[str, str], List[str | None]] = {}
         with open(self.file_path, 'r', encoding='utf-8') as f:
@@ -1312,12 +1312,12 @@ class MorphologicalDataValidator:
                 groups.setdefault((row['form'], row['item']), []).append(row.get('partOfSpeech'))
 
         for (form, item), pos_list in groups.items():
-            word = words.get((form, item))
+            spelling = spellings.get((form, item))
             is_capitalized = bool(form) and form[0].isupper()
-            if is_capitalized != is_proper_item(word, pos_list):
+            if is_capitalized != is_proper_item(spelling, pos_list):
                 self._log_warning(0, 'casing', form,
-                                  f"item {item}: {'capitalized' if is_capitalized else 'lowercase'} but word "
-                                  f"'{word}' with pos {pos_list} says otherwise.")
+                                  f"item {item}: {'capitalized' if is_capitalized else 'lowercase'} but lemma "
+                                  f"'{spelling}' with pos {pos_list} says otherwise.")
 
     def _validate_no_duplicate_details(self):
         """MorphologicalDetails rows must be unique on (form, item)."""
@@ -1375,7 +1375,7 @@ _VOWELS = _LONG_VOWELS | frozenset("aeiouyAEIOUY")
 
 class Reading(NamedTuple):
     spelling: str
-    lemma: str
+    dictionary_ref: str
     sublemma: str
 
 
@@ -1403,17 +1403,17 @@ def readings_ruled_out_by_certain_vowels(library_dir: Path, details_path: Path,
     back an ending that Morpheus leaves out of it, such as an enclitic, and a spelling with more or fewer letters than
     the token rules nothing out."""
     with open(details_path, encoding="utf-8") as f:
-        lemma_and_sublemma = {(row["form"], row["item"]): (row["dictionaryRef"], row["sublemma"])
-                              for row in csv.DictReader(f)}
+        lemmas_by_item = {(row["form"], row["item"]): (row["dictionaryRef"], row["sublemma"])
+                          for row in csv.DictReader(f)}
     readings_by_form: Dict[str, List[Reading]] = {}
     with open(inflections_path, encoding="utf-8") as f:
         for row in csv.DictReader(f):
             spelling = row["stem"].replace("-", "") + row["suffix"]
             ending = row["form"][len(spelling):]
-            lemma, sublemma = lemma_and_sublemma[(row["form"], row["item"])]
+            dictionary_ref, sublemma = lemmas_by_item[(row["form"], row["item"])]
             readings_by_form.setdefault(row["form"], []).append(
                 Reading(spelling + ending if ending.lower() in MorphologicalAnalyzer.OMITTED_TAILS else spelling,
-                        lemma, sublemma))
+                        dictionary_ref, sublemma))
     with open(library_dir / "works.csv", encoding="utf-8") as f:
         work_names = {row["id"]: row["name"] for row in csv.DictReader(f)}
     with open(library_dir / "unambiguous_macronizations.csv", encoding="utf-8") as f:
@@ -1454,10 +1454,10 @@ def readings_ruled_out_by_certain_vowels(library_dir: Path, details_path: Path,
 
 
 def _name_of(reading: Reading) -> str:
-    """Returns a reading's spelling and its word, as the log names them: Dardaniae (Dardanius under Dardanus1), and
-    est (sum1) for an entry's own word."""
-    return (f"{reading.spelling} ({reading.sublemma} under {reading.lemma})" if reading.sublemma
-            else f"{reading.spelling} ({reading.lemma})")
+    """Returns a reading's spelling and its lemma, as the log names them: Dardaniae (Dardanius under Dardanus1), and
+    est (sum1) for an entry's own lemma."""
+    return (f"{reading.spelling} ({reading.sublemma} under {reading.dictionary_ref})" if reading.sublemma
+            else f"{reading.spelling} ({reading.dictionary_ref})")
 
 
 def _log_by_token_count(references_by_key: Dict[str, List[str]]):

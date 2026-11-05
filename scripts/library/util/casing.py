@@ -1,14 +1,15 @@
 from typing import Iterable
 
-# A capitalized word makes an item proper only for these parts of speech. An interjection whose headword is a name
+# A capitalized lemma makes an item proper only for these parts of speech. An interjection whose headword is a name
 # ("hercle" -> "Hercules") is not itself proper
 PROPER_PARTS_OF_SPEECH = frozenset({"noun", "adjective"})
 
 
-def is_proper_item(word: str | None, parts_of_speech: Iterable[str | None]) -> bool:
-    """Whether an analysis item is proper: its word, the sublemma or else the headword, is capitalized and at least one
-    of its inflections is a noun or an adjective. Proper adjectives ("Atticus") keep their part of speech."""
-    return bool(word) and word[0].isupper() and any(pos in PROPER_PARTS_OF_SPEECH for pos in parts_of_speech)
+def is_proper_item(spelling: str | None, parts_of_speech: Iterable[str | None]) -> bool:
+    """Whether an analysis item is proper: the spelling of its lemma, the sublemma or else the headword, is capitalized
+    and at least one of its inflections is a noun or an adjective. Proper adjectives ("Atticus") keep their part of
+    speech."""
+    return bool(spelling) and spelling[0].isupper() and any(pos in PROPER_PARTS_OF_SPEECH for pos in parts_of_speech)
 
 
 def apply_contract_casing(word_form: str, is_proper: bool) -> str:
