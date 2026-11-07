@@ -44,7 +44,7 @@ def project_root( ):
 PHAEDRUS = WorkConfiguration(
     edition_urn='urn:cts:latinLit:phi0975.phi001.perseus-lat2',
     cited_division_subtypes=('book', 'poem'),
-    poem_types_by_n={'prologus': 'PROL', 'epilogus': 'EPIL'},
+    types_by_n={'prologus': 'PROL', 'epilogus': 'EPIL'},
     letter_convention=LETTER_CONVENTION,
     token_overrides=WORK_SPECIFIC_TOKEN_OVERRIDES,
     expansions=WORK_SPECIFIC_EXPANSIONS,

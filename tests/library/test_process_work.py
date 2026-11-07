@@ -17,7 +17,7 @@ _CARMEN_FILES = Path(__file__).parent / 'fixtures' / 'carmen'
 _CARMEN_LETTERS = LetterConvention(uv_lowercase="uv", uv_capitals="UV", ij_lowercase="i", ij_capitals="I")
 _CARMEN_WORK = process_work.WorkConfiguration(
     edition_urn='urn:cts:latinLit:fict001.fict001.fict-lat1',
-    cited_division_subtypes=('book', 'poem'), poem_types_by_n={},
+    cited_division_subtypes=('book', 'poem'), types_by_n={},
     letter_convention=_CARMEN_LETTERS, token_overrides={}, expansions={}, proper_noun_overrides={},
     author_abbreviations=('Fict.',), work_about_file=str(_CARMEN_FILES / 'work_about.txt'),
     author_about_file=str(_CARMEN_FILES / 'author_about.txt'),
@@ -450,7 +450,7 @@ def test_a_speaker_and_what_is_said_after_it_start_sentences_and_a_lost_passage_
                     contents["wordIdx"])) == [
         (0, "Carmen", "1.1", 0, "0"), (1, "Roma", "1.1.1", 0, "1"), (2, "est", "1.1.1", 0, "2"),
         (3, "levis", "1.1.1", 0, "3"), (4, "et", "1.1.2", 0, "4"), (5, "", "1.1.2", 0, ""),
-        (6, "Fictor", "1.1", 1, "0"), (7, "levis", "1.1.3", 2, "0"), (8, "est", "1.1.3", 2, "1"),
+        (6, "Fictor", "1.1.3", 1, "0"), (7, "levis", "1.1.3", 2, "0"), (8, "est", "1.1.3", 2, "1"),
         (9, ".", "1.1.3", 2, ""),
     ]
 
@@ -460,6 +460,90 @@ def test_notes_and_headings_in_another_language_cover_what_holds_them_and_a_lost
     assert pd.read_csv(structures / "work_content_supplementary.csv").drop(columns="workId").values.tolist() == [
         ["NOTE", 0, 1, 3, "A note."], ["GAP", 0, 5, 5, "lost"], ["NOTE", 1, 1, 5, "Youths"],
         ["NOTE", 2, 0, 9, "On the book."]]
+
+
+_COMMENTARIUS = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Commentarius</title><author>Fictor</author></titleStmt>
+  </fileDesc></teiHeader>
+  <text><body><div type="edition"><div type="textpart" subtype="book" n="1">
+    <head>Liber</head>
+    <div type="textpart" subtype="chapter" n="1">
+      <div type="textpart" subtype="section" n="1"><p>Levis, et iacere est.</p></div>
+      <div type="textpart" subtype="section" n="2"><p>Et iam est.</p></div>
+    </div>
+  </div></div></body></text>
+</TEI>"""
+_COMMENTARIUS_WORK = _CARMEN_WORK._replace(cited_division_subtypes=('book', 'chapter', 'section'))
+
+
+def _subdivision_rows(output_dir):
+    """Returns each subdivision as (typ, cnt, the type of its parent, fromIndex, toIndex, editionLabel)"""
+    subdivisions = pd.read_csv(output_dir / "work_content_subdivisions.csv", dtype={"editionLabel": str})
+    types_by_node = dict(zip(subdivisions["node"], subdivisions["typ"]))
+    return [(typ, cnt, types_by_node.get(parent), from_index, to_index, None if pd.isna(label) else label)
+            for typ, cnt, parent, from_index, to_index, label in zip(
+                subdivisions["typ"], subdivisions["cnt"], subdivisions["parent"], subdivisions["fromIndex"],
+                subdivisions["toIndex"], subdivisions["editionLabel"])]
+
+
+def _references(output_dir):
+    contents = pd.read_csv(output_dir / "work_contents.csv", dtype={"word": str, "sourceReference": str},
+                           keep_default_na=False)
+    return list(zip(contents["word"], contents["sourceReference"]))
+
+
+def test_books_of_chapters_of_sections_of_paragraphs_pass_validation(monkeypatch, tmp_path):
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    _macronizer_echoes(monkeypatch)
+
+    process_work.process_verse(_COMMENTARIUS, tmp_path, _COMMENTARIUS_WORK)
+    process_work.validate_csv_files(_COMMENTARIUS, tmp_path, _COMMENTARIUS_WORK)
+
+    assert _subdivision_rows(tmp_path) == [
+        ("BOOK", 0, None, 0, 10, "1"), ("TITL", 0, "BOOK", 0, 0, None), ("CHAP", 0, "BOOK", 1, 10, "1"),
+        ("SECT", 0, "CHAP", 1, 6, "1"), ("PARA", 0, "SECT", 1, 6, None), ("SECT", 1, "CHAP", 7, 10, "2"),
+        ("PARA", 0, "SECT", 7, 10, None)]
+    assert _references(tmp_path) == [
+        ("Liber", "1"), ("Levis", "1.1.1"), (",", "1.1.1"), ("et", "1.1.1"), ("jacere", "1.1.1"), ("est", "1.1.1"),
+        (".", "1.1.1"), ("Et", "1.1.2"), ("jam", "1.1.2"), ("est", "1.1.2"), (".", "1.1.2")]
+
+
+_FABULA = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Fabula</title><author>Fictor</author></titleStmt>
+  </fileDesc></teiHeader>
+  <text><body><div type="edition">
+    <div type="textpart" subtype="act" n="prologue"><div type="textpart" subtype="scene" n="pr">
+      <milestone unit="card" n="1"/>
+      <sp>
+        <speaker>Fictor</speaker>
+        <l n="1">Levis et levis est.</l>
+        <lb ed="actscene" n="5"/>
+        <l n="2">iam est levis.</l>
+      </sp>
+    </div></div>
+    <div type="textpart" subtype="act" n="1"><div type="textpart" subtype="scene" n="1">
+      <sp><speaker>Fictor</speaker><l n="3">et iacere.</l></sp>
+    </div></div>
+  </div></body></text>
+</TEI>"""
+_FABULA_WORK = _CARMEN_WORK._replace(cited_division_subtypes=(), types_by_n={'prologue': 'PROL'})
+
+
+def test_acts_of_scenes_of_speeches_cited_by_line_pass_validation(monkeypatch, tmp_path):
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    _macronizer_echoes(monkeypatch)
+
+    process_work.process_verse(_FABULA, tmp_path, _FABULA_WORK)
+    process_work.validate_csv_files(_FABULA, tmp_path, _FABULA_WORK)
+
+    assert _subdivision_rows(tmp_path) == [
+        ("PROL", 0, None, 0, 9, "prologue"), ("SCEN", 0, "PROL", 0, 9, "pr"), ("SPCH", 0, "SCEN", 0, 9, None),
+        ("TITL", 0, "SPCH", 0, 0, None), ("VERS", 0, "SPCH", 1, 5, "1"), ("VERS", 1, "SPCH", 6, 9, "2"),
+        ("ACT", 0, None, 10, 13, "1"), ("SCEN", 0, "ACT", 10, 13, "1"), ("SPCH", 0, "SCEN", 10, 13, None),
+        ("TITL", 0, "SPCH", 10, 10, None), ("VERS", 0, "SPCH", 11, 13, "3")]
+    assert _references(tmp_path) == [
+        ("Fictor", "1"), ("Levis", "1"), ("et", "1"), ("levis", "1"), ("est", "1"), (".", "1"), ("jam", "2"),
+        ("est", "2"), ("levis", "2"), (".", "2"), ("Fictor", "3"), ("et", "3"), ("jacere", "3"), (".", "3")]
 
 
 def _carmina(book: str) -> str:
@@ -480,8 +564,8 @@ def test_the_first_verse_of_a_poem_prologue_or_epilogue_starts_a_sentence(monkey
     xml = _carmina(f'<div type="textpart" subtype="poem" n="1"><l n="1">Roma est</l></div>'
                    f'<div type="textpart" subtype="poem" n="{n}"><l n="1">levis est.</l></div>')
 
-    process_work.process_verse(xml, tmp_path, _CARMEN_WORK._replace(poem_types_by_n={"prologus": "PROL",
-                                                                                      "epilogus": "EPIL"}))
+    process_work.process_verse(xml, tmp_path, _CARMEN_WORK._replace(types_by_n={"prologus": "PROL",
+                                                                                 "epilogus": "EPIL"}))
 
     contents = pd.read_csv(tmp_path / "work_contents.csv")
     assert list(zip(contents["word"], contents["sentenceIdx"])) == [
@@ -752,18 +836,19 @@ def _labelled_subdivisions(*rows):
 
 
 _EVERY_TYPE_LABELLED_AS_THE_EDITION = [("b1", "BOOK", "appendix"), ("p1", "POEM", "14a"), ("p2", "PROL", "prologus"),
-                                       ("p3", "EPIL", "epilogus"), ("v1", "VERS", "3ff"), ("t1", "TITL", None),
-                                       ("a1", "PARA", None)]
+                                       ("p3", "EPIL", "epilogus"), ("c1", "CHAP", "1"), ("s1", "SECT", "1"),
+                                       ("a2", "ACT", "1"), ("s2", "SCEN", "pr"), ("v1", "VERS", "3ff"),
+                                       ("t1", "TITL", None), ("a1", "PARA", None)]
 
 
 @pytest.mark.parametrize("subdivisions, errors", [
     (_labelled_subdivisions(*_EVERY_TYPE_LABELLED_AS_THE_EDITION), []),
     (_labelled_subdivisions(("v1", "VERS", None)), ["VERS v1 has no editionLabel."]),
     (_labelled_subdivisions(("t1", "TITL", "1")),
-     ["TITL t1 has an editionLabel, which only BOOK, POEM, PROL, EPIL, VERS have."]),
+     ["TITL t1 has an editionLabel, which only BOOK, POEM, PROL, EPIL, CHAP, SECT, ACT, SCEN, VERS have."]),
 ], ids=["every type", "a verse without one", "a title with one"])
-def test_books_poems_prologues_epilogues_and_verses_have_an_edition_label_and_other_subdivisions_none(subdivisions,
-                                                                                                      errors):
+def test_the_divisions_that_the_edition_numbers_and_verses_have_an_edition_label_and_other_subdivisions_none(
+        subdivisions, errors):
     found = []
 
     process_work.check_edition_labels(found, subdivisions)

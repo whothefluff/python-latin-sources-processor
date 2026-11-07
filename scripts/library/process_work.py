@@ -67,8 +67,8 @@ class WorkConfiguration(NamedTuple):
     edition_urn: str
     #: The TEI subtypes of the divisions whose n is part of their tokens' references, as the edition cites them
     cited_division_subtypes: Tuple[str, ...]
-    #: The subdivision types of the poems whose n isn't a poem's, such as prologus
-    poem_types_by_n: Dict[str, str]
+    #: The subdivision types of the poems and acts whose n makes them a prologue or an epilogue, such as prologus
+    types_by_n: Dict[str, str]
     letter_convention: LetterConvention
     #: Token types by token index, where the script's own would be wrong
     token_overrides: Dict[int, TokenType]
@@ -766,7 +766,7 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
     authors_and_works_data.append([author_id, work_id])
 
     numbering = _Numbering(work_id, work)
-    numbering.add_parts(read_edition(root, work.cited_division_subtypes, work.poem_types_by_n), None, None)
+    numbering.add_parts(read_edition(root, work.cited_division_subtypes, work.types_by_n), None, None)
     work_contents_data = numbering.contents
     work_content_subdivisions_data = numbering.subdivisions
     work_content_supplementary_data = numbering.supplementary
@@ -1028,7 +1028,7 @@ def check_seq_unique_ints_from_0(errors, df, f_name, column_name, group_columns=
 
 
 #: The subdivisions that have their TEI n as editionLabel
-SUBDIVISION_TYPES_WITH_EDITION_LABELS = ('BOOK', 'POEM', 'PROL', 'EPIL', 'VERS')
+SUBDIVISION_TYPES_WITH_EDITION_LABELS = ('BOOK', 'POEM', 'PROL', 'EPIL', 'CHAP', 'SECT', 'ACT', 'SCEN', 'VERS')
 
 
 def check_subdivision_numbers(errors, work_content_subdivisions_df):
@@ -1045,7 +1045,8 @@ def check_subdivision_numbers(errors, work_content_subdivisions_df):
 
 
 def check_edition_labels(errors, work_content_subdivisions_df):
-    """Checks that books, poems, prologues, epilogues and verses have an editionLabel, and other subdivisions none."""
+    """Checks that books, poems, prologues, epilogues, chapters, sections, acts, scenes and verses have an editionLabel,
+    and other subdivisions none."""
     subdivisions = work_content_subdivisions_df
     labelled = subdivisions['typ'].isin(SUBDIVISION_TYPES_WITH_EDITION_LABELS)
     has_label = subdivisions['editionLabel'].notnull()

@@ -92,9 +92,11 @@ morphology forms:
 
 In `work_content_subdivisions.csv`:
 
-* **Types:** `BOOK`, `POEM`, `PROL`, `EPIL`, `LGRP` (a group of lines, `<lg>`), `SPCH` (a speech, `<sp>`, whose
-  `TITL` is its speaker), `TITL`, `VERS` and `PARA`. The roots are the books or, in a work without books, its poems,
-  prologues and epilogues.
+* **Types:** `BOOK`, `POEM`, `PROL`, `EPIL`, `CHAP` (a chapter), `SECT` (a section of a chapter), `ACT`, `SCEN` (a
+  scene of an act), `LGRP` (a group of lines, `<lg>`), `SPCH` (a speech, `<sp>`, whose `TITL` is its speaker), `TITL`,
+  `VERS` and `PARA`. The roots are the books, the acts, or, in a work without books, its poems, prologues and
+  epilogues. A play's prologue is an act that the configuration types `PROL`, as Amphitruo's is.
 * **`cnt`:** a subdivision's position among its siblings of the same type, from 0, whatever the edition numbers it.
-* **`editionLabel`:** the subdivision's TEI `n`, preserved as text. Books, poems, prologues, epilogues and verses have
-  one (`1`, `appendix`, `prologus`, `14a`, `3ff`), and other subdivisions none.
+* **`editionLabel`:** the subdivision's TEI `n`, preserved as text. Books, poems, prologues, epilogues, chapters,
+  sections, acts, scenes and verses have one (`1`, `appendix`, `prologus`, `14a`, `3ff`, `pr`), and other subdivisions
+  none.

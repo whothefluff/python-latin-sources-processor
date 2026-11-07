@@ -8,6 +8,8 @@ from scripts.library.util.tei_edition import Division, LostPassage, TextBlock, r
 
 _BOOKS_AND_POEMS = ('book', 'poem')
 _POEMS = ('poem',)
+_BOOKS_CHAPTERS_AND_SECTIONS = ('book', 'chapter', 'section')
+_LINES_ONLY = ()
 
 
 def _edition(body: str) -> ET.Element:
@@ -23,8 +25,28 @@ def _poem(n: str, content: str) -> str:
     return f'<div type="textpart" subtype="poem" n="{n}">{content}</div>'
 
 
+def _chapter(n: str, content: str) -> str:
+    return f'<div type="textpart" subtype="chapter" n="{n}">{content}</div>'
+
+
+def _section(n: str, content: str) -> str:
+    return f'<div type="textpart" subtype="section" n="{n}">{content}</div>'
+
+
+def _act(n: str, content: str) -> str:
+    return f'<div type="textpart" subtype="act" n="{n}">{content}</div>'
+
+
+def _scene(n: str, content: str) -> str:
+    return f'<div type="textpart" subtype="scene" n="{n}">{content}</div>'
+
+
 def _verse(n: str, reference: str, *pieces, deleted=False, notes=()) -> TextBlock:
     return TextBlock('VERS', n, reference, pieces, deleted, notes)
+
+
+def _paragraph(reference: str, *pieces) -> TextBlock:
+    return TextBlock('PARA', None, reference, pieces, False, ())
 
 
 def _title(reference: str, text: str) -> TextBlock:
@@ -73,7 +95,7 @@ def test_line_groups_and_speeches_hold_their_verses_without_an_edition_label_and
         Division('POEM', '8', (
             Division('LGRP', None, (_verse('1', '8.1', 'Pastorum musam'),
                                     Division('LGRP', None, (_verse('2', '8.2', 'Tu mihi'),), ())), ()),
-            Division('SPCH', None, (_title('8', 'Damon'), _verse('3', '8.3', 'Nascere'),
+            Division('SPCH', None, (_title('8.3', 'Damon'), _verse('3', '8.3', 'Nascere'),
                                     Division('LGRP', None, (_verse('4', '8.4', 'Incipe'),), ())), ())), ()),)
 
 
@@ -111,6 +133,39 @@ def test_a_verse_that_the_edition_marks_for_deletion_keeps_its_text():
         Division('POEM', '3', (_verse('13', '3.13', 'Hac re probatur.', deleted=True),), ()),)
 
 
+def test_books_of_chapters_of_sections_hold_paragraphs_with_the_references_of_book_chapter_and_section():
+    edition = _edition(_book('1', '<head>COMMENTARIUS PRIMUS</head>'
+                                  + _chapter('1', _section('1', '<p>Gallia est omnis divisa.</p>')
+                                             + _section('2', '<p>Hi omnes lingua differunt.</p>'))
+                                  + _chapter('2', _section('1', '<p>Apud Helvetios.</p>'))))
+
+    assert read_edition(edition, _BOOKS_CHAPTERS_AND_SECTIONS, {}) == (
+        Division('BOOK', '1', (
+            _title('1', 'COMMENTARIUS PRIMUS'),
+            Division('CHAP', '1', (Division('SECT', '1', (_paragraph('1.1.1', 'Gallia est omnis divisa.'),), ()),
+                                   Division('SECT', '2', (_paragraph('1.1.2', 'Hi omnes lingua differunt.'),), ())),
+                     ()),
+            Division('CHAP', '2', (Division('SECT', '1', (_paragraph('1.2.1', 'Apud Helvetios.'),), ()),), ())), ()),)
+
+
+def test_acts_of_scenes_hold_speeches_whose_speakers_take_the_reference_of_their_first_line():
+    edition = _edition(_act('prologue', _scene('pr', '<milestone unit="card" n="1"/>'
+                                                     '<sp><speaker>Mercvrivs</speaker><l n="1">Vt vos</l>'
+                                                     '<lb ed="actscene" n="5"/><l n="2">emundis</l></sp>'))
+                       + _act('1', _scene('1', '<sp><speaker>Sosia</speaker><lg><l n="153">Qui me</l></lg></sp>')))
+
+    assert read_edition(edition, _LINES_ONLY, {'prologue': 'PROL'}) == (
+        Division('PROL', 'prologue', (
+            Division('SCEN', 'pr', (
+                Division('SPCH', None, (_title('1', 'Mercvrivs'), _verse('1', '1', 'Vt vos'),
+                                        _verse('2', '2', 'emundis')), ()),), ()),), ()),
+        Division('ACT', '1', (
+            Division('SCEN', '1', (
+                Division('SPCH', None, (_title('153', 'Sosia'),
+                                        Division('LGRP', None, (_verse('153', '153', 'Qui me'),), ())), ()),), ()),),
+                 ()))
+
+
 @pytest.mark.parametrize("body, cited, error", [
     (_poem('1', '<l n="1">Roma <foreign>est</foreign></l>'), _POEMS,
      "the edition > poem 1 > l 1 holds <foreign>, which isn't read there."),
@@ -124,13 +179,13 @@ def test_a_verse_that_the_edition_marks_for_deletion_keeps_its_text():
     (_poem('1', '<l>Roma est.</l>'), _POEMS, "A line in the edition > poem 1 has no n."),
     ('<div type="textpart" subtype="poem"><l n="1">Roma</l></div>', _POEMS, "A poem in the edition has no n."),
     (_book('1', _poem('1', '<l n="1">Roma</l>')) + _poem('2', '<l n="1">est</l>'), _POEMS,
-     "The edition must hold books, or poems, and not both."),
+     "the edition holds books and poems, but only one kind of division is read in the edition."),
     (_poem('1', _book('1', '<l n="1">Roma</l>')), _POEMS, "the edition > poem 1 holds <div>, which isn't read in a "
                                                           "poem."),
-    (_book('1', _book('2', _poem('1', '<l n="1">Roma</l>'))), _POEMS, "the edition > book 1 holds a book, but a book "
-                                                                      "is only read with poems."),
-    ('<div type="textpart" subtype="chapter" n="1"><p>Roma</p></div>', _POEMS,
-     'the edition holds <div type="textpart" subtype="chapter">, but only books and poems are read.'),
+    (_book('1', _book('2', _poem('1', '<l n="1">Roma</l>'))), _POEMS,
+     'the edition > book 1 holds <div type="textpart" subtype="book">, but only poems and chapters are read there.'),
+    ('<div type="textpart" subtype="speech" n="1"><p>Roma</p></div>', _POEMS,
+     'the edition holds <div type="textpart" subtype="speech">, but only books, poems and acts are read there.'),
     (_poem('1', '<lg><sp><speaker>Damon</speaker><l n="1">Roma</l></sp></lg>'), _POEMS,
      "the edition > poem 1 > lg holds <sp>, which isn't read in a line group."),
     (_poem('1', '<lg><p>Roma est.</p></lg>'), _POEMS, "the edition > poem 1 > lg holds <p>, which isn't read in a line "
@@ -148,13 +203,26 @@ def test_a_verse_that_the_edition_marks_for_deletion_keeps_its_text():
     (_book('lyrics', '<head>Polymetra</head>' + _poem('1', '<l n="1">Roma</l>')), _POEMS,
      "the edition > book lyrics > head would have no reference: no division above it is cited."),
     ('', _POEMS, "The edition is empty."),
+    (_book('1', _poem('1', '<l n="1">Roma</l>') + _chapter('1', _section('1', '<p>est</p>'))), _POEMS,
+     "the edition > book 1 holds chapters and poems, but only one kind of division is read in the book."),
+    (_book('1', _chapter('1', _section('1', '<l n="1">Roma</l>'))), _BOOKS_CHAPTERS_AND_SECTIONS,
+     "the edition > book 1 > chapter 1 > section 1 holds <l>, which isn't read in a section."),
+    (_book('1', _chapter('1', _chapter('2', _section('1', '<p>Roma</p>')))), _BOOKS_CHAPTERS_AND_SECTIONS,
+     'the edition > book 1 > chapter 1 holds <div type="textpart" subtype="chapter">, but only sections are read '
+     'there.'),
+    (_scene('1', '<sp><speaker>Sosia</speaker><l n="1">Roma</l></sp>'), _LINES_ONLY,
+     'the edition holds <div type="textpart" subtype="scene">, but only books, poems and acts are read there.'),
+    ('<div type="textpart" subtype="act">' + _scene('1', '<sp><l n="1">Roma</l></sp>') + '</div>', _LINES_ONLY,
+     "An act in the edition has no n."),
+    (_poem('1', '<sp><speaker>Sosia</speaker></sp>'), _POEMS, "the edition > poem 1 > sp has no text."),
 ], ids=["an element in a verse that isn't read", "a deletion of part of a verse", "a lost passage in a title",
         "a gap for another reason", "text outside a verse", "a verse without n", "a poem without n",
         "books and poems at the top", "a book in a poem", "a book in a book", "another subtype",
         "a speech in a line group", "a paragraph in a line group", "a note in a paragraph",
         "a paragraph marked for deletion", "a title after a verse", "two titles",
         "a verse without text", "a poem without text", "a title of a book that the edition doesn't cite",
-        "an empty edition"])
+        "an empty edition", "a book of poems and chapters", "a verse in a section", "a chapter in a chapter",
+        "a scene at the top", "an act without n", "a speech without what is said"])
 def test_a_structure_that_isnt_read_raises(body, cited, error):
     with pytest.raises(ValueError, match=re.escape(error)):
         read_edition(_edition(body), cited, {})
