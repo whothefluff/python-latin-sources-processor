@@ -468,8 +468,8 @@ _COMMENTARIUS = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
   <text><body><div type="edition"><div type="textpart" subtype="book" n="1">
     <head>Liber</head>
     <div type="textpart" subtype="chapter" n="1">
-      <div type="textpart" subtype="section" n="1"><p>Levis, et iacere est.</p></div>
-      <div type="textpart" subtype="section" n="2"><p>Et iam est.</p></div>
+      <div type="textpart" subtype="section" n="1"><p>Levis,<add>et</add> iace<add>re</add> est.</p></div>
+      <div type="textpart" subtype="section" n="2"><p><add>Et</add> iam <gap reason="lost"/> est.</p></div>
     </div>
   </div></div></body></text>
 </TEI>"""
@@ -492,7 +492,8 @@ def _references(output_dir):
     return list(zip(contents["word"], contents["sourceReference"]))
 
 
-def test_books_of_chapters_of_sections_of_paragraphs_pass_validation(monkeypatch, tmp_path):
+def test_books_of_chapters_of_sections_of_paragraphs_with_additions_and_lost_passages_pass_validation(monkeypatch,
+                                                                                                       tmp_path):
     _morpheus(monkeypatch, _CARMEN_ANALYSES)
     _macronizer_echoes(monkeypatch)
 
@@ -500,12 +501,23 @@ def test_books_of_chapters_of_sections_of_paragraphs_pass_validation(monkeypatch
     process_work.validate_csv_files(_COMMENTARIUS, tmp_path, _COMMENTARIUS_WORK)
 
     assert _subdivision_rows(tmp_path) == [
-        ("BOOK", 0, None, 0, 10, "1"), ("TITL", 0, "BOOK", 0, 0, None), ("CHAP", 0, "BOOK", 1, 10, "1"),
-        ("SECT", 0, "CHAP", 1, 6, "1"), ("PARA", 0, "SECT", 1, 6, None), ("SECT", 1, "CHAP", 7, 10, "2"),
-        ("PARA", 0, "SECT", 7, 10, None)]
+        ("BOOK", 0, None, 0, 11, "1"), ("TITL", 0, "BOOK", 0, 0, None), ("CHAP", 0, "BOOK", 1, 11, "1"),
+        ("SECT", 0, "CHAP", 1, 6, "1"), ("PARA", 0, "SECT", 1, 6, None), ("SECT", 1, "CHAP", 7, 11, "2"),
+        ("PARA", 0, "SECT", 7, 11, None)]
     assert _references(tmp_path) == [
         ("Liber", "1"), ("Levis", "1.1.1"), (",", "1.1.1"), ("et", "1.1.1"), ("jacere", "1.1.1"), ("est", "1.1.1"),
-        (".", "1.1.1"), ("Et", "1.1.2"), ("jam", "1.1.2"), ("est", "1.1.2"), (".", "1.1.2")]
+        (".", "1.1.1"), ("Et", "1.1.2"), ("jam", "1.1.2"), ("", "1.1.2"), ("est", "1.1.2"), (".", "1.1.2")]
+
+
+def test_an_addition_gets_a_note_over_the_tokens_that_it_is_part_of(monkeypatch, tmp_path):
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    _macronizer_echoes(monkeypatch)
+
+    process_work.process_verse(_COMMENTARIUS, tmp_path, _COMMENTARIUS_WORK)
+
+    assert pd.read_csv(tmp_path / "work_content_supplementary.csv").drop(columns="workId").values.tolist() == [
+        ["NOTE", 0, 3, 3, "added by the editor"], ["NOTE", 1, 4, 4, "added by the editor"], ["GAP", 0, 9, 9, "lost"],
+        ["NOTE", 2, 7, 7, "added by the editor"]]
 
 
 _FABULA = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
@@ -516,20 +528,21 @@ _FABULA = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
       <milestone unit="card" n="1"/>
       <sp>
         <speaker>Fictor</speaker>
-        <l n="1">Levis et levis est.</l>
+        <l n="1">Levis et <gap reason="omitted"/> levis est.</l>
         <lb ed="actscene" n="5"/>
-        <l n="2">iam est levis.</l>
+        <l n="2">iam est<lb/>levis.</l>
       </sp>
     </div></div>
     <div type="textpart" subtype="act" n="1"><div type="textpart" subtype="scene" n="1">
-      <sp><speaker>Fictor</speaker><l n="3">et iacere.</l></sp>
+      <sp><speaker>Fictor</speaker><l n="3">et <del>iacere</del>.</l></sp>
     </div></div>
   </div></body></text>
 </TEI>"""
 _FABULA_WORK = _CARMEN_WORK._replace(cited_division_subtypes=(), types_by_n={'prologue': 'PROL'})
 
 
-def test_acts_of_scenes_of_speeches_cited_by_line_pass_validation(monkeypatch, tmp_path):
+def test_acts_of_scenes_of_speeches_cited_by_line_with_an_omitted_passage_and_a_deleted_word_pass_validation(
+        monkeypatch, tmp_path):
     _morpheus(monkeypatch, _CARMEN_ANALYSES)
     _macronizer_echoes(monkeypatch)
 
@@ -537,13 +550,16 @@ def test_acts_of_scenes_of_speeches_cited_by_line_pass_validation(monkeypatch, t
     process_work.validate_csv_files(_FABULA, tmp_path, _FABULA_WORK)
 
     assert _subdivision_rows(tmp_path) == [
-        ("PROL", 0, None, 0, 9, "prologue"), ("SCEN", 0, "PROL", 0, 9, "pr"), ("SPCH", 0, "SCEN", 0, 9, None),
-        ("TITL", 0, "SPCH", 0, 0, None), ("VERS", 0, "SPCH", 1, 5, "1"), ("VERS", 1, "SPCH", 6, 9, "2"),
-        ("ACT", 0, None, 10, 13, "1"), ("SCEN", 0, "ACT", 10, 13, "1"), ("SPCH", 0, "SCEN", 10, 13, None),
-        ("TITL", 0, "SPCH", 10, 10, None), ("VERS", 0, "SPCH", 11, 13, "3")]
+        ("PROL", 0, None, 0, 10, "prologue"), ("SCEN", 0, "PROL", 0, 10, "pr"), ("SPCH", 0, "SCEN", 0, 10, None),
+        ("TITL", 0, "SPCH", 0, 0, None), ("VERS", 0, "SPCH", 1, 6, "1"), ("VERS", 1, "SPCH", 7, 10, "2"),
+        ("ACT", 0, None, 11, 14, "1"), ("SCEN", 0, "ACT", 11, 14, "1"), ("SPCH", 0, "SCEN", 11, 14, None),
+        ("TITL", 0, "SPCH", 11, 11, None), ("VERS", 0, "SPCH", 12, 14, "3")]
     assert _references(tmp_path) == [
-        ("Fictor", "1"), ("Levis", "1"), ("et", "1"), ("levis", "1"), ("est", "1"), (".", "1"), ("jam", "2"),
-        ("est", "2"), ("levis", "2"), (".", "2"), ("Fictor", "3"), ("et", "3"), ("jacere", "3"), (".", "3")]
+        ("Fictor", "1"), ("Levis", "1"), ("et", "1"), ("", "1"), ("levis", "1"), ("est", "1"), (".", "1"),
+        ("jam", "2"), ("est", "2"), ("levis", "2"), (".", "2"), ("Fictor", "3"), ("et", "3"), ("jacere", "3"),
+        (".", "3")]
+    assert _rows(tmp_path / "work_content_supplementary.csv", "workId") == [
+        ("GAP", 0, 3, 3, "omitted"), ("NOTE", 0, 13, 13, "marked for deletion")]
 
 
 def _carmina(book: str) -> str:

@@ -58,6 +58,9 @@ CAPITALIZATION_RESET_PUNCTUATION = ".!?:—"
 # introduces a clause, it doesn't end a sentence.
 SENTENCE_TERMINATORS = ".!?"
 
+#: The note over the tokens of each kind of editorial mark, also when it marks a whole block
+_NOTES_BY_EDITORIAL_MARK = {'addition': 'added by the editor', 'deletion': 'marked for deletion'}
+
 
 class WorkConfiguration(NamedTuple):
     """The settings of a work's processing that depend on its edition: its URN, how it cites its text, the letters that
@@ -612,11 +615,17 @@ def ids_of(edition_urn: str) -> WorkIds:
     return WorkIds(str(uuid.uuid5(uuid.NAMESPACE_URL, edition_urn)), str(uuid.uuid5(uuid.NAMESPACE_URL, urn.group(1))))
 
 
-def split_text_into_segments(text: str) -> list:
-    # Normalize spaces and split text by words and punctuation
-    text = text.strip()
-    # Split text including em dash and other punctuation
-    raw_segments = re.findall(_SEGMENT_PATTERN, text, re.UNICODE)
+class _Segment(NamedTuple):
+    """A word or punctuation mark of a text, and where it starts and ends in the text"""
+    text: str
+    start: int
+    end: int
+
+
+def _segments_of(text: str) -> List[_Segment]:
+    """Splits the text into words and punctuation marks, with a known abbreviation and its period as one segment"""
+    matches = list(re.finditer(_SEGMENT_PATTERN, text, re.UNICODE))
+    raw_segments = [match.group() for match in matches]
 
     # Put a known abbreviation back together with its period, ["M", "'", "."] -> ["M'."], so that get_token_type
     # finds it by the period
@@ -626,15 +635,14 @@ def split_text_into_segments(text: str) -> list:
         abbreviation = next((pieces for pieces in _ABBREVIATION_SEGMENTS
                              if raw_segments[i:i + len(pieces) + 1] == [*pieces, "."]), None)
         if abbreviation is not None:
-            segments.append("".join(abbreviation) + ".")
+            end = matches[i + len(abbreviation)].end()
+            segments.append(_Segment("".join(abbreviation) + ".", matches[i].start(), end))
             i += len(abbreviation) + 1
         else:
-            segments.append(raw_segments[i])
+            segments.append(_Segment(raw_segments[i], matches[i].start(), matches[i].end()))
             i += 1
+    return segments
 
-    normalized_segments = [normalize_digraphs(s) for s in segments]
-
-    return normalized_segments
 
 
 @dataclass
@@ -696,14 +704,28 @@ class _Numbering:
         print(f'Subdivision: {row}')
 
     def add_block(self, block: TextBlock, cnt: int, path: str, parent_path: str | None):
-        segments: list = [segment for piece in block.pieces for segment in
-                          ([None] if isinstance(piece, LostPassage) else split_text_into_segments(piece))]
+        segments: list = []
+        marked: List[Tuple[str, int, int]] = []  # each editorial mark's note, and its first and last segment
+        for index, piece in enumerate(block.pieces):
+            if isinstance(piece, LostPassage):
+                segments.append(None)
+                continue
+            piece_segments = _segments_of(piece)
+            for mark in (mark for mark in block.marks if mark.piece == index):
+                covered = [len(segments) + position for position, segment in enumerate(piece_segments)
+                           if segment.start < mark.end and mark.start < segment.end]
+                if covered:
+                    marked.append((_NOTES_BY_EDITORIAL_MARK[mark.kind], covered[0], covered[-1]))
+            segments.extend(normalize_digraphs(segment.text) for segment in piece_segments)
         first, last = self.next_index, self.next_index + len(segments) - 1
         if block.deleted:
-            self.add_supplementary("NOTE", first, last, 'marked for deletion')
+            self.add_supplementary("NOTE", first, last, _NOTES_BY_EDITORIAL_MARK['deletion'])
+        lost_passages = iter(piece for piece in block.pieces if isinstance(piece, LostPassage))
         for position, segment in enumerate(segments):
             if segment is None:
-                self.add_supplementary("GAP", first + position, first + position, 'lost')
+                self.add_supplementary("GAP", first + position, first + position, next(lost_passages).reason)
+        for note, from_position, to_position in marked:
+            self.add_supplementary("NOTE", first + from_position, first + to_position, note)
         self.subdivisions.append([self.work_id, self.node_of(path), block.typ, cnt, block.text or None,
                                   self.node_of(parent_path), first, last, block.edition_label])
         self.lines_for_macronizer.append(' '.join(segment for segment in segments if segment))
@@ -1145,7 +1167,7 @@ def find_all_gap_tags(element, namespace, gap_tags=None):
 def find_all_p_tags(element, namespace, p_tags=None):
     if p_tags is None:
         p_tags = []
-    if element.tag == f'{namespace}p' and not element.text.strip().startswith('This pointer pattern'):
+    if element.tag == f'{namespace}p' and not ''.join(element.itertext()).strip().startswith('This pointer pattern'):
         p_tags.append(element)
     for child in element:
         find_all_p_tags(child, namespace, p_tags)
@@ -1169,8 +1191,8 @@ def validate_gap_tags(errors, xml_string, subdivisions, contents, supp_entries):
 
     # Check for corresponding subdivision entries
     for idx in gap_indices:
-        # the verse that holds it, which can have text before it or after it
-        matching_subdivisions = [sub for sub in subdivisions if sub['typ'] == 'VERS' and
+        # the verse or paragraph that holds it, which can have text before it or after it
+        matching_subdivisions = [sub for sub in subdivisions if sub['typ'] in ('VERS', 'PARA') and
                                  sub['fromIndex'] <= idx <= sub['toIndex']]
         if len(matching_subdivisions) != 1:
             errors.append(
@@ -1203,11 +1225,12 @@ def validate_p_tags(errors, xml_string, subdivisions):
 
     # Iterate over the contents list for as many times as there are elements in p_tags
     for i in range(num_p_tags):
-        # For each iteration, find the corresponding entry in the subdivisions list
+        # For each iteration, find the corresponding entry in the subdivisions list, named after the paragraph's text:
+        # its own and that of the elements inside it, without the whitespace around it
         for subdivision in subdivisions:
             # If a corresponding entry is found, add entry to the list
             if subdivision['typ'] == 'PARA' \
-                    and subdivision['name'] == p_tags[i].text:
+                    and subdivision['name'] == ''.join(p_tags[i].itertext()).strip():
                 paragraphs.append(subdivision)
                 break
 

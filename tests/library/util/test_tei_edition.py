@@ -4,7 +4,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from scripts.library.util.tei_edition import Division, LostPassage, TextBlock, read_edition
+from scripts.library.util.tei_edition import Division, EditorialMark, LostPassage, TextBlock, read_edition
 
 _BOOKS_AND_POEMS = ('book', 'poem')
 _POEMS = ('poem',)
@@ -41,12 +41,12 @@ def _scene(n: str, content: str) -> str:
     return f'<div type="textpart" subtype="scene" n="{n}">{content}</div>'
 
 
-def _verse(n: str, reference: str, *pieces, deleted=False, notes=()) -> TextBlock:
-    return TextBlock('VERS', n, reference, pieces, deleted, notes)
+def _verse(n: str, reference: str, *pieces, deleted=False, notes=(), marks=()) -> TextBlock:
+    return TextBlock('VERS', n, reference, pieces, deleted, notes, marks)
 
 
-def _paragraph(reference: str, *pieces) -> TextBlock:
-    return TextBlock('PARA', None, reference, pieces, False, ())
+def _paragraph(reference: str, *pieces, marks=()) -> TextBlock:
+    return TextBlock('PARA', None, reference, pieces, False, (), marks)
 
 
 def _title(reference: str, text: str) -> TextBlock:
@@ -122,8 +122,8 @@ def test_a_lost_passage_is_where_the_edition_marks_it():
                                    '<l n="23c"><gap reason="lost"/><note>Lost.</note></l>'))
 
     assert read_edition(edition, _POEMS, {}) == (
-        Division('POEM', '64', (_verse('23b', '64.23b', 'progenies, salvete iterum ', LostPassage()),
-                                _verse('23c', '64.23c', LostPassage(), notes=('Lost.',))), ()),)
+        Division('POEM', '64', (_verse('23b', '64.23b', 'progenies, salvete iterum ', LostPassage('lost')),
+                                _verse('23c', '64.23c', LostPassage('lost'), notes=('Lost.',))), ()),)
 
 
 def test_a_verse_that_the_edition_marks_for_deletion_keeps_its_text():
@@ -166,15 +166,60 @@ def test_acts_of_scenes_hold_speeches_whose_speakers_take_the_reference_of_their
                  ()))
 
 
+def test_the_editors_additions_are_read_where_they_are_and_marked():
+    edition = _edition(_book('1', _chapter('1', _section('1', '<p>Hoc <add>ab</add> illo.</p>')))
+                       + _book('2', _chapter('1', _section('1', '<p>Erus Amphitruo<add>st</add> occupatus.</p>'))))
+
+    first = _paragraph('1.1.1', 'Hoc ab illo.', marks=(EditorialMark('addition', 0, 4, 6),))
+    second = _paragraph('2.1.1', 'Erus Amphitruost occupatus.', marks=(EditorialMark('addition', 0, 14, 16),))
+    assert read_edition(edition, _BOOKS_CHAPTERS_AND_SECTIONS, {}) == (
+        Division('BOOK', '1', (Division('CHAP', '1', (Division('SECT', '1', (first,), ()),), ()),), ()),
+        Division('BOOK', '2', (Division('CHAP', '1', (Division('SECT', '1', (second,), ()),), ()),), ()))
+
+
+def test_an_addition_after_a_lost_passage_is_found_in_the_piece_after_it():
+    edition = _edition(_poem('1', '<l n="1">quo <gap reason="omitted"/> te <add>avortisti</add>?</l>'))
+
+    assert read_edition(edition, _POEMS, {}) == (
+        Division('POEM', '1', (_verse('1', '1.1', 'quo ', LostPassage('omitted'), ' te avortisti?',
+                                      marks=(EditorialMark('addition', 2, 4, 13),)),), ()),)
+
+
+def test_a_word_that_the_edition_marks_for_deletion_inside_a_verse_is_read_and_marked():
+    edition = _edition(_poem('1', '<l n="237"> <del>vicimus</del> vi feroces.</l>'))
+
+    assert read_edition(edition, _POEMS, {}) == (
+        Division('POEM', '1', (_verse('237', '1.237', ' vicimus vi feroces.',
+                                      marks=(EditorialMark('deletion', 0, 1, 8),)),), ()),)
+
+
+def test_a_correction_is_read_as_printed_an_abbreviation_without_its_expansion_and_a_line_break_separates_words():
+    edition = _edition(_poem('1', '<l n="1"><sic>coicerent</sic> si <abbr>exercituru\'s<expan> <ex>exerciturus es'
+                                  '</ex> </expan></abbr>, quaeso</l><l n="2">Quid hoc sit<lb/>hominis?</l>')
+                       + _poem('2', '<p>Milia passuum <sic>XV</sic>.</p>'))
+
+    assert read_edition(edition, _POEMS, {}) == (
+        Division('POEM', '1', (_verse('1', '1.1', "coicerent si exercituru's, quaeso"),
+                               _verse('2', '1.2', 'Quid hoc sit hominis?')), ()),
+        Division('POEM', '2', (_paragraph('2', 'Milia passuum XV.'),), ()))
+
+
+def test_an_omitted_passage_is_a_lost_passage_with_its_reason_in_a_verse_or_a_paragraph():
+    edition = _edition(_poem('1', '<l n="45">deorum <gap reason="omitted"/> architectus</l>'
+                                  '<p>tamen <gap reason="lost"/> Caesar</p>'))
+
+    assert read_edition(edition, _POEMS, {}) == (
+        Division('POEM', '1', (_verse('45', '1.45', 'deorum ', LostPassage('omitted'), ' architectus'),
+                               _paragraph('1', 'tamen ', LostPassage('lost'), ' Caesar')), ()),)
+
+
 @pytest.mark.parametrize("body, cited, error", [
     (_poem('1', '<l n="1">Roma <foreign>est</foreign></l>'), _POEMS,
      "the edition > poem 1 > l 1 holds <foreign>, which isn't read there."),
-    (_poem('1', '<l n="1">Roma <del>est</del></l>'), _POEMS, "the edition > poem 1 > l 1 holds <del>, which isn't "
-                                                            "read there."),
     (_poem('1', '<head>Roma <gap reason="lost"/></head><l n="1">est</l>'), _POEMS,
      "the edition > poem 1 > head holds <gap>, which isn't read there."),
     (_poem('1', '<l n="1"><gap reason="illegible"/></l>'), _POEMS, "the edition > poem 1 > l 1 has a gap whose reason "
-                                                                  "isn't lost."),
+                                                                  "isn't lost or omitted."),
     (_poem('1', 'Roma est.<l n="1">Roma</l>'), _POEMS, "the edition > poem 1 has text outside its parts"),
     (_poem('1', '<l>Roma est.</l>'), _POEMS, "A line in the edition > poem 1 has no n."),
     ('<div type="textpart" subtype="poem"><l n="1">Roma</l></div>', _POEMS, "A poem in the edition has no n."),
@@ -215,14 +260,18 @@ def test_acts_of_scenes_hold_speeches_whose_speakers_take_the_reference_of_their
     ('<div type="textpart" subtype="act">' + _scene('1', '<sp><l n="1">Roma</l></sp>') + '</div>', _LINES_ONLY,
      "An act in the edition has no n."),
     (_poem('1', '<sp><speaker>Sosia</speaker></sp>'), _POEMS, "the edition > poem 1 > sp has no text."),
-], ids=["an element in a verse that isn't read", "a deletion of part of a verse", "a lost passage in a title",
+    (_poem('1', '<l n="1">Roma <expan>est</expan></l>'), _POEMS,
+     "the edition > poem 1 > l 1 holds <expan>, which isn't read there."),
+    (_poem('1', '<p>Roma<lb/>est</p>'), _POEMS, "the edition > poem 1 > p holds <lb>, which isn't read there."),
+], ids=["an element in a verse that isn't read", "a lost passage in a title",
         "a gap for another reason", "text outside a verse", "a verse without n", "a poem without n",
         "books and poems at the top", "a book in a poem", "a book in a book", "another subtype",
         "a speech in a line group", "a paragraph in a line group", "a note in a paragraph",
         "a paragraph marked for deletion", "a title after a verse", "two titles",
         "a verse without text", "a poem without text", "a title of a book that the edition doesn't cite",
         "an empty edition", "a book of poems and chapters", "a verse in a section", "a chapter in a chapter",
-        "a scene at the top", "an act without n", "a speech without what is said"])
+        "a scene at the top", "an act without n", "a speech without what is said",
+        "an expansion outside an abbreviation", "a line break in a paragraph"])
 def test_a_structure_that_isnt_read_raises(body, cited, error):
     with pytest.raises(ValueError, match=re.escape(error)):
         read_edition(_edition(body), cited, {})
