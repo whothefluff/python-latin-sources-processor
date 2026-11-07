@@ -562,6 +562,72 @@ def test_acts_of_scenes_of_speeches_cited_by_line_with_an_omitted_passage_and_a_
         ("GAP", 0, 3, 3, "omitted"), ("NOTE", 0, 13, 13, "marked for deletion")]
 
 
+_COMOEDIA = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Comoedia</title><author>Fictor</author></titleStmt>
+  </fileDesc></teiHeader>
+  <text><body><div type="edition"><div type="textpart" subtype="act" n="1"><div type="textpart" subtype="scene" n="1">
+    <sp><speaker>Mercurius</speaker><l n="1">Lévis ét iacére iam.</l></sp>
+  </div></div></div></body></text>
+</TEI>"""
+_COMOEDIA_WORK = _CARMEN_WORK._replace(cited_division_subtypes=())
+_COMOEDIA_ANALYSES = {**_CARMEN_ANALYSES, "Mercurius": _entry("Mercurius", "Mercurius")}
+
+
+def test_a_word_loses_the_acutes_that_mark_its_ictus_and_its_ictus_bit_mask_keeps_where_they_were(monkeypatch,
+                                                                                                  tmp_path):
+    texts_macronized = []
+
+    def macronize_text(text):
+        texts_macronized.append(text)
+        return [process_work.TokenResult(word=token, is_word=token.isalpha(), macronized=token, uncertainty_mask=0,
+                                         candidates=[])
+                for token in re.findall(r'\w+|[^\w\s]', text)]
+
+    monkeypatch.setattr(process_work, "macronize_text", macronize_text)
+    _morpheus(monkeypatch, _COMOEDIA_ANALYSES)
+
+    process_work.process_verse(_COMOEDIA, tmp_path, _COMOEDIA_WORK)
+    process_work.validate_csv_files(_COMOEDIA, tmp_path, _COMOEDIA_WORK)
+
+    contents = pd.read_csv(tmp_path / "work_contents.csv")
+    subdivisions = pd.read_csv(tmp_path / "work_content_subdivisions.csv")
+    assert list(zip(contents["word"], contents["ictusBitMask"])) == [
+        ("Mercurius", 0), ("Levis", 0b10), ("et", 0b1), ("jacere", 0b1000), ("jam", 0), (".", 0)]
+    assert texts_macronized == ["Mercurius\nLevis et iacere iam ."]
+    assert list(subdivisions.loc[subdivisions["typ"] == "VERS", "name"]) == ["Lévis ét iacére iam."]
+
+
+def test_validation_refuses_an_ictus_on_a_letter_that_morpheus_spells_as_a_consonant(monkeypatch, tmp_path):
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    _macronizer_echoes(monkeypatch)
+    xml = _COMOEDIA.replace("Lévis ét iacére iam.", "Levis íam est.")
+
+    process_work.process_verse(xml, tmp_path, _COMOEDIA_WORK)
+
+    with pytest.raises(ValueError, match=re.escape(
+            "Found 1 words with an ictus on a letter that isn't one of their vowels: 'jam' at index 2, mask 1")):
+        process_work.validate_csv_files(xml, tmp_path, _COMOEDIA_WORK)
+
+
+@pytest.mark.parametrize("word, mask, errors", [
+    ("Levis", 0b10, []),
+    ("jacere", 0b101000, []),
+    ("est", 0, []),
+    ("est", 0b1000, ["Found 1 words with an ictus on a letter that isn't one of their vowels: 'est' at index 0, "
+                     "mask 8"]),
+    ("est", 0b10, ["Found 1 words with an ictus on a letter that isn't one of their vowels: 'est' at index 0, "
+                   "mask 2"]),
+    ("jussu", 0b1, ["Found 1 words with an ictus on a letter that isn't one of their vowels: 'jussu' at index 0, "
+                    "mask 1"]),
+], ids=["a vowel", "two vowels", "none", "past the word", "a consonant", "a consonantal j"])
+def test_an_ictus_marks_only_a_vowel_of_its_word(word, mask, errors):
+    found = []
+
+    process_work.check_ictus_marks_on_vowels(found, pd.DataFrame({"idx": [0], "word": [word], "ictusBitMask": [mask]}))
+
+    assert found == errors
+
+
 def _carmina(book: str) -> str:
     """Returns a TEI file of Carmen with the book given"""
     return f"""<TEI xmlns="http://www.tei-c.org/ns/1.0">

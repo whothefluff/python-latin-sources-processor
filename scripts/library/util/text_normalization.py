@@ -19,3 +19,19 @@ def normalize_digraphs(text: str | None) -> str | None:
                 .replace("Æ", "Ae")
                 .replace("Œ", "Oe")
             )
+
+
+#: Each vowel with the acute that some editions put on it to mark the ictus, and the vowel without it
+_VOWELS_BY_ICTUS_MARKED_VOWEL = {'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u', 'ý': 'y',
+                                 'Á': 'A', 'É': 'E', 'Í': 'I', 'Ó': 'O', 'Ú': 'U', 'Ý': 'Y'}
+
+
+def without_ictus_marks(text: str) -> str:
+    """Returns the text without the acutes that some editions put on vowels to mark the ictus, such as Plautus's
+    audácior. Required by the Pipeline Contract, as digraphs are"""
+    return text.translate(str.maketrans(_VOWELS_BY_ICTUS_MARKED_VOWEL))
+
+
+def ictus_bit_mask(word: str) -> int:
+    """Returns a mask with bit N set when the Nth letter of the word has the acute that marks the ictus"""
+    return sum(1 << position for position, letter in enumerate(word) if letter in _VOWELS_BY_ICTUS_MARKED_VOWEL)

@@ -186,11 +186,11 @@ def test_a_word_that_the_reader_would_look_up_under_a_numeral_gets_its_own_macro
     # before i. Carmina Altera has the numeral I, unambiguous as I.
     works = _copy_of_both_works(tmp_path)
     _add_rows(works / 'carmina_prima' / 'work_contents.csv', [
-        (CARMINA_PRIMA_ID, 11, 'et', '1.1.3', 0, 1, 3, 0, None, None),
-        (CARMINA_PRIMA_ID, 12, 'I', '1.1.3', None, 1, 3, 1, None, None)])
+        (CARMINA_PRIMA_ID, 11, 'et', '1.1.3', 0, 1, 3, 0, None, None, 0),
+        (CARMINA_PRIMA_ID, 12, 'I', '1.1.3', None, 1, 3, 1, None, None, 0)])
     _add_rows(works / 'carmina_prima' / 'unambiguous_macronizations.csv', [('i', 'ī')])
     _add_rows(works / 'carmina_altera' / 'work_contents.csv', [
-        (CARMINA_ALTERA_ID, 10, 'I', '1.1.3', 0, 3, 3, 0, None, 'ūnus')])
+        (CARMINA_ALTERA_ID, 10, 'I', '1.1.3', 0, 3, 3, 0, None, 'ūnus', 0)])
     _add_rows(works / 'carmina_altera' / 'unambiguous_macronizations.csv', [('I', 'I')])
 
     _aggregate_in_turn(works, runs, tmp_path / 'aggregate')

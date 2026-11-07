@@ -9,6 +9,9 @@ In `work_contents.csv`, the `word` and `macronizedWord` columns MUST have identi
 
 * **Digraphs:** Ligatures like `æ/œ` are normalized to `ae/oe` in the pipeline *before* macronization. One character (
   `æ`) becoming two (`ae`) downstream would break substring math for enclitics and bitmasks.
+* **Ictus:** The acute that some editions put on a vowel to mark the ictus (Plautus's `audácior`) is taken out of `word`
+  *before* macronization, and `ictusBitMask` keeps where it was: bit N for the Nth letter of `word`, `0` for a token
+  without one. It only marks vowels, never `j` or `v`. Subdivision names keep the edition's text, with its acutes.
 
 ## 2. Match Domain Casing Rule & Morphological Uniqueness
 

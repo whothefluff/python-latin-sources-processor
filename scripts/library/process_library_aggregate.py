@@ -17,7 +17,7 @@ from scripts.library.util.unambiguous_macronizations import (
 COLUMNS_BY_LIBRARY_FILE: Dict[str, List[str]] = {
     'works.csv': ['id', 'name', 'about', 'uvLowercase', 'uvCapitals', 'ijLowercase', 'ijCapitals'],
     'work_contents.csv': ['workId', 'idx', 'word', 'sourceReference', 'properNounState', 'tokenType', 'sentenceIdx',
-                          'wordIdx', 'enclitic', 'expansion'],
+                          'wordIdx', 'enclitic', 'expansion', 'ictusBitMask'],
     'work_content_subdivisions.csv': ['workId', 'node', 'typ', 'cnt', 'name', 'parent', 'fromIndex', 'toIndex',
                                       'editionLabel'],
     'work_content_supplementary.csv': ['workId', 'typ', 'cnt', 'fromIndex', 'toIndex', 'val'],

@@ -31,7 +31,7 @@ from scripts.library.util.spelling import (
     LetterConvention, differs_in_told_apart_letters, respell, respell_macronized, spellings_of, token_spellings_of,
 )
 from scripts.library.util.tei_edition import TEI_NAMESPACE, Division, LostPassage, TextBlock, read_edition
-from scripts.library.util.text_normalization import normalize_digraphs
+from scripts.library.util.text_normalization import ictus_bit_mask, normalize_digraphs, without_ictus_marks
 from scripts.library.util.token_classification import TokenType, get_token_type
 from scripts.library.util.unambiguous_macronizations import (
     CertainToken, WorkMacronization, agreed_macronizations, lookup_key, work_macronizations_where_lookup_differs,
@@ -391,6 +391,7 @@ def macronize_text(text: str) -> List[TokenResult]:
 
 def _process_text_segments(
         segments: List[str],
+        ictus_bit_masks: List[int],
         work_id: str,
         fragment_index: int,
         sentence_idx: int,
@@ -414,7 +415,7 @@ def _process_text_segments(
     """
     prev_word_was_capitalized = False
 
-    for segment in segments:
+    for segment, ictus_marks in zip(segments, ictus_bit_masks):
 
         if starts_new_sentence:
             sentence_idx += 1
@@ -449,7 +450,7 @@ def _process_text_segments(
 
         work_contents_data.append([
             work_id, fragment_index, segment, source_ref, context_dependent_state,
-            int(t_type), sentence_idx, current_word_idx, enclitic, expansion,
+            int(t_type), sentence_idx, current_word_idx, enclitic, expansion, ictus_marks,
         ])
 
         if t_type == TokenType.WORD:
@@ -705,10 +706,12 @@ class _Numbering:
 
     def add_block(self, block: TextBlock, cnt: int, path: str, parent_path: str | None):
         segments: list = []
+        ictus_bit_masks: List[int] = []
         marked: List[Tuple[str, int, int]] = []  # each editorial mark's note, and its first and last segment
         for index, piece in enumerate(block.pieces):
             if isinstance(piece, LostPassage):
                 segments.append(None)
+                ictus_bit_masks.append(0)
                 continue
             piece_segments = _segments_of(piece)
             for mark in (mark for mark in block.marks if mark.piece == index):
@@ -716,7 +719,9 @@ class _Numbering:
                            if segment.start < mark.end and mark.start < segment.end]
                 if covered:
                     marked.append((_NOTES_BY_EDITORIAL_MARK[mark.kind], covered[0], covered[-1]))
-            segments.extend(normalize_digraphs(segment.text) for segment in piece_segments)
+            printed_words = [cast(str, normalize_digraphs(segment.text)) for segment in piece_segments]
+            segments.extend(without_ictus_marks(printed) for printed in printed_words)
+            ictus_bit_masks.extend(ictus_bit_mask(printed) for printed in printed_words)
         first, last = self.next_index, self.next_index + len(segments) - 1
         if block.deleted:
             self.add_supplementary("NOTE", first, last, _NOTES_BY_EDITORIAL_MARK['deletion'])
@@ -733,6 +738,7 @@ class _Numbering:
         self.next_block_starts_sentence = False
         self.next_index, self.sentence_idx, self.word_idx, _, self.starts_new_sentence = _process_text_segments(
             segments,
+            ictus_bit_masks,
             self.work_id,
             first,
             self.sentence_idx,
@@ -806,7 +812,7 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
                                                  'ijCapitals'])
     work_contents_df = pd.DataFrame(work_contents_data,
                                     columns=['workId', 'idx', 'word', 'sourceReference', 'properNounState', 'tokenType',
-                                             'sentenceIdx', 'wordIdx', 'enclitic', 'expansion']).astype(
+                                             'sentenceIdx', 'wordIdx', 'enclitic', 'expansion', 'ictusBitMask']).astype(
         {'properNounState': 'Int64', 'wordIdx': 'Int64'})
     work_content_subdivisions_df = pd.DataFrame(work_content_subdivisions_data,
                                                 columns=['workId', 'node', 'typ', 'cnt', 'name', 'parent', 'fromIndex',
@@ -1005,6 +1011,7 @@ def validate_csv_files(xml_string, output_dir, work: WorkConfiguration):
     check_proper_noun_states(errors, work_contents_df)
     check_macronization_coverage(errors, work_contents_df, work_macronizations_df, unambiguous_macronizations_df)
     check_masks_within_their_words(errors, work_macronizations_df)
+    check_ictus_marks_on_vowels(errors, work_contents_df)
     check_expansion_completeness(errors, work_contents_df)
     check_sentence_and_word_idx(errors, work_contents_df)
     check_letters_against_morpheus(errors, work_contents_df, work.letter_convention)
@@ -1353,6 +1360,22 @@ def check_masks_within_their_words(errors, work_macronizations_df):
     if past:
         errors.append(f"Found {len(past)} macronizations with an uncertain bit past their word's letters: "
                       + ', '.join(f"'{word}' at index {idx}, mask {mask}" for word, idx, mask in past))
+
+
+#: The letters that can carry the ictus
+_VOWEL_LETTERS = 'aeiouyAEIOUY'
+
+
+def check_ictus_marks_on_vowels(errors, work_contents_df):
+    """Every bit of an ictusBitMask must be a vowel of its word: bit N is the Nth letter, so a bit past the last one
+    marks none, and the ictus falls on a vowel, never on a consonant, j and v included."""
+    marked = work_contents_df[work_contents_df['ictusBitMask'] != 0]
+    wrong = [(word, idx, mask) for idx, word, mask in zip(marked['idx'], marked['word'], marked['ictusBitMask'])
+             if int(mask) >> len(word) != 0
+             or any(int(mask) >> position & 1 and letter not in _VOWEL_LETTERS for position, letter in enumerate(word))]
+    if wrong:
+        errors.append(f"Found {len(wrong)} words with an ictus on a letter that isn't one of their vowels: "
+                      + ', '.join(f"'{word}' at index {idx}, mask {mask}" for word, idx, mask in wrong))
 
 
 def check_expansion_completeness(errors, work_contents_df):
