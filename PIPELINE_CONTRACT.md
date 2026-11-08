@@ -89,6 +89,10 @@ morphology forms:
 * **Edition Letters:** `works.csv` records what the edition printed, so the reader can show it: `uvLowercase` (`uv`,
   `u` or `v`), `uvCapitals` (`UV`, `U` or `V`), `ijLowercase` (`ij`, `i` or `j`) and `ijCapitals` (`IJ`, `I` or
   `J`). Two letters mean the edition tells them apart; one letter stands for both.
+* **Configured Spellings:** A printed word listed in the work's `WorkConfiguration.spellings_by_printed_word` is
+  replaced by the spelling it maps to, in word tokens and `TITL` names, before Morpheus and the macronizer see it. It's
+  for words that the rules above leave wrong: where `letter_convention.uv_lowercase` is `uv`, the edition's v stays
+  (Edition First), so `Mercvrivs` becomes `Mercurius` only if the map has `'Mercvrivs': 'Mercurius'`.
 * **Hand-Written Data:** Expansions and override analyses are written the same way by hand.
 
 ## 6. Subdivisions

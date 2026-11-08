@@ -46,6 +46,7 @@ PHAEDRUS = WorkConfiguration(
     cited_division_subtypes=('book', 'poem'),
     types_by_n={'prologus': 'PROL', 'epilogus': 'EPIL'},
     letter_convention=LETTER_CONVENTION,
+    spellings_by_printed_word={},
     token_overrides=WORK_SPECIFIC_TOKEN_OVERRIDES,
     expansions=WORK_SPECIFIC_EXPANSIONS,
     proper_noun_overrides=WORK_SPECIFIC_PROPER_NOUN_OVERRIDES,

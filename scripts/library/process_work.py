@@ -73,6 +73,9 @@ class WorkConfiguration(NamedTuple):
     #: The subdivision types of the poems and acts whose n makes them a prologue or an epilogue, such as prologus
     types_by_n: Dict[str, str]
     letter_convention: LetterConvention
+    #: The spelling that replaces a word as printed, by the word as printed, for words that letter_convention can't fix:
+    #: with uv_lowercase 'uv', Mercvrivs keeps its v unless this maps it to 'Mercurius'
+    spellings_by_printed_word: Dict[str, str]
     #: Token types by token index, where the script's own would be wrong
     token_overrides: Dict[int, TokenType]
     #: Expansions of abbreviations and numerals, by token index
@@ -271,12 +274,14 @@ def spelled_with_morpheus_letters(word: str, convention: LetterConvention) -> st
     return respell(word, find_enclitic(word, convention), morpheus_surfaces(word, convention), convention)
 
 
-def _title_spelled_like_its_tokens(title: str, tokens: List[list], convention: LetterConvention) -> str:
+def _title_spelled_like_its_tokens(title: str, tokens: List[list], convention: LetterConvention,
+                                   spellings_by_printed_word: Dict[str, str]) -> str:
     spellings: Dict[str, str] = {token[2]: spelled_with_morpheus_letters(token[2], convention)
                                  for token in tokens if token[5] == TokenType.WORD}
 
     def spelled_like_its_token(word: re.Match[str]) -> str:
-        return spellings.get(word[0], word[0])
+        spelling = spellings_by_printed_word.get(word[0], word[0])
+        return spellings.get(spelling, spelling)
 
     return re.sub(r'\w+', spelled_like_its_token, title)
 
@@ -720,7 +725,8 @@ class _Numbering:
                 if covered:
                     marked.append((_NOTES_BY_EDITORIAL_MARK[mark.kind], covered[0], covered[-1]))
             printed_words = [cast(str, normalize_digraphs(segment.text)) for segment in piece_segments]
-            segments.extend(without_ictus_marks(printed) for printed in printed_words)
+            segments.extend(self.work.spellings_by_printed_word.get(printed, without_ictus_marks(printed))
+                            for printed in printed_words)
             ictus_bit_masks.extend(ictus_bit_mask(printed) for printed in printed_words)
         first, last = self.next_index, self.next_index + len(segments) - 1
         if block.deleted:
@@ -806,7 +812,8 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
     for subdivision in work_content_subdivisions_data:
         if subdivision[2] == 'TITL':
             title_tokens = [tokens_by_idx[idx] for idx in range(subdivision[6], subdivision[7] + 1) if idx in tokens_by_idx]
-            subdivision[4] = _title_spelled_like_its_tokens(subdivision[4], title_tokens, work.letter_convention)
+            subdivision[4] = _title_spelled_like_its_tokens(subdivision[4], title_tokens, work.letter_convention,
+                                                            work.spellings_by_printed_word)
 
     works_df = pd.DataFrame(works_data, columns=['id', 'name', 'about', 'uvLowercase', 'uvCapitals', 'ijLowercase',
                                                  'ijCapitals'])

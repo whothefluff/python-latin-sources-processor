@@ -18,8 +18,8 @@ _CARMEN_LETTERS = LetterConvention(uv_lowercase="uv", uv_capitals="UV", ij_lower
 _CARMEN_WORK = process_work.WorkConfiguration(
     edition_urn='urn:cts:latinLit:fict001.fict001.fict-lat1',
     cited_division_subtypes=('book', 'poem'), types_by_n={},
-    letter_convention=_CARMEN_LETTERS, token_overrides={}, expansions={}, proper_noun_overrides={},
-    author_abbreviations=('Fict.',), work_about_file=str(_CARMEN_FILES / 'work_about.txt'),
+    letter_convention=_CARMEN_LETTERS, spellings_by_printed_word={}, token_overrides={}, expansions={},
+    proper_noun_overrides={}, author_abbreviations=('Fict.',), work_about_file=str(_CARMEN_FILES / 'work_about.txt'),
     author_about_file=str(_CARMEN_FILES / 'author_about.txt'),
     author_image_file=str(_CARMEN_FILES / 'author_image.bin'))
 
@@ -566,11 +566,30 @@ _COMOEDIA = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
   <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Comoedia</title><author>Fictor</author></titleStmt>
   </fileDesc></teiHeader>
   <text><body><div type="edition"><div type="textpart" subtype="act" n="1"><div type="textpart" subtype="scene" n="1">
-    <sp><speaker>Mercurius</speaker><l n="1">Lévis ét iacére iam.</l></sp>
+    <sp><speaker>Mercvrivs</speaker><l n="1">Lévis ét iacére iam.</l></sp>
   </div></div></div></body></text>
 </TEI>"""
-_COMOEDIA_WORK = _CARMEN_WORK._replace(cited_division_subtypes=())
+_COMOEDIA_WORK = _CARMEN_WORK._replace(cited_division_subtypes=(), spellings_by_printed_word={'Mercvrivs': 'Mercurius'})
 _COMOEDIA_ANALYSES = {**_CARMEN_ANALYSES, "Mercurius": _entry("Mercurius", "Mercurius")}
+
+
+def _process_comoedia(monkeypatch, output_dir) -> list:
+    """Processes Comoedia and returns what Morpheus was asked for"""
+    asked = _morpheus(monkeypatch, _COMOEDIA_ANALYSES)
+    _macronizer_echoes(monkeypatch)
+    process_work.process_verse(_COMOEDIA, output_dir, _COMOEDIA_WORK)
+    return asked
+
+
+def test_a_word_listed_in_spellings_by_printed_word_is_looked_up_and_written_in_the_spelling_it_maps_to(
+        monkeypatch, tmp_path):
+    asked = _process_comoedia(monkeypatch, tmp_path)
+    process_work.validate_csv_files(_COMOEDIA, tmp_path, _COMOEDIA_WORK)
+
+    subdivisions = pd.read_csv(tmp_path / "work_content_subdivisions.csv")
+    assert (_references(tmp_path)[0], list(subdivisions.loc[subdivisions["typ"] == "TITL", "name"])) == (
+        ("Mercurius", "1"), ["Mercurius"])
+    assert "mercvrivs" not in asked and "Mercvrivs" not in asked
 
 
 def test_a_word_loses_the_acutes_that_mark_its_ictus_and_its_ictus_bit_mask_keeps_where_they_were(monkeypatch,
