@@ -564,6 +564,27 @@ def test_a_numeral_tag_that_holds_only_part_of_a_token_raises(monkeypatch, tmp_p
         process_work.process_verse(numeri, tmp_path, _COMMENTARIUS_WORK)
 
 
+_EMENDATA = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Emendata</title><author>Fictor</author></titleStmt>
+  </fileDesc></teiHeader>
+  <text><body><div type="edition"><div type="textpart" subtype="book" n="1"><div type="textpart" subtype="poem" n="1">
+    <l n="1">Levis <sic>et levis</sic> est.</l>
+    <l n="2"><corr>Est</corr> levis.</l>
+  </div></div></div></body></text>
+</TEI>"""
+
+
+def test_sic_and_a_correction_of_the_editors_get_a_note_over_their_tokens(monkeypatch, tmp_path):
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    _macronizer_echoes(monkeypatch)
+
+    process_work.process_verse(_EMENDATA, tmp_path, _CARMEN_WORK)
+    process_work.validate_csv_files(_EMENDATA, tmp_path, _CARMEN_WORK)
+
+    assert _rows(tmp_path / "work_content_supplementary.csv", "workId") == [
+        ("NOTE", 0, 1, 2, "sic"), ("NOTE", 1, 5, 5, "corrected by the editor")]
+
+
 _FABULA = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
   <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Fabula</title><author>Fictor</author></titleStmt>
   </fileDesc></teiHeader>

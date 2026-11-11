@@ -36,9 +36,10 @@ _NUMBERED_DIVISION_KINDS = ('book', 'poem', 'chapter', 'section', 'act', 'scene'
 _DIVISION_KINDS_TYPED_BY_N = ('poem', 'act')
 _BLOCK_TYPES_BY_TAG = {'head': 'TITL', 'speaker': 'TITL', 'l': 'VERS', 'p': 'PARA'}
 #: The elements that a block can hold in its text
-_INLINE_TAGS = ('q', 'quote', 'hi', 'emph', 'gap', 'note', 'milestone', 'add', 'del', 'sic', 'num', 'abbr', 'lb', 'pb')
+_INLINE_TAGS = ('q', 'quote', 'hi', 'emph', 'gap', 'note', 'milestone', 'add', 'del', 'sic', 'corr', 'num', 'abbr',
+                'lb', 'pb')
 #: The elements whose text is read as the text around it
-_READ_AS_TEXT_TAGS = ('q', 'quote', 'hi', 'emph', 'sic', 'add', 'del', 'num')
+_READ_AS_TEXT_TAGS = ('q', 'quote', 'hi', 'emph', 'sic', 'corr', 'add', 'del', 'num')
 #: The reasons for a gap that are read, which the gap's supplementary entry keeps
 _GAP_REASONS = ('lost', 'omitted')
 _TYPOGRAPHY_TAGS = ('hi', 'emph')
@@ -52,9 +53,9 @@ class LostPassage(NamedTuple):
 
 
 class EditorialMark(NamedTuple):
-    """Part of a block's text that the editor added or marked for deletion: a range of characters in one of its
-    pieces"""
-    #: addition or deletion
+    """Part of a block's text that the editor added, corrected or marked for deletion, or that the edition prints as
+    its source has it (sic): a range of characters in one of its pieces"""
+    #: addition, correction, deletion or sic
     kind: str
     piece: int
     start: int
@@ -81,7 +82,8 @@ class TextBlock(NamedTuple):
     #: Whether the edition marks the whole block for deletion
     deleted: bool
     notes: Tuple[str, ...]
-    #: The parts of its text that the editor added or marked for deletion, when not the whole block
+    #: The parts of its text that the editor added, corrected or marked for deletion (unless the whole block is), and
+    #: those that the edition prints as its source has them
     marks: Tuple[EditorialMark, ...] = ()
     numerals: Tuple[Numeral, ...] = ()
 
@@ -113,7 +115,7 @@ class Division(NamedTuple):
 
 
 #: The kind of editorial mark of each element that marks part of a block's text
-_EDITORIAL_MARKS_BY_TAG = {'add': 'addition', 'del': 'deletion'}
+_EDITORIAL_MARKS_BY_TAG = {'add': 'addition', 'del': 'deletion', 'corr': 'correction', 'sic': 'sic'}
 #: The elements that mark part of a block's text: the editor's marks, and numerals
 _MARKING_TAGS = (*_EDITORIAL_MARKS_BY_TAG, 'num')
 

@@ -193,15 +193,26 @@ def test_a_word_that_the_edition_marks_for_deletion_inside_a_verse_is_read_and_m
                                       marks=(EditorialMark('deletion', 0, 1, 8),)),), ()),)
 
 
-def test_a_correction_is_read_as_printed_an_abbreviation_without_its_expansion_and_a_line_break_separates_words():
-    edition = _edition(_poem('1', '<l n="1"><sic>coicerent</sic> si <abbr>exercituru\'s<expan> <ex>exerciturus es'
-                                  '</ex> </expan></abbr>, quaeso</l><l n="2">Quid hoc sit<lb/>hominis?</l>')
-                       + _poem('2', '<p>Milia passuum <sic>XV</sic>.</p>'))
+def test_an_abbreviation_is_read_without_its_expansion_and_a_line_break_separates_words():
+    edition = _edition(_poem('1', '<l n="1">coicerent si <abbr>exercituru\'s<expan> <ex>exerciturus es'
+                                  '</ex> </expan></abbr>, quaeso</l><l n="2">Quid hoc sit<lb/>hominis?</l>'))
 
     assert read_edition(edition, _POEMS, {}) == (
         Division('POEM', '1', (_verse('1', '1.1', "coicerent si exercituru's, quaeso"),
-                               _verse('2', '1.2', 'Quid hoc sit hominis?')), ()),
-        Division('POEM', '2', (_paragraph('2', 'Milia passuum XV.'),), ()))
+                               _verse('2', '1.2', 'Quid hoc sit hominis?')), ()),)
+
+
+def test_sic_and_a_correction_of_the_editors_are_read_and_marked():
+    edition = _edition(_poem('8', '<l n="19">quod ut superbo <corr>provoces</corr> ab inguine,</l>')
+                       + _poem('9', '<l n="1">lapides ac tela <sic>coicerent</sic></l>')
+                       + _poem('10', '<p>Milia passuum <sic>XV</sic>.</p>'))
+
+    assert read_edition(edition, _POEMS, {}) == (
+        Division('POEM', '8', (_verse('19', '8.19', 'quod ut superbo provoces ab inguine,',
+                                      marks=(EditorialMark('correction', 0, 16, 24),)),), ()),
+        Division('POEM', '9', (_verse('1', '9.1', 'lapides ac tela coicerent',
+                                      marks=(EditorialMark('sic', 0, 16, 25),)),), ()),
+        Division('POEM', '10', (_paragraph('10', 'Milia passuum XV.', marks=(EditorialMark('sic', 0, 14, 16),)),), ()))
 
 
 def test_an_omitted_passage_is_a_lost_passage_with_its_reason_in_a_verse_or_a_paragraph():
@@ -252,7 +263,8 @@ def test_a_numeral_that_the_edition_tags_is_marked_also_inside_what_the_editor_m
 
     assert read_edition(edition, _BOOKS_CHAPTERS_AND_SECTIONS, {}) == (
         Division('BOOK', '3', (Division('CHAP', '2', (Division('SECT', '3', (_paragraph(
-            '3.2.3', 'anguste xv milia militum, circiter d equites', marks=(EditorialMark('deletion', 0, 26, 36),),
+            '3.2.3', 'anguste xv milia militum, circiter d equites',
+            marks=(EditorialMark('sic', 0, 8, 16), EditorialMark('deletion', 0, 26, 36)),
             numerals=(Numeral(0, 8, 10), Numeral(0, 35, 36))),), ()),), ()),), ()),)
 
 

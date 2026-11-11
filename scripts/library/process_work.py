@@ -59,7 +59,8 @@ CAPITALIZATION_RESET_PUNCTUATION = ".!?:—"
 SENTENCE_TERMINATORS = ".!?"
 
 #: The note over the tokens of each kind of editorial mark, also when it marks a whole block
-_NOTES_BY_EDITORIAL_MARK = {'addition': 'added by the editor', 'deletion': 'marked for deletion'}
+_NOTES_BY_EDITORIAL_MARK = {'addition': 'added by the editor', 'deletion': 'marked for deletion',
+                            'correction': 'corrected by the editor', 'sic': 'sic'}
 
 
 class WorkConfiguration(NamedTuple):
