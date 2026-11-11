@@ -17,14 +17,14 @@ _DIVISION_KINDS_BY_HOLDER: Dict[str, Tuple[str, ...]] = {
 }
 #: The elements that each kind of division can hold
 _PARTS_BY_DIVISION_KIND: Dict[str, Tuple[str, ...]] = {
-    'book': ('head', 'div', 'note', 'milestone'),
-    'poem': ('head', 'l', 'lg', 'sp', 'p', 'note', 'milestone'),
-    'chapter': ('head', 'div', 'note', 'milestone'),
-    'section': ('head', 'p', 'note', 'milestone'),
-    'act': ('head', 'div', 'note', 'milestone'),
-    'scene': ('head', 'sp', 'note', 'milestone'),
-    'lg': ('head', 'l', 'lg', 'note', 'milestone'),
-    'sp': ('speaker', 'l', 'lg', 'p', 'note', 'milestone', 'lb'),
+    'book': ('head', 'div', 'note', 'milestone', 'lb', 'pb'),
+    'poem': ('head', 'l', 'lg', 'sp', 'p', 'note', 'milestone', 'lb', 'pb'),
+    'chapter': ('head', 'div', 'note', 'milestone', 'lb', 'pb'),
+    'section': ('head', 'p', 'note', 'milestone', 'lb', 'pb'),
+    'act': ('head', 'div', 'note', 'milestone', 'lb', 'pb'),
+    'scene': ('head', 'sp', 'note', 'milestone', 'lb', 'pb'),
+    'lg': ('head', 'l', 'lg', 'note', 'milestone', 'lb', 'pb'),
+    'sp': ('speaker', 'l', 'lg', 'p', 'note', 'milestone', 'lb', 'pb'),
 }
 _DIVISION_TYPES_BY_KIND = {'book': 'BOOK', 'poem': 'POEM', 'chapter': 'CHAP', 'section': 'SECT', 'act': 'ACT',
                            'scene': 'SCEN', 'lg': 'LGRP', 'sp': 'SPCH'}
@@ -35,14 +35,14 @@ _NUMBERED_DIVISION_KINDS = ('book', 'poem', 'chapter', 'section', 'act', 'scene'
 #: The kinds of division that the work's configuration can give another type by their n, such as a prologue
 _DIVISION_KINDS_TYPED_BY_N = ('poem', 'act')
 _BLOCK_TYPES_BY_TAG = {'head': 'TITL', 'speaker': 'TITL', 'l': 'VERS', 'p': 'PARA'}
-#: The elements that each type of block can hold in its text
-_INLINE_TAGS_BY_BLOCK_TYPE: Dict[str, Tuple[str, ...]] = {
-    'VERS': ('q', 'quote', 'gap', 'note', 'milestone', 'add', 'del', 'sic', 'abbr', 'lb'),
-    'TITL': ('q', 'quote', 'note', 'milestone'),
-    'PARA': ('add', 'sic', 'gap'),
-}
+#: The elements that a block can hold in its text
+_INLINE_TAGS = ('q', 'quote', 'hi', 'emph', 'gap', 'note', 'milestone', 'add', 'del', 'sic', 'num', 'abbr', 'lb', 'pb')
+#: The elements whose text is read as the text around it
+_READ_AS_TEXT_TAGS = ('q', 'quote', 'hi', 'emph', 'sic', 'add', 'del', 'num')
 #: The reasons for a gap that are read, which the gap's supplementary entry keeps
 _GAP_REASONS = ('lost', 'omitted')
+_TYPOGRAPHY_TAGS = ('hi', 'emph')
+_TYPOGRAPHY_RENDS_READ_AS_TEXT = ('uppercase',)
 
 
 class LostPassage(NamedTuple):
@@ -56,6 +56,13 @@ class EditorialMark(NamedTuple):
     pieces"""
     #: addition or deletion
     kind: str
+    piece: int
+    start: int
+    end: int
+
+
+class Numeral(NamedTuple):
+    """Part of a block's text that the edition tags as a numeral: a range of characters in one of its pieces"""
     piece: int
     start: int
     end: int
@@ -76,6 +83,7 @@ class TextBlock(NamedTuple):
     notes: Tuple[str, ...]
     #: The parts of its text that the editor added or marked for deletion, when not the whole block
     marks: Tuple[EditorialMark, ...] = ()
+    numerals: Tuple[Numeral, ...] = ()
 
     @property
     def printed_text(self) -> str:
@@ -106,12 +114,15 @@ class Division(NamedTuple):
 
 #: The kind of editorial mark of each element that marks part of a block's text
 _EDITORIAL_MARKS_BY_TAG = {'add': 'addition', 'del': 'deletion'}
+#: The elements that mark part of a block's text: the editor's marks, and numerals
+_MARKING_TAGS = (*_EDITORIAL_MARKS_BY_TAG, 'num')
 
 
-class _Marked(NamedTuple):
-    """The text of an <add> or a <del>, until it's joined with the text around it"""
-    kind: str
+class _MarkedText(NamedTuple):
+    """Some of a block's text and the elements that mark it, innermost first, until it's joined with the text around
+    it"""
     text: str
+    marking: Tuple[ET.Element, ...] = ()
 
 
 def read_edition(root: ET.Element, cited_division_subtypes: Tuple[str, ...],
@@ -122,10 +133,11 @@ def read_edition(root: ET.Element, cited_division_subtypes: Tuple[str, ...],
     body = root.find(f'{_TEI}text/{_TEI}body')
     if body is None:
         raise ValueError("The TEI file has no <text><body>.")
-    editions = _children(body, 'the body')
+    editions = [child for child in _children(body, 'the body') if _tag(child) != 'pb']
     if len(editions) != 1 or _tag(editions[0]) != 'div' or editions[0].get('type') != 'edition':
         raise ValueError('The body must hold one <div type="edition"> and nothing else.')
-    children = _children(editions[0], 'the edition')
+    parts = [child for child in _children(editions[0], 'the edition') if _tag(child) != 'pb']
+    children = parts[1:] if parts and _tag(parts[0]) == 'head' else parts  # the work's title, which its header gives
     if not children:
         raise ValueError("The edition is empty.")
     kind = cast(str, _division_kind_held(children, 'edition', 'the edition'))
@@ -236,12 +248,12 @@ def _block(element: ET.Element, typ: str, where: str, cited: Tuple[str, ...],
     reference = reference or '.'.join(cited + ((n,) if n else ()))
     if not reference:
         raise ValueError(f"{where} would have no reference: no division above it is cited.")
-    deletion = _whole_deletion(element) if typ != 'PARA' else None
-    pieces, notes = _inline(deletion if deletion is not None else element, where, _INLINE_TAGS_BY_BLOCK_TYPE[typ])
-    joined, marks = _joined(pieces)
+    deletion = _whole_deletion(element)
+    pieces, notes = _inline(deletion if deletion is not None else element, where, _INLINE_TAGS)
+    joined, marks, numerals = _joined(pieces)
     if not any(isinstance(piece, LostPassage) or piece.strip() for piece in joined):
         raise ValueError(f"{where} has no text.")
-    return TextBlock(typ, n, reference, joined, deletion is not None, notes, marks)
+    return TextBlock(typ, n, reference, joined, deletion is not None, notes, marks, numerals)
 
 
 def _whole_deletion(element: ET.Element) -> ET.Element | None:
@@ -253,54 +265,68 @@ def _whole_deletion(element: ET.Element) -> ET.Element | None:
 
 
 def _inline(element: ET.Element, where: str,
-            tags: Tuple[str, ...]) -> Tuple[List[Union[str, LostPassage, _Marked]], Tuple[str, ...]]:
-    """Returns the element's text, with its lost passages and the editor's marks where they are, and its notes.
-    Raises on any element that isn't one of tags.
-    A line break inside a verse separates two words, and an abbreviation is read as printed, without its expansion."""
-    pieces: List[Union[str, LostPassage, _Marked]] = [element.text or '']
+            tags: Tuple[str, ...]) -> Tuple[List[Union[_MarkedText, LostPassage]], Tuple[str, ...]]:
+    """Returns the element's text, with its lost passages where they are and the elements that mark its parts, and
+    its notes. Raises on any element that isn't one of tags, and on typography whose rend isn't read.
+    A line break separates two words, a page break joins the text around it, and an abbreviation is read as printed,
+    without its expansion."""
+    pieces: List[Union[_MarkedText, LostPassage]] = [_MarkedText(element.text or '')]
     notes: List[str] = []
     for child in element:
         tag = _tag(child)
         if tag not in tags:
             raise ValueError(f"{where} holds <{tag}>, which isn't read there.")
-        if tag in ('q', 'quote', 'sic', 'add', 'del'):
+        if tag in _TYPOGRAPHY_TAGS and child.get('rend') not in _TYPOGRAPHY_RENDS_READ_AS_TEXT:
+            raise ValueError(f"{where} holds <{tag} rend=\"{child.get('rend', '')}\">, but only "
+                             f"{' and '.join(_TYPOGRAPHY_RENDS_READ_AS_TEXT)} typography is read there.")
+        if tag in _READ_AS_TEXT_TAGS:
             inner, inner_notes = _inline(child, where, tags)
-            pieces.extend(_Marked(_EDITORIAL_MARKS_BY_TAG[tag], piece) if tag in _EDITORIAL_MARKS_BY_TAG
-                          and isinstance(piece, str) else piece for piece in inner)
+            pieces.extend(_marked_by(piece, child) if tag in _MARKING_TAGS else piece for piece in inner)
             notes.extend(inner_notes)
         elif tag == 'abbr':
             pieces.extend(_inline(child, where, ('expan',))[0])
         elif tag == 'lb':
-            pieces.append(' ')
+            pieces.append(_MarkedText(' '))
         elif tag == 'gap':
             if child.get('reason') not in _GAP_REASONS:
                 raise ValueError(f"{where} has a gap whose reason isn't {' or '.join(_GAP_REASONS)}.")
             pieces.append(LostPassage(cast(str, child.get('reason'))))
         elif tag == 'note':
             notes.append(_note_text(child))
-        pieces.append(child.tail or '')
+        pieces.append(_MarkedText(child.tail or ''))
     return pieces, tuple(notes)
 
 
-def _joined(pieces: List[Union[str, LostPassage, _Marked]]) -> Tuple[Tuple[Union[str, LostPassage], ...],
-                                                                     Tuple[EditorialMark, ...]]:
+def _marked_by(piece: Union[_MarkedText, LostPassage], element: ET.Element) -> Union[_MarkedText, LostPassage]:
+    """Returns the text with the element among those that mark it, or the lost passage as it is"""
+    return piece._replace(marking=piece.marking + (element,)) if isinstance(piece, _MarkedText) else piece
+
+
+def _joined(pieces: List[Union[_MarkedText, LostPassage]]) -> Tuple[Tuple[Union[str, LostPassage], ...],
+                                                                     Tuple[EditorialMark, ...], Tuple[Numeral, ...]]:
     """Returns the pieces with the text between two lost passages in one piece, and no empty ones, and where the
-    editor's marks are in them"""
+    editor's marks and the numerals are in them: one range for each marking element in each piece"""
     joined: List[Union[str, LostPassage]] = []
-    marks: List[EditorialMark] = []
+    #: The marking elements, by their id and the piece, with their range in it
+    ranges: Dict[Tuple[int, int], Tuple[ET.Element, int, int]] = {}
     for piece in pieces:
-        text = piece.text if isinstance(piece, _Marked) else piece
         last = joined[-1] if joined else None
-        if isinstance(text, LostPassage):
-            joined.append(text)
-        elif text and isinstance(last, str):
-            joined[-1] = last + text
-        elif text:
-            joined.append(text)
-        if isinstance(piece, _Marked) and piece.text:
-            end = len(cast(str, joined[-1]))
-            marks.append(EditorialMark(piece.kind, len(joined) - 1, end - len(piece.text), end))
-    return tuple(joined), tuple(marks)
+        if isinstance(piece, LostPassage):
+            joined.append(piece)
+        elif piece.text and isinstance(last, str):
+            joined[-1] = last + piece.text
+        elif piece.text:
+            joined.append(piece.text)
+        if isinstance(piece, _MarkedText) and piece.text:
+            index, end = len(joined) - 1, len(cast(str, joined[-1]))
+            for element in piece.marking:
+                start = ranges.get((id(element), index), (element, end - len(piece.text), end))[1]
+                ranges[(id(element), index)] = (element, start, end)
+    marks = tuple(EditorialMark(_EDITORIAL_MARKS_BY_TAG[_tag(element)], index, start, end)
+                  for (_, index), (element, start, end) in ranges.items() if _tag(element) != 'num')
+    numerals = tuple(Numeral(index, start, end)
+                     for (_, index), (element, start, end) in ranges.items() if _tag(element) == 'num')
+    return tuple(joined), marks, numerals
 
 
 def _note_text(note: ET.Element) -> str:

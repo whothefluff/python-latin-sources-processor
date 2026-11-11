@@ -73,7 +73,8 @@ In `work_contents.csv`, every chunk of text is assigned a `tokenType`:
 
 **Numeral Collisions:**
 Valid Roman numerals often collide with valid Latin words (e.g., 'I', 'VI', 'DI'). The global pipeline defaults to
-classifying these as Words (`tokenType = 1`) if the morphological analyzer finds a lemma. **If this default is
+classifying these as Words (`tokenType = 1`) if the morphological analyzer finds a lemma, unless the edition tags the
+token as a numeral (`<num>`), which makes it one (`tokenType = 3`) without a guess. **If this default is
 contextually wrong for a specific text, the work-specific processor MUST explicitly overwrite the `tokenType`
 and `properNounState`.**
 

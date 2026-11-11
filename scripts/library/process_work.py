@@ -407,6 +407,7 @@ def _process_text_segments(
         work_contents_data: List,
         inherent_states_map: Dict[str, ProperNounState | None],
         work: WorkConfiguration,
+        tagged_numerals: Set[int],
 ) -> Tuple[int, int, int, bool, bool]:
     """
     Two independent context flags are threaded through, on purpose:
@@ -431,7 +432,7 @@ def _process_text_segments(
             segment, is_capitalization_forgivable, prev_word_was_capitalized, work.letter_convention
         )
 
-        t_type = get_token_type(segment, inherent_state)
+        t_type = TokenType.NUMERAL if fragment_index in tagged_numerals else get_token_type(segment, inherent_state)
         t_type = work.token_overrides.get(fragment_index, t_type)
 
         if t_type == TokenType.ABBREVIATION:
@@ -651,6 +652,12 @@ def _segments_of(text: str) -> List[_Segment]:
 
 
 
+def _positions_of_segments_overlapping(segments: List[_Segment], start: int, end: int,
+                                       first_position: int) -> List[int]:
+    return [first_position + position for position, segment in enumerate(segments)
+            if segment.start < end and start < segment.end]
+
+
 @dataclass
 class _Numbering:
     """The rows of a work's tokens, subdivisions and supplementary entries, numbered in reading order"""
@@ -713,6 +720,7 @@ class _Numbering:
         segments: list = []
         ictus_bit_masks: List[int] = []
         marked: List[Tuple[str, int, int]] = []  # each editorial mark's note, and its first and last segment
+        tagged_numeral_positions: Set[int] = set()
         for index, piece in enumerate(block.pieces):
             if isinstance(piece, LostPassage):
                 segments.append(None)
@@ -720,10 +728,19 @@ class _Numbering:
                 continue
             piece_segments = _segments_of(piece)
             for mark in (mark for mark in block.marks if mark.piece == index):
-                covered = [len(segments) + position for position, segment in enumerate(piece_segments)
-                           if segment.start < mark.end and mark.start < segment.end]
+                covered = _positions_of_segments_overlapping(piece_segments, mark.start, mark.end,
+                                                             first_position=len(segments))
                 if covered:
                     marked.append((_NOTES_BY_EDITORIAL_MARK[mark.kind], covered[0], covered[-1]))
+            for numeral in (numeral for numeral in block.numerals if numeral.piece == index):
+                cut = next((segment.text for segment in piece_segments
+                            if segment.start < numeral.start < segment.end
+                            or segment.start < numeral.end < segment.end), None)
+                if cut is not None:
+                    raise ValueError(f"{self.work.edition_urn}: a <num> at {block.reference} holds only part of "
+                                     f"'{cut}', which isn't read yet.")
+                tagged_numeral_positions.update(_positions_of_segments_overlapping(
+                    piece_segments, numeral.start, numeral.end, first_position=len(segments)))
             printed_words = [cast(str, normalize_digraphs(segment.text)) for segment in piece_segments]
             segments.extend(self.work.spellings_by_printed_word.get(printed, without_ictus_marks(printed))
                             for printed in printed_words)
@@ -755,6 +772,7 @@ class _Numbering:
             self.contents,
             self.inherent_states,
             self.work,
+            {first + position for position in tagged_numeral_positions},
         )
         for note in block.notes:
             self.add_supplementary("NOTE", first, last, note)

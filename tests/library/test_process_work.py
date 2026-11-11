@@ -520,6 +520,50 @@ def test_an_addition_gets_a_note_over_the_tokens_that_it_is_part_of(monkeypatch,
         ["NOTE", 2, 7, 7, "added by the editor"]]
 
 
+_NUMERI = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Numeri</title><author>Fictor</author></titleStmt>
+  </fileDesc></teiHeader>
+  <text><body><div type="edition"><div type="textpart" subtype="book" n="1"><head>Liber</head>
+    <div type="textpart" subtype="chapter" n="1">
+      <div type="textpart" subtype="section" n="1">
+        <p>Est <gap reason="lost"/> <num>vi</num> et vi, <num>vi</num>.</p>
+      </div>
+    </div>
+  </div></div></body></text>
+</TEI>"""
+
+
+def test_a_word_that_the_edition_tags_as_a_numeral_is_one_wherever_its_block_is_unless_the_work_says_otherwise(
+        monkeypatch, tmp_path):
+    _morpheus(monkeypatch, {**_CARMEN_ANALYSES, "vi": _entry("vis", "vi")})
+    _macronizer_echoes(monkeypatch)
+
+    # The first tagged vi comes after a title and a lost passage; the work makes the second a word again
+    process_work.process_verse(_NUMERI, tmp_path, _COMMENTARIUS_WORK._replace(
+        expansions={3: 'sex'}, token_overrides={7: TokenType.WORD}))
+
+    contents = pd.read_csv(tmp_path / "work_contents.csv", dtype={"word": str}, keep_default_na=False)
+    assert list(zip(contents["word"], contents["tokenType"], contents["properNounState"], contents["expansion"])) == [
+        ("Liber", 1, "2", ""), ("Est", 1, "0", ""), ("", 6, "", ""), ("vi", 3, "0", "sex"), ("et", 1, "0", ""),
+        ("vi", 1, "0", ""), (",", 4, "", ""), ("vi", 1, "0", ""), (".", 4, "", "")]
+
+
+@pytest.mark.parametrize("paragraph, token", [
+    ("Tum <num>x</num>viri veniunt.", "xviri"),
+    ("Dat HS<num>x</num> servo.", "HSx"),
+    ("Milia <num>C</num>. Deinde abit.", "C."),
+], ids=["it ends inside a word", "it starts inside a word", "an abbreviation takes the period after it"])
+def test_a_numeral_tag_that_holds_only_part_of_a_token_raises(monkeypatch, tmp_path, paragraph, token):
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    _macronizer_echoes(monkeypatch)
+    numeri = re.sub(r'<p>.*</p>', f'<p>{paragraph}</p>', _NUMERI)
+
+    with pytest.raises(ValueError, match=re.escape(
+            f"{_COMMENTARIUS_WORK.edition_urn}: a <num> at 1.1.1 holds only part of '{token}', which isn't read "
+            f"yet.")):
+        process_work.process_verse(numeri, tmp_path, _COMMENTARIUS_WORK)
+
+
 _FABULA = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
   <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Fabula</title><author>Fictor</author></titleStmt>
   </fileDesc></teiHeader>
