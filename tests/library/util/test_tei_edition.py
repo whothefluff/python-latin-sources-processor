@@ -4,7 +4,8 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from scripts.library.util.tei_edition import Division, EditorialMark, LostPassage, Numeral, TextBlock, read_edition
+from scripts.library.util.tei_edition import (Division, EditorialMark, LemmaMatch, LostPassage, Note, Numeral,
+                                              TextBlock, read_edition)
 
 _BOOKS_AND_POEMS = ('book', 'poem')
 _POEMS = ('poem',)
@@ -41,12 +42,17 @@ def _scene(n: str, content: str) -> str:
     return f'<div type="textpart" subtype="scene" n="{n}">{content}</div>'
 
 
+def _notes(notes) -> tuple:
+    """Returns the notes, each text that covers its whole block as a Note"""
+    return tuple(Note(note) if isinstance(note, str) else note for note in notes)
+
+
 def _verse(n: str, reference: str, *pieces, deleted=False, notes=(), marks=()) -> TextBlock:
-    return TextBlock('VERS', n, reference, pieces, deleted, notes, marks)
+    return TextBlock('VERS', n, reference, pieces, deleted, _notes(notes), marks)
 
 
 def _paragraph(reference: str, *pieces, notes=(), marks=(), numerals=()) -> TextBlock:
-    return TextBlock('PARA', None, reference, pieces, False, notes, marks, numerals)
+    return TextBlock('PARA', None, reference, pieces, False, _notes(notes), marks, numerals)
 
 
 def _title(reference: str, text: str) -> TextBlock:
@@ -224,6 +230,54 @@ def test_an_omitted_passage_is_a_lost_passage_with_its_reason_in_a_verse_or_a_pa
                                _paragraph('1', 'tamen ', LostPassage('lost'), ' Caesar')), ()),)
 
 
+def test_a_note_with_a_lemma_is_about_the_last_words_before_it_that_match_the_lemma():
+    edition = _edition(_poem('1', '<p>cum tot, cum<note><app><lem>cum</lem></app> quom A</note> summi oratores</p>'
+                                  '<p>Postea, cum ut hoc intellegatis'
+                                  '<note><app><lem>postea cum ut... intellegatis</lem></app> ut om. P</note>'
+                                  ' cum<note><w type="lemma">quod</w> quod vos</note>'
+                                  '<note><app><lem>nemo ... cum</lem></app> nemo B</note>'
+                                  '<note><app><lem/></app> om. C</note>.</p>'
+                                  '<p>et levis est<note><app><lem>et levis ... levis est</lem></app> om. D</note></p>'))
+
+    assert read_edition(edition, _POEMS, {}) == (
+        Division('POEM', '1', (
+            _paragraph('1', 'cum tot, cum summi oratores', notes=(Note('cum quom A', 'cum', LemmaMatch(0, 9, 12)),)),
+            _paragraph('1', 'Postea, cum ut hoc intellegatis cum.', notes=(
+                Note('postea cum ut... intellegatis ut om. P', 'postea cum ut... intellegatis', LemmaMatch(0, 0, 31)),
+                Note('quod quod vos', 'quod'), Note('nemo ... cum nemo B', 'nemo ... cum'), Note('om. C', ''))),
+            _paragraph('1', 'et levis est', notes=(Note('et levis ... levis est om. D', 'et levis ... levis est'),)),
+        ), ()),)
+
+
+def test_two_dots_or_more_spaced_or_not_even_across_lines_stand_for_the_words_that_a_lemma_leaves_out():
+    edition = _edition(_poem('1', '<l n="53">unus in hoc nemo est populo,'
+                                  '<note><app><lem>nemo . . populo</lem></app> populo vix est</note></l>'
+                                  '<l n="55">ille ego Romanus vates'
+                                  '<note><app><lem>ille .\n          . vates</lem></app> om. A</note></l>'
+                                  '<l n="59">quia me meruisse videbam'
+                                  '<note><app><lem>quia . . . videbam</lem></app> quoniam videbar</note></l>'))
+
+    assert read_edition(edition, _POEMS, {}) == (
+        Division('POEM', '1', (
+            _verse('53', '1.53', 'unus in hoc nemo est populo,',
+                   notes=(Note('nemo . . populo populo vix est', 'nemo . . populo', LemmaMatch(0, 12, 27)),)),
+            _verse('55', '1.55', 'ille ego Romanus vates',
+                   notes=(Note('ille .\n          . vates om. A', 'ille .\n          . vates', LemmaMatch(0, 0, 22)),)),
+            _verse('59', '1.59', 'quia me meruisse videbam',
+                   notes=(Note('quia . . . videbam quoniam videbar', 'quia . . . videbam', LemmaMatch(0, 0, 24)),)),
+        ), ()),)
+
+
+def test_one_dot_in_a_lemma_is_punctuation_and_leaves_out_no_words():
+    edition = _edition(_poem('1', '<l n="1">tum Roma, tum Caesar'
+                                  '<note><app><lem>Roma. Caesar</lem></app> om. B</note></l>'))
+
+    assert read_edition(edition, _POEMS, {}) == (
+        Division('POEM', '1', (
+            _verse('1', '1.1', 'tum Roma, tum Caesar', notes=(Note('Roma. Caesar om. B', 'Roma. Caesar'),)),
+        ), ()),)
+
+
 def test_a_page_break_is_left_out_wherever_it_is_and_one_inside_a_word_leaves_it_whole():
     root = ET.fromstring('<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body><pb n="1"/><div type="edition">'
                          '<pb n="2"/>' + _book('1', '<pb n="3"/><head>Liber</head>' + _chapter('1', _section('1', (
@@ -342,6 +396,10 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
     (_poem('1', '<sp><speaker>Sosia</speaker></sp>'), _POEMS, "the edition > poem 1 > sp has no text."),
     (_poem('1', '<l n="1">Roma <expan>est</expan></l>'), _POEMS,
      "the edition > poem 1 > l 1 holds <expan>, which isn't read there."),
+    (_poem('1', '<l n="1">Roma<note><app><lem>Roma</lem></app> <w type="lemma">Roma</w> A</note></l>'), _POEMS,
+     "the edition > poem 1 > l 1 holds a note with 2 lemmas, but only one is read."),
+    (_poem('1', '<l n="1">Roma</l><note><app><lem>Roma</lem></app> A</note>'), _POEMS,
+     "the edition > poem 1 holds a note with a lemma outside a verse, title or paragraph, which isn't read."),
     ('<head>M. Tulli Ciceroni in Q. Caecilium Oratio</head><head>Quae Divinatio Dicitur</head>'
      + _poem('1', '<l n="1">Roma</l>'), _POEMS,
      'the edition holds <head type="" subtype="">, but only books, poems and acts are read there.'),
@@ -353,7 +411,8 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
         "a verse without text", "a poem without text", "a title of a book that the edition doesn't cite",
         "an empty edition", "a book of poems and chapters", "a verse in a section", "a chapter in a chapter",
         "a scene at the top", "an act without n", "a speech without what is said",
-        "an expansion outside an abbreviation", "a second heading in the edition"])
+        "an expansion outside an abbreviation", "a note with two lemmas", "a note with a lemma between verses",
+        "a second heading in the edition"])
 def test_a_structure_that_isnt_read_raises(body, cited, error):
     with pytest.raises(ValueError, match=re.escape(error)):
         read_edition(_edition(body), cited, {})

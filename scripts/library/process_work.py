@@ -714,6 +714,9 @@ class _Numbering:
         to_index = self.next_index - 1  # its last token
         row[7] = to_index
         for note in division.notes:
+            if not note:
+                logging.warning("%s, the division that starts at %s: an empty note, which the edition should fill or "
+                                "leave out", self.work.edition_urn, self.contents[from_index][3])
             self.add_supplementary("NOTE", from_index, to_index, note)
         print(f'Subdivision: {row}')
 
@@ -722,6 +725,7 @@ class _Numbering:
         ictus_bit_masks: List[int] = []
         marked: List[Tuple[str, int, int]] = []  # each editorial mark's note, and its first and last segment
         tagged_numeral_positions: Set[int] = set()
+        covered_by_note_index: Dict[int, List[int]] = {}
         for index, piece in enumerate(block.pieces):
             if isinstance(piece, LostPassage):
                 segments.append(None)
@@ -742,6 +746,10 @@ class _Numbering:
                                      f"'{cut}', which isn't read yet.")
                 tagged_numeral_positions.update(_positions_of_segments_overlapping(
                     piece_segments, numeral.start, numeral.end, first_position=len(segments)))
+            for note_index, match in enumerate(note.lemma_match for note in block.notes):
+                if match is not None and match.piece == index:
+                    covered_by_note_index[note_index] = _positions_of_segments_overlapping(
+                        piece_segments, match.start, match.end, first_position=len(segments))
             printed_words = [cast(str, normalize_digraphs(segment.text)) for segment in piece_segments]
             segments.extend(self.work.spellings_by_printed_word.get(printed, without_ictus_marks(printed))
                             for printed in printed_words)
@@ -775,8 +783,16 @@ class _Numbering:
             self.work,
             {first + position for position in tagged_numeral_positions},
         )
-        for note in block.notes:
-            self.add_supplementary("NOTE", first, last, note)
+        for note_index, note in enumerate(block.notes):
+            if not note.text:
+                logging.warning("%s %s: an empty note, which the edition should fill or leave out",
+                                self.work.edition_urn, block.reference)
+            if note.lemma is not None and note.lemma_match is None:
+                logging.warning("%s %s: the note's lemma %r matches no words before it, so the note covers its block",
+                                self.work.edition_urn, block.reference, note.lemma)
+            covered = covered_by_note_index.get(note_index)
+            from_index, to_index = (first + covered[0], first + covered[-1]) if covered else (first, last)
+            self.add_supplementary("NOTE", from_index, to_index, note.text)
 
     def add_supplementary(self, typ: str, from_index: int, to_index: int, val: str):
         self.supplementary.append([self.work_id, typ, self.supplementary_counts[typ], from_index, to_index, val])

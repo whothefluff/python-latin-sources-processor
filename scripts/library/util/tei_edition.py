@@ -1,5 +1,6 @@
 """Reads the text of a TEI edition, as Perseus encodes its poetry, prose and plays, into divisions and blocks of text.
 Raises on any structure that it doesn't read, rather than guessing what the structure means."""
+import re
 # noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
 from typing import Dict, Iterator, List, NamedTuple, Sequence, Tuple, Union, cast
@@ -44,6 +45,8 @@ _READ_AS_TEXT_TAGS = ('q', 'quote', 'hi', 'emph', 'sic', 'corr', 'add', 'del', '
 _GAP_REASONS = ('lost', 'omitted')
 _TYPOGRAPHY_TAGS = ('hi', 'emph')
 _TYPOGRAPHY_RENDS_READ_AS_TEXT = ('uppercase',)
+_WORD = re.compile(r'\w+')
+_LEMMA_ELLIPSIS = re.compile(r'\.\s*\.')
 
 
 class LostPassage(NamedTuple):
@@ -69,6 +72,22 @@ class Numeral(NamedTuple):
     end: int
 
 
+class LemmaMatch(NamedTuple):
+    """Where a note's lemma matches the words before it: a range of characters in one of its block's pieces"""
+    piece: int
+    start: int
+    end: int
+
+
+class Note(NamedTuple):
+    """A note of a block's: its text, and the lemma that says which of the block's words it's about, when it has one"""
+    text: str
+    #: The words of the text that an apparatus's note is about, as its <lem> or <w type="lemma"> repeats them
+    lemma: str | None = None
+    #: Where the lemma matches the last words before the note, compared without punctuation or case, when it does
+    lemma_match: LemmaMatch | None = None
+
+
 class TextBlock(NamedTuple):
     """A verse, title or paragraph: text that the reader starts on a line of its own"""
     typ: str
@@ -81,7 +100,7 @@ class TextBlock(NamedTuple):
     pieces: Tuple[Union[str, LostPassage], ...]
     #: Whether the edition marks the whole block for deletion
     deleted: bool
-    notes: Tuple[str, ...]
+    notes: Tuple[Note, ...]
     #: The parts of its text that the editor added, corrected or marked for deletion (unless the whole block is), and
     #: those that the edition prints as its source has them
     marks: Tuple[EditorialMark, ...] = ()
@@ -125,6 +144,17 @@ class _MarkedText(NamedTuple):
     it"""
     text: str
     marking: Tuple[ET.Element, ...] = ()
+
+
+class _InlineNote(NamedTuple):
+    """A <note> where it is in a block's text, until it's found where its lemma matches"""
+    text: str
+    lemma: str | None
+
+
+_InlinePiece = Union[_MarkedText, LostPassage, _InlineNote]
+#: A block's text, its lost passages and its notes, in reading order, before the text is joined
+_InlinePieces = List[_InlinePiece]
 
 
 def read_edition(root: ET.Element, cited_division_subtypes: Tuple[str, ...],
@@ -205,6 +235,9 @@ def _division(element: ET.Element, kind: str, where: str, cited: Tuple[str, ...]
     for child in children:
         tag = _tag(child)
         if tag == 'note':
+            if _lemma(child, where) is not None:
+                raise ValueError(f"{where} holds a note with a lemma outside a verse, title or paragraph, which isn't "
+                                 "read.")
             notes.append(_note_text(child))
         elif tag == 'head' and child.get(_XML_LANG, 'lat') != 'lat':
             notes.append(''.join(child.itertext()).strip())
@@ -251,8 +284,8 @@ def _block(element: ET.Element, typ: str, where: str, cited: Tuple[str, ...],
     if not reference:
         raise ValueError(f"{where} would have no reference: no division above it is cited.")
     deletion = _whole_deletion(element)
-    pieces, notes = _inline(deletion if deletion is not None else element, where, _INLINE_TAGS)
-    joined, marks, numerals = _joined(pieces)
+    joined, marks, numerals, notes = _joined(_inline(deletion if deletion is not None else element, where,
+                                                     _INLINE_TAGS))
     if not any(isinstance(piece, LostPassage) or piece.strip() for piece in joined):
         raise ValueError(f"{where} has no text.")
     return TextBlock(typ, n, reference, joined, deletion is not None, notes, marks, numerals)
@@ -266,14 +299,12 @@ def _whole_deletion(element: ET.Element) -> ET.Element | None:
     return children[0] if whole else None
 
 
-def _inline(element: ET.Element, where: str,
-            tags: Tuple[str, ...]) -> Tuple[List[Union[_MarkedText, LostPassage]], Tuple[str, ...]]:
-    """Returns the element's text, with its lost passages where they are and the elements that mark its parts, and
-    its notes. Raises on any element that isn't one of tags, and on typography whose rend isn't read.
+def _inline(element: ET.Element, where: str, tags: Tuple[str, ...]) -> _InlinePieces:
+    """Returns the element's text, with its lost passages and its notes where they are and the elements that mark
+    its parts. Raises on any element that isn't one of tags, and on typography whose rend isn't read.
     A line break separates two words, a page break joins the text around it, and an abbreviation is read as printed,
     without its expansion."""
-    pieces: List[Union[_MarkedText, LostPassage]] = [_MarkedText(element.text or '')]
-    notes: List[str] = []
+    pieces: _InlinePieces = [_MarkedText(element.text or '')]
     for child in element:
         tag = _tag(child)
         if tag not in tags:
@@ -282,11 +313,10 @@ def _inline(element: ET.Element, where: str,
             raise ValueError(f"{where} holds <{tag} rend=\"{child.get('rend', '')}\">, but only "
                              f"{' and '.join(_TYPOGRAPHY_RENDS_READ_AS_TEXT)} typography is read there.")
         if tag in _READ_AS_TEXT_TAGS:
-            inner, inner_notes = _inline(child, where, tags)
-            pieces.extend(_marked_by(piece, child) if tag in _MARKING_TAGS else piece for piece in inner)
-            notes.extend(inner_notes)
+            pieces.extend(_marked_by(piece, child) if tag in _MARKING_TAGS else piece
+                          for piece in _inline(child, where, tags))
         elif tag == 'abbr':
-            pieces.extend(_inline(child, where, ('expan',))[0])
+            pieces.extend(_inline(child, where, ('expan',)))
         elif tag == 'lb':
             pieces.append(_MarkedText(' '))
         elif tag == 'gap':
@@ -294,26 +324,30 @@ def _inline(element: ET.Element, where: str,
                 raise ValueError(f"{where} has a gap whose reason isn't {' or '.join(_GAP_REASONS)}.")
             pieces.append(LostPassage(cast(str, child.get('reason'))))
         elif tag == 'note':
-            notes.append(_note_text(child))
+            pieces.append(_InlineNote(_note_text(child), _lemma(child, where)))
         pieces.append(_MarkedText(child.tail or ''))
-    return pieces, tuple(notes)
+    return pieces
 
 
-def _marked_by(piece: Union[_MarkedText, LostPassage], element: ET.Element) -> Union[_MarkedText, LostPassage]:
-    """Returns the text with the element among those that mark it, or the lost passage as it is"""
+def _marked_by(piece: _InlinePiece, element: ET.Element) -> _InlinePiece:
+    """Returns the text with the element among those that mark it, or the lost passage or note as it is"""
     return piece._replace(marking=piece.marking + (element,)) if isinstance(piece, _MarkedText) else piece
 
 
-def _joined(pieces: List[Union[_MarkedText, LostPassage]]) -> Tuple[Tuple[Union[str, LostPassage], ...],
-                                                                     Tuple[EditorialMark, ...], Tuple[Numeral, ...]]:
-    """Returns the pieces with the text between two lost passages in one piece, and no empty ones, and where the
-    editor's marks and the numerals are in them: one range for each marking element in each piece"""
+def _joined(pieces: _InlinePieces) -> Tuple[Tuple[Union[str, LostPassage], ...], Tuple[EditorialMark, ...],
+                                            Tuple[Numeral, ...], Tuple[Note, ...]]:
+    """Returns the pieces with the text between two lost passages in one piece, and no empty ones; where the
+    editor's marks and the numerals are in them, one range for each marking element in each piece; and the notes,
+    with where each lemma matches the text before it"""
     joined: List[Union[str, LostPassage]] = []
     #: The marking elements, by their id and the piece, with their range in it
     ranges: Dict[Tuple[int, int], Tuple[ET.Element, int, int]] = {}
+    notes: List[Note] = []
     for piece in pieces:
         last = joined[-1] if joined else None
-        if isinstance(piece, LostPassage):
+        if isinstance(piece, _InlineNote):
+            notes.append(_note(piece, last if isinstance(last, str) else '', len(joined) - 1))
+        elif isinstance(piece, LostPassage):
             joined.append(piece)
         elif piece.text and isinstance(last, str):
             joined[-1] = last + piece.text
@@ -328,7 +362,45 @@ def _joined(pieces: List[Union[_MarkedText, LostPassage]]) -> Tuple[Tuple[Union[
                   for (_, index), (element, start, end) in ranges.items() if _tag(element) != 'num')
     numerals = tuple(Numeral(index, start, end)
                      for (_, index), (element, start, end) in ranges.items() if _tag(element) == 'num')
-    return tuple(joined), marks, numerals
+    return tuple(joined), marks, numerals, tuple(notes)
+
+
+def _lemma(note: ET.Element, where: str) -> str | None:
+    """Returns the words of the text that the note is about, as its <lem> or <w type="lemma"> repeats them. Raises on a
+    note with more than one"""
+    lemmas = [*note.iterfind(f'.//{_TEI}app/{_TEI}lem'), *note.iterfind(f'.//{_TEI}w[@type="lemma"]')]
+    if len(lemmas) > 1:
+        raise ValueError(f"{where} holds a note with {len(lemmas)} lemmas, but only one is read.")
+    return ''.join(lemmas[0].itertext()) if lemmas else None
+
+
+def _note(note: _InlineNote, text_before: str, piece_index: int) -> Note:
+    """Returns the note, with where its lemma matches text_before, when it does. text_before is the block's text before
+    the note since its last lost passage, so a lemma that matches only words before that matches nothing"""
+    match_range = _range_of_last_words_matching(note.lemma, text_before) if note.lemma is not None else None
+    return Note(note.text, note.lemma, LemmaMatch(piece_index, *match_range) if match_range is not None else None)
+
+
+def _range_of_last_words_matching(lemma: str, text: str) -> Tuple[int, int] | None:
+    """Returns the characters of text from the first to the last of the words that the lemma matches, compared
+    without punctuation or case: the last such words, when it matches more than once. When two dots or more, spaced
+    or not (... or . .), split the lemma into runs of words, each run matches before the next one, without sharing a
+    word with it"""
+    text_words = list(_WORD.finditer(text))
+    lowered_text_words = [word.group().lower() for word in text_words]
+    lemma_runs = [run for run in (_WORD.findall(stretch.lower()) for stretch in _LEMMA_ELLIPSIS.split(lemma)) if run]
+    if not lemma_runs:
+        return None
+    run_starts: List[int] = []
+    next_run_start = len(text_words)
+    for run in reversed(lemma_runs):
+        run_start = next((index for index in range(next_run_start - len(run), -1, -1)
+                          if lowered_text_words[index:index + len(run)] == run), None)
+        if run_start is None:
+            return None
+        run_starts.insert(0, run_start)
+        next_run_start = run_start
+    return text_words[run_starts[0]].start(), text_words[run_starts[-1] + len(lemma_runs[-1]) - 1].end()
 
 
 def _note_text(note: ET.Element) -> str:
