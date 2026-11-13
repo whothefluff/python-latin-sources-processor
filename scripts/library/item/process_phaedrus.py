@@ -49,6 +49,7 @@ PHAEDRUS = WorkConfiguration(
     spellings_by_printed_word={},
     token_overrides=WORK_SPECIFIC_TOKEN_OVERRIDES,
     expansions=WORK_SPECIFIC_EXPANSIONS,
+    printed_macronizations={},
     proper_noun_overrides=WORK_SPECIFIC_PROPER_NOUN_OVERRIDES,
     author_abbreviations=('Phaedr.', 'Phaed.'),
     work_about_file=asset_path('about_phi0975_phi001.txt'),

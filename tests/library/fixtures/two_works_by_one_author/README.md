@@ -9,4 +9,8 @@ Carmina Prima has no books, as the Eclogues have none, so its references are mad
 all look like numbers. Carmina Altera has one book, with two poems: poem 10, whose title has the reference 1.10, and
 poem 10a, which has no title.
 
+Poem 10a's second verse prints `levi's` for lēvis es ("you are smooth"), a contraction such as Plautus's `locutu's`
+for locutus es. Its levi and s are words, each with its whole word as its expansion (lēvis and es) and its own
+macronization (lēvi and s, certain), and the `'` between them is punctuation.
+
 Once the aggregate merges them, its output is also the reader's import fixture.

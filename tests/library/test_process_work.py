@@ -19,8 +19,8 @@ _CARMEN_WORK = process_work.WorkConfiguration(
     edition_urn='urn:cts:latinLit:fict001.fict001.fict-lat1',
     cited_division_subtypes=('book', 'poem'), types_by_n={},
     letter_convention=_CARMEN_LETTERS, spellings_by_printed_word={}, token_overrides={}, expansions={},
-    proper_noun_overrides={}, author_abbreviations=('Fict.',), work_about_file=str(_CARMEN_FILES / 'work_about.txt'),
-    author_about_file=str(_CARMEN_FILES / 'author_about.txt'),
+    printed_macronizations={}, proper_noun_overrides={}, author_abbreviations=('Fict.',),
+    work_about_file=str(_CARMEN_FILES / 'work_about.txt'), author_about_file=str(_CARMEN_FILES / 'author_about.txt'),
     author_image_file=str(_CARMEN_FILES / 'author_image.bin'))
 
 
@@ -406,11 +406,17 @@ _STRUCTURES = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
 
 
 def _macronizer_echoes(monkeypatch):
-    """Makes the macronizer certain of every token as it's written"""
-    monkeypatch.setattr(process_work, "macronize_text", lambda text: [
-        process_work.TokenResult(word=token, is_word=token.isalpha(), macronized=token, uncertainty_mask=0,
-                                 candidates=[])
-        for token in re.findall(r'\w+|[^\w\s]', text)])
+    """Makes the macronizer certain of every token as it's written. Returns the texts asked for, in order."""
+    asked = []
+
+    def macronize_text(text):
+        asked.append(text)
+        return [process_work.TokenResult(word=token, is_word=token.isalpha(), macronized=token, uncertainty_mask=0,
+                                         candidates=[])
+                for token in re.findall(r'\w+|[^\w\s]', text)]
+
+    monkeypatch.setattr(process_work, "macronize_text", macronize_text)
+    return asked
 
 
 @pytest.fixture
@@ -618,6 +624,159 @@ def test_a_note_covers_the_words_of_its_lemma_and_one_whose_lemma_or_text_is_mis
         "urn:cts:latinLit:fict001.fict001.fict-lat1 1.1.4: an empty note, which the edition should fill or leave out",
         "urn:cts:latinLit:fict001.fict001.fict-lat1, the division that starts at 1.1.1: an empty note, which the "
         "edition should fill or leave out"]
+
+
+_CONTRACTA = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Contracta</title><author>Fictor</author></titleStmt>
+  </fileDesc></teiHeader>
+  <text><body><div type="edition"><div type="textpart" subtype="book" n="1"><div type="textpart" subtype="poem" n="1">
+    <l n="1"><choice><abbr>Levi's</abbr><expan>levi<ex>s e</ex>s</expan></choice> et iam's.</l>
+    <l n="2">quia <abbr>vaniloquo's<expan> <ex>vaniloquus es</ex> </expan></abbr></l>
+  </div></div></div></body></text>
+</TEI>"""
+# Levi's and vaniloquo's are expanded by the edition, iam's isn't, and vaniloquo is an old spelling of vaniloquu
+_CONTRACTA_WORK = _CARMEN_WORK._replace(
+    expansions={0: 'lēvis', 2: 'es', 4: 'jam', 6: 'es', 9: 'vāniloquus', 11: 'es'},
+    printed_macronizations={9: 'vāniloquo'})
+_CONTRACTA_ANALYSES = {**_CARMEN_ANALYSES, "quia": _entry("quia", "quia")}
+
+
+def _process_contracta(monkeypatch, output_dir, work=_CONTRACTA_WORK):
+    _morpheus(monkeypatch, _CONTRACTA_ANALYSES)
+    _macronizer_echoes(monkeypatch)
+    process_work.process_verse(_CONTRACTA, output_dir, work)
+
+
+def test_each_word_of_a_contraction_is_a_word_with_its_whole_word_and_the_macrons_of_its_letters(
+        monkeypatch, tmp_path):
+    _process_contracta(monkeypatch, tmp_path)
+    process_work.validate_csv_files(_CONTRACTA, tmp_path, _CONTRACTA_WORK)
+
+    contents = pd.read_csv(tmp_path / "work_contents.csv", dtype={"word": str}, keep_default_na=False)
+    assert contents[["word", "tokenType", "properNounState", "wordIdx", "enclitic", "expansion"]].values.tolist() == [
+        ["Levi", 1, "2", "0", "", "lēvis"], ["'", 4, "", "", "", ""], ["s", 1, "0", "1", "", "es"],
+        ["et", 1, "0", "2", "", ""], ["jam", 1, "0", "3", "", "jam"], ["'", 4, "", "", "", ""],
+        ["s", 1, "0", "4", "", "es"], [".", 4, "", "", "", ""], ["quia", 1, "0", "0", "", ""],
+        ["vaniloquo", 1, "0", "1", "", "vāniloquus"], ["'", 4, "", "", "", ""], ["s", 1, "0", "2", "", "es"]]
+    assert _rows(tmp_path / "work_macronizations.csv", "workId") == [
+        (0, "Lēvi", 0), (2, "s", 0), (4, "jam", 0), (6, "s", 0), (9, "vāniloquo", 0), (11, "s", 0)]
+    assert _rows(tmp_path / "unambiguous_macronizations.csv") == [
+        ("'", "'"), (".", "."), ("et", "et"), ("quia", "quia")]
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("Sic locutu's ilico", [1]), ("locutu\u2019s", [0]), ("Laruatu's", [0]), ("qua's, dea's", [0, 4]),
+    ("locutu' s", []), ("locutu 's", []), ("locutu,s", []), ("locutu'st", []), ("3's", []),
+])
+def test_a_contraction_is_a_word_an_apostrophe_and_an_s_with_nothing_between_them(text, expected):
+    assert process_work._positions_of_contractions(process_work._segments_of(text), 0) == expected
+
+
+def test_a_word_printed_short_has_no_enclitic_whatever_its_letters_end_with(monkeypatch, tmp_path):
+    xml = _CONTRACTA.replace("""<l n="2">quia <abbr>vaniloquo's<expan> <ex>vaniloquus es</ex> </expan></abbr></l>""",
+                             """<l n="2">iamque's.</l>""")
+    work = _CARMEN_WORK._replace(expansions={0: 'lēvis', 2: 'es', 4: 'jam', 6: 'es', 8: 'jamque', 10: 'es'})
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    _macronizer_echoes(monkeypatch)
+
+    process_work.process_verse(xml, tmp_path, work)
+
+    contents = pd.read_csv(tmp_path / "work_contents.csv", dtype={"word": str}, keep_default_na=False)
+    assert contents[["word", "enclitic", "expansion"]].values.tolist()[8:] == [
+        ["jamque", "", "jamque"], ["'", "", ""], ["s", "", "es"], [".", "", ""]]
+
+
+@pytest.mark.parametrize("changes, error", [
+    ({"expansions": {0: 'lēvis', 2: 'es', 9: 'vāniloquus', 11: 'es'}},
+     r"1\.1\.1: iam's \(idx 4\) is two words run together, so each needs its whole word in the configuration's "
+     r"expansions"),
+    ({"expansions": {0: 'lēvior', 2: 'es', 4: 'jam', 6: 'es', 9: 'vāniloquus', 11: 'es'}},
+     r"1\.1\.1: the edition expands 'Levi s' \(idx 0\) as 'levis es', but the configuration's expansions are "
+     r"'lēvior es', with other letters"),
+    ({"expansions": {0: 'lēvis', 2: 'es', 4: 'nam', 6: 'es', 9: 'vāniloquus', 11: 'es'}},
+     r"1\.1\.1: iam's \(idx 4\) has the expansions 'nam' and 'es', but the first must start with the letters of 'iam', "
+     r"and the second must be es"),
+    ({"expansions": {0: 'lēvis', 2: 'es', 4: 'jam', 6: 'est', 9: 'vāniloquus', 11: 'es'}},
+     r"iam's \(idx 4\) has the expansions 'jam' and 'est'"),
+    ({"printed_macronizations": {}},
+     r"'vaniloquo' \(idx 9\), printed short for 'vāniloquus', doesn't start or end its expansion's letters, so "
+     r"printed_macronizations needs its macronization"),
+    ({"printed_macronizations": {0: 'Lēvi', 9: 'vāniloquo'}},
+     r"'Levi' \(idx 0\), printed short for 'lēvis', gets its macrons from its expansion, so printed_macronizations "
+     r"needs no 'Lēvi'"),
+    ({"printed_macronizations": {9: 'vāniloquu'}},
+     r"'vaniloquo' \(idx 9\), printed short for 'vāniloquus', has the macronization 'vāniloquu' in "
+     r"printed_macronizations, with other letters"),
+    ({"printed_macronizations": {9: 'Vāniloquo'}},
+     r"'vaniloquo' \(idx 9\), printed short for 'vāniloquus', has the macronization 'Vāniloquo' in "
+     r"printed_macronizations, with other letters"),
+    ({"printed_macronizations": {3: 'et', 9: 'vāniloquo'}},
+     r"the configuration's printed_macronizations has idx 3, which isn't a word with an expansion"),
+    ({"expansions": {0: 'lēvis', 2: 'es', 3: 'etiam', 4: 'jam', 6: 'es', 9: 'vāniloquus', 11: 'es'}},
+     r"1\.1\.1: et \(idx 3\) has the expansion 'etiam', but only the two words of a contraction take one"),
+])
+def test_a_configuration_without_the_whole_words_of_a_contraction_or_their_macrons_raises_before_macronizing(
+        monkeypatch, tmp_path, changes, error):
+    _morpheus(monkeypatch, _CONTRACTA_ANALYSES)
+    asked = _macronizer_echoes(monkeypatch)
+    with pytest.raises(ValueError, match=error):
+        process_work.process_verse(_CONTRACTA, tmp_path, _CONTRACTA_WORK._replace(**changes))
+    assert asked == []
+
+
+def test_a_contraction_without_its_expansions_is_one_problem_that_gives_the_edition_s_expansion(monkeypatch, tmp_path):
+    with pytest.raises(ValueError) as raised:
+        _process_contracta(monkeypatch, tmp_path,
+                           _CONTRACTA_WORK._replace(expansions={4: 'jam', 6: 'es', 9: 'vāniloquus', 11: 'es'}))
+    assert str(raised.value).splitlines()[1:] == [
+        "    urn:cts:latinLit:fict001.fict001.fict-lat1 1.1.1: Levi's (idx 0) is two words run together, which the "
+        "edition expands as 'levis es', so each needs its whole word in the configuration's expansions, as locūtus "
+        "and es for locutu's"]
+
+
+@pytest.mark.parametrize("expansions, problem", [
+    ({**_CONTRACTA_WORK.expansions, 3: 'atque'},
+     "1.1.1: et (idx 3) has the expansion 'atque', but only the two words of a contraction take one, as the locutu "
+     "and the s of locutu's (locutus es)"),
+    ({**_CONTRACTA_WORK.expansions, 4: 'nam'},
+     "1.1.1: iam's (idx 4) has the expansions 'nam' and 'es', but the first must start with the letters of 'iam', and "
+     "the second must be es"),
+], ids=["a word that isn't printed short", "a contraction that the edition doesn't expand, with other letters"])
+def test_a_word_whose_expansion_is_a_problem_gets_no_line_about_its_printed_macronization(
+        monkeypatch, tmp_path, expansions, problem):
+    with pytest.raises(ValueError) as raised:
+        _process_contracta(monkeypatch, tmp_path, _CONTRACTA_WORK._replace(expansions=expansions))
+    assert str(raised.value).splitlines()[1:] == [f"    urn:cts:latinLit:fict001.fict001.fict-lat1 {problem}"]
+
+
+def test_the_s_of_a_contraction_that_the_edition_doesnt_expand_can_be_es_in_either_case(monkeypatch, tmp_path):
+    _process_contracta(monkeypatch, tmp_path,
+                       _CONTRACTA_WORK._replace(expansions={**_CONTRACTA_WORK.expansions, 6: 'Es'}))
+
+    contents = pd.read_csv(tmp_path / "work_contents.csv", dtype={"word": str}, keep_default_na=False)
+    assert contents["expansion"].tolist()[4:7] == ["jam", "", "Es"]
+
+
+_NOMEN = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Nomen</title><author>Fictor</author></titleStmt>
+  </fileDesc></teiHeader>
+  <text><body><div type="edition"><div type="textpart" subtype="book" n="1"><div type="textpart" subtype="poem" n="1">
+    <l n="1"><choice><abbr>L.</abbr><expan>L<ex>ucio</ex></expan></choice> Sulla</l>
+  </div></div></div></body></text>
+</TEI>"""
+
+
+def test_an_abbreviation_that_the_edition_expands_needs_an_expansion_with_the_edition_s_letters(monkeypatch, tmp_path):
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+    with pytest.raises(ValueError, match=r"1\.1\.1: the edition expands 'L\.' \(idx 0\) as 'Lucio', but the "
+                                         r"configuration's expansions are 'Lūcius', with other letters"):
+        process_work.process_verse(_NOMEN, tmp_path, _CARMEN_WORK._replace(expansions={0: 'Lūcius'}))
+
+    process_work.process_verse(_NOMEN, tmp_path, _CARMEN_WORK._replace(expansions={0: 'Lūciō'}))
+
+    contents = pd.read_csv(tmp_path / "work_contents.csv", dtype={"word": str}, keep_default_na=False)
+    assert contents[["word", "tokenType", "expansion"]].values.tolist() == [["L.", 2, "Lūciō"], ["Sulla", 1, ""]]
 
 
 _FABULA = """<TEI xmlns="http://www.tei-c.org/ns/1.0">

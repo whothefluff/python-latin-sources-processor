@@ -4,8 +4,8 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from scripts.library.util.tei_edition import (Division, EditorialMark, LemmaMatch, LostPassage, Note, Numeral,
-                                              TextBlock, read_edition)
+from scripts.library.util.tei_edition import (Division, EditorialMark, Expansion, LemmaMatch, LostPassage, Note,
+                                              Numeral, TextBlock, read_edition)
 
 _BOOKS_AND_POEMS = ('book', 'poem')
 _POEMS = ('poem',)
@@ -47,8 +47,8 @@ def _notes(notes) -> tuple:
     return tuple(Note(note) if isinstance(note, str) else note for note in notes)
 
 
-def _verse(n: str, reference: str, *pieces, deleted=False, notes=(), marks=()) -> TextBlock:
-    return TextBlock('VERS', n, reference, pieces, deleted, _notes(notes), marks)
+def _verse(n: str, reference: str, *pieces, deleted=False, notes=(), marks=(), expansions=()) -> TextBlock:
+    return TextBlock('VERS', n, reference, pieces, deleted, _notes(notes), marks, (), expansions)
 
 
 def _paragraph(reference: str, *pieces, notes=(), marks=(), numerals=()) -> TextBlock:
@@ -204,7 +204,8 @@ def test_an_abbreviation_is_read_without_its_expansion_and_a_line_break_separate
                                   '</ex> </expan></abbr>, quaeso</l><l n="2">Quid hoc sit<lb/>hominis?</l>'))
 
     assert read_edition(edition, _POEMS, {}) == (
-        Division('POEM', '1', (_verse('1', '1.1', "coicerent si exercituru's, quaeso"),
+        Division('POEM', '1', (_verse('1', '1.1', "coicerent si exercituru's, quaeso",
+                                      expansions=(Expansion('exerciturus es', 0, 13, 25),)),
                                _verse('2', '1.2', 'Quid hoc sit hominis?')), ()),)
 
 
@@ -276,6 +277,17 @@ def test_one_dot_in_a_lemma_is_punctuation_and_leaves_out_no_words():
         Division('POEM', '1', (
             _verse('1', '1.1', 'tum Roma, tum Caesar', notes=(Note('Roma. Caesar om. B', 'Roma. Caesar'),)),
         ), ()),)
+
+
+def test_an_abbreviation_in_a_choice_is_read_as_printed_with_the_edition_s_expansion_over_its_characters():
+    edition = _edition(_poem('1', '<l n="176"><choice><abbr>locutu\'s</abbr><expan>locutu<ex>s e</ex>s</expan>'
+                                  '</choice> ilico</l><l n="177"><del><choice> <abbr>L.</abbr> '
+                                  '<expan>L<ex>ucio</ex></expan> </choice></del> Sulla</l>'))
+
+    assert read_edition(edition, _POEMS, {}) == (
+        Division('POEM', '1', (_verse('176', '1.176', "locutu's ilico", expansions=(Expansion('locutus es', 0, 0, 8),)),
+                               _verse('177', '1.177', 'L. Sulla', marks=(EditorialMark('deletion', 0, 0, 2),),
+                                      expansions=(Expansion('Lucio', 0, 0, 2),))), ()),)
 
 
 def test_a_page_break_is_left_out_wherever_it_is_and_one_inside_a_word_leaves_it_whole():
@@ -396,10 +408,18 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
     (_poem('1', '<sp><speaker>Sosia</speaker></sp>'), _POEMS, "the edition > poem 1 > sp has no text."),
     (_poem('1', '<l n="1">Roma <expan>est</expan></l>'), _POEMS,
      "the edition > poem 1 > l 1 holds <expan>, which isn't read there."),
+    (_poem('1', '<l n="1"><abbr>L.</abbr> Sulla</l>'), _POEMS,
+     "the edition > poem 1 > l 1 holds an <abbr> without an <expan>, which isn't read there."),
     (_poem('1', '<l n="1">Roma<note><app><lem>Roma</lem></app> <w type="lemma">Roma</w> A</note></l>'), _POEMS,
      "the edition > poem 1 > l 1 holds a note with 2 lemmas, but only one is read."),
     (_poem('1', '<l n="1">Roma</l><note><app><lem>Roma</lem></app> A</note>'), _POEMS,
      "the edition > poem 1 holds a note with a lemma outside a verse, title or paragraph, which isn't read."),
+    (_poem('1', '<l n="1">dedit <choice><sic>gesture</sic> <corr>gestare</corr></choice> Latinis</l>'), _POEMS,
+     "the edition > poem 1 > l 1 holds a <choice> of <corr> and <sic>, which isn't read there."),
+    (_poem('1', '<l n="1"><choice><abbr>locutu<hi rend="uppercase">\'</hi>s</abbr><expan>locutus es</expan>'
+                '</choice></l>'), _POEMS, "the edition > poem 1 > l 1 holds <hi>, which isn't read there."),
+    (_poem('1', '<l n="1"><choice>locutu\'s <abbr>locutu\'s</abbr><expan>locutus es</expan></choice></l>'), _POEMS,
+     "the edition > poem 1 > l 1 has text outside its parts, which isn't read."),
     ('<head>M. Tulli Ciceroni in Q. Caecilium Oratio</head><head>Quae Divinatio Dicitur</head>'
      + _poem('1', '<l n="1">Roma</l>'), _POEMS,
      'the edition holds <head type="" subtype="">, but only books, poems and acts are read there.'),
@@ -411,8 +431,10 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
         "a verse without text", "a poem without text", "a title of a book that the edition doesn't cite",
         "an empty edition", "a book of poems and chapters", "a verse in a section", "a chapter in a chapter",
         "a scene at the top", "an act without n", "a speech without what is said",
-        "an expansion outside an abbreviation", "a note with two lemmas", "a note with a lemma between verses",
-        "a second heading in the edition"])
+        "an expansion outside an abbreviation", "an abbreviation without its expansion", "a note with two lemmas",
+        "a note with a lemma between verses",
+        "a choice of a misprint and its correction", "an element in a choice's abbreviation",
+        "text in a choice outside its readings", "a second heading in the edition"])
 def test_a_structure_that_isnt_read_raises(body, cited, error):
     with pytest.raises(ValueError, match=re.escape(error)):
         read_edition(_edition(body), cited, {})

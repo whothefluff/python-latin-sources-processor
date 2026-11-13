@@ -32,7 +32,7 @@ READER_PRIMARY_KEYS = {
 
 AGREED_UNAMBIGUOUS_MACRONIZATIONS = {
     'ad': 'ad', 'amicum': 'amīcum', 'et': 'et', 'Roma': 'Rōma', 'est': 'est', 'aura': 'aura', '.': '.',
-    'de': 'dē', 'speculo': 'speculō', 'speculum': 'speculum',
+    'de': 'dē', 'speculo': 'speculō', 'speculum': 'speculum', "'": "'",
 }
 # levis is lĕvis wherever Carmina Prima is certain of it, and lēvis wherever Carmina Altera is
 CERTAIN_MACRONIZATIONS_OF_LEVIS = {

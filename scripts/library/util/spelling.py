@@ -1,5 +1,7 @@
 from typing import Iterable, NamedTuple
 
+from scripts.common.macrons import strip_macrons
+
 _PAIRS = ("uv", "ij")
 
 
@@ -84,3 +86,24 @@ def differs_in_told_apart_letters(word: str, surface: str, convention: LetterCon
     only_pairs_changed = all(letter.lower() == morpheus_letter or morpheus_letter in (_pair_of(letter) or "")
                              for letter, morpheus_letter in zip(word, surface))
     return only_pairs_changed and _respelled_as(word, surface, convention) is None
+
+
+def has_the_letters_of(printed: str, written: str, convention: LetterConvention) -> bool:
+    """Returns whether printed and written have the same letters, macrons and case aside. A letter that the edition
+    prints for two matches either: Lucio and Lūciō, and laruatus and lārvātus where u stands for v too"""
+    written = strip_macrons(written)
+    return len(printed) == len(written) and all(
+        other.lower() in _stands_for(letter, convention) for letter, other in zip(printed, written))
+
+
+def projected_macronization(word: str, expansion: str, convention: LetterConvention) -> str | None:
+    """Returns the word with the macrons of the start or end of its expansion, whichever it prints, in its own case:
+    locūtu of locūtus, s of es. Returns None when it prints neither, or when a macron would fall on a j or a v"""
+    for letters in (expansion[:len(word)], expansion[len(expansion) - len(word):]):
+        if has_the_letters_of(word, letters, convention) and all(
+                letter == strip_macrons(letter) or strip_macrons(letter).lower() == printed.lower()
+                for printed, letter in zip(word, letters)):
+            return "".join(printed if letter == strip_macrons(letter)
+                           else letter.upper() if printed.isupper() else letter.lower()
+                           for printed, letter in zip(word, letters))
+    return None

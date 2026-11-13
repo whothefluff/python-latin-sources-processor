@@ -38,7 +38,7 @@ _DIVISION_KINDS_TYPED_BY_N = ('poem', 'act')
 _BLOCK_TYPES_BY_TAG = {'head': 'TITL', 'speaker': 'TITL', 'l': 'VERS', 'p': 'PARA'}
 #: The elements that a block can hold in its text
 _INLINE_TAGS = ('q', 'quote', 'hi', 'emph', 'gap', 'note', 'milestone', 'add', 'del', 'sic', 'corr', 'num', 'abbr',
-                'lb', 'pb')
+                'choice', 'lb', 'pb')
 #: The elements whose text is read as the text around it
 _READ_AS_TEXT_TAGS = ('q', 'quote', 'hi', 'emph', 'sic', 'corr', 'add', 'del', 'num')
 #: The reasons for a gap that are read, which the gap's supplementary entry keeps
@@ -67,6 +67,14 @@ class EditorialMark(NamedTuple):
 
 class Numeral(NamedTuple):
     """Part of a block's text that the edition tags as a numeral: a range of characters in one of its pieces"""
+    piece: int
+    start: int
+    end: int
+
+
+class Expansion(NamedTuple):
+    """An <expan>'s text, and where its abbreviation is printed: a range of characters in one of its block's pieces"""
+    text: str
     piece: int
     start: int
     end: int
@@ -105,6 +113,7 @@ class TextBlock(NamedTuple):
     #: those that the edition prints as its source has them
     marks: Tuple[EditorialMark, ...] = ()
     numerals: Tuple[Numeral, ...] = ()
+    expansions: Tuple[Expansion, ...] = ()
 
     @property
     def printed_text(self) -> str:
@@ -135,8 +144,7 @@ class Division(NamedTuple):
 
 #: The kind of editorial mark of each element that marks part of a block's text
 _EDITORIAL_MARKS_BY_TAG = {'add': 'addition', 'del': 'deletion', 'corr': 'correction', 'sic': 'sic'}
-#: The elements that mark part of a block's text: the editor's marks, and numerals
-_MARKING_TAGS = (*_EDITORIAL_MARKS_BY_TAG, 'num')
+_READ_AS_MARKED_TEXT_TAGS = (*_EDITORIAL_MARKS_BY_TAG, 'num')
 
 
 class _MarkedText(NamedTuple):
@@ -284,11 +292,15 @@ def _block(element: ET.Element, typ: str, where: str, cited: Tuple[str, ...],
     if not reference:
         raise ValueError(f"{where} would have no reference: no division above it is cited.")
     deletion = _whole_deletion(element)
-    joined, marks, numerals, notes = _joined(_inline(deletion if deletion is not None else element, where,
-                                                     _INLINE_TAGS))
+    joined, ranges, notes = _joined(_inline(deletion if deletion is not None else element, where, _INLINE_TAGS))
     if not any(isinstance(piece, LostPassage) or piece.strip() for piece in joined):
         raise ValueError(f"{where} has no text.")
-    return TextBlock(typ, n, reference, joined, deletion is not None, notes, marks, numerals)
+    marks = tuple(EditorialMark(_EDITORIAL_MARKS_BY_TAG[_tag(marking)], piece, start, end)
+                  for marking, piece, start, end in ranges if _tag(marking) in _EDITORIAL_MARKS_BY_TAG)
+    numerals = tuple(Numeral(piece, start, end) for marking, piece, start, end in ranges if _tag(marking) == 'num')
+    expansions = tuple(Expansion(_expansion_text(marking), piece, start, end)
+                       for marking, piece, start, end in ranges if _tag(marking) in ('choice', 'abbr'))
+    return TextBlock(typ, n, reference, joined, deletion is not None, notes, marks, numerals, expansions)
 
 
 def _whole_deletion(element: ET.Element) -> ET.Element | None:
@@ -313,10 +325,16 @@ def _inline(element: ET.Element, where: str, tags: Tuple[str, ...]) -> _InlinePi
             raise ValueError(f"{where} holds <{tag} rend=\"{child.get('rend', '')}\">, but only "
                              f"{' and '.join(_TYPOGRAPHY_RENDS_READ_AS_TEXT)} typography is read there.")
         if tag in _READ_AS_TEXT_TAGS:
-            pieces.extend(_marked_by(piece, child) if tag in _MARKING_TAGS else piece
+            pieces.extend(_marked_by(piece, child) if tag in _READ_AS_MARKED_TEXT_TAGS else piece
                           for piece in _inline(child, where, tags))
+        elif tag == 'choice':
+            pieces.extend(_marked_by(piece, child) for piece in _inline(_abbreviation_of(child, where), where, ()))
         elif tag == 'abbr':
-            pieces.extend(_inline(child, where, ('expan',)))
+            # TODO(whothefluff): Amphitruo, Curculio and Menaechmi put the <expan> inside its <abbr>, where TEI has the
+            #  two side by side in a <choice>. Read as a <choice> until their editions are fixed
+            if child.find(f'{_TEI}expan') is None:
+                raise ValueError(f"{where} holds an <abbr> without an <expan>, which isn't read there.")
+            pieces.extend(_marked_by(piece, child) for piece in _inline(child, where, ('expan',)))
         elif tag == 'lb':
             pieces.append(_MarkedText(' '))
         elif tag == 'gap':
@@ -334,10 +352,24 @@ def _marked_by(piece: _InlinePiece, element: ET.Element) -> _InlinePiece:
     return piece._replace(marking=piece.marking + (element,)) if isinstance(piece, _MarkedText) else piece
 
 
-def _joined(pieces: _InlinePieces) -> Tuple[Tuple[Union[str, LostPassage], ...], Tuple[EditorialMark, ...],
-                                            Tuple[Numeral, ...], Tuple[Note, ...]]:
+def _abbreviation_of(choice: ET.Element, where: str) -> ET.Element:
+    """Returns the <abbr> of a <choice> of an abbreviation and its <expan>, and raises on any other <choice>"""
+    readings = sorted(_tag(reading) for reading in _children(choice, where))
+    if readings != ['abbr', 'expan']:
+        raise ValueError(f"{where} holds a <choice> of {' and '.join(f'<{tag}>' for tag in readings)}, which isn't "
+                         f"read there.")
+    return cast(ET.Element, choice.find(f'{_TEI}abbr'))
+
+
+def _expansion_text(element: ET.Element) -> str:
+    """Returns the text of the <expan> of a <choice>, or of the <abbr> that holds one, with its spaces collapsed"""
+    return ' '.join(''.join(cast(ET.Element, element.find(f'{_TEI}expan')).itertext()).split())
+
+
+def _joined(pieces: _InlinePieces) -> Tuple[Tuple[Union[str, LostPassage], ...],
+                                            List[Tuple[ET.Element, int, int, int]], Tuple[Note, ...]]:
     """Returns the pieces with the text between two lost passages in one piece, and no empty ones; where the
-    editor's marks and the numerals are in them, one range for each marking element in each piece; and the notes,
+    marking elements are in them, a range in a piece for each element in each piece that it marks; and the notes,
     with where each lemma matches the text before it"""
     joined: List[Union[str, LostPassage]] = []
     #: The marking elements, by their id and the piece, with their range in it
@@ -358,11 +390,8 @@ def _joined(pieces: _InlinePieces) -> Tuple[Tuple[Union[str, LostPassage], ...],
             for element in piece.marking:
                 start = ranges.get((id(element), index), (element, end - len(piece.text), end))[1]
                 ranges[(id(element), index)] = (element, start, end)
-    marks = tuple(EditorialMark(_EDITORIAL_MARKS_BY_TAG[_tag(element)], index, start, end)
-                  for (_, index), (element, start, end) in ranges.items() if _tag(element) != 'num')
-    numerals = tuple(Numeral(index, start, end)
-                     for (_, index), (element, start, end) in ranges.items() if _tag(element) == 'num')
-    return tuple(joined), marks, numerals, tuple(notes)
+    return (tuple(joined), [(element, index, start, end) for (_, index), (element, start, end) in ranges.items()],
+            tuple(notes))
 
 
 def _lemma(note: ET.Element, where: str) -> str | None:

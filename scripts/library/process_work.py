@@ -28,7 +28,8 @@ from scripts.library.util.proper_noun import (
     is_proper_noun_lemma, compute_inherent_state, compute_context_aware_state, ProperNounState,
 )
 from scripts.library.util.spelling import (
-    LetterConvention, differs_in_told_apart_letters, respell, respell_macronized, spellings_of, token_spellings_of,
+    LetterConvention, differs_in_told_apart_letters, has_the_letters_of, projected_macronization, respell,
+    respell_macronized, spellings_of, token_spellings_of,
 )
 from scripts.library.util.tei_edition import TEI_NAMESPACE, Division, LostPassage, TextBlock, read_edition
 from scripts.library.util.text_normalization import ictus_bit_mask, normalize_digraphs, without_ictus_marks
@@ -79,8 +80,10 @@ class WorkConfiguration(NamedTuple):
     spellings_by_printed_word: Dict[str, str]
     #: Token types by token index, where the script's own would be wrong
     token_overrides: Dict[int, TokenType]
-    #: Expansions of abbreviations and numerals, by token index
+    #: Expansions of abbreviations, numerals and words printed short, by token index
     expansions: Dict[int, str]
+    #: Macronizations of words printed short, by token index, where their expansion can't give them
+    printed_macronizations: Dict[int, str]
     #: Proper-noun states by token index, where the script's own would be wrong
     proper_noun_overrides: Dict[int, ProperNounState | None]
     author_abbreviations: Tuple[str, ...]
@@ -448,12 +451,11 @@ def _process_text_segments(
             current_word_idx = word_idx
             word_idx += 1
 
+        # A word printed short has its whole word as its expansion, and so no enclitic of its own
         enclitic = None
-        expansion = None
-        if t_type == TokenType.WORD:
+        expansion = work.expansions.get(fragment_index) if t_type <= 3 else None
+        if t_type == TokenType.WORD and expansion is None:
             enclitic = find_enclitic(segment, work.letter_convention)
-        elif t_type in (TokenType.ABBREVIATION, TokenType.NUMERAL):
-            expansion = work.expansions.get(fragment_index)
 
         work_contents_data.append([
             work_id, fragment_index, segment, source_ref, context_dependent_state,
@@ -659,6 +661,17 @@ def _positions_of_segments_overlapping(segments: List[_Segment], start: int, end
             if segment.start < end and start < segment.end]
 
 
+_CONTRACTION_APOSTROPHES = ("'", "’")
+
+
+def _positions_of_contractions(segments: List[_Segment], first_position: int) -> List[int]:
+    """A contraction is a word, an apostrophe and an s with nothing between them, as locutu's"""
+    return [first_position + position
+            for position, (word, apostrophe, s) in enumerate(zip(segments, segments[1:], segments[2:]))
+            if word.text.isalpha() and apostrophe.text in _CONTRACTION_APOSTROPHES and s.text == 's'
+            and word.end == apostrophe.start and apostrophe.end == s.start]
+
+
 @dataclass
 class _Numbering:
     """The rows of a work's tokens, subdivisions and supplementary entries, numbered in reading order"""
@@ -680,6 +693,7 @@ class _Numbering:
     #: Whether the next block starts a sentence whatever the text before it: the first of a poem, prologue or
     #: epilogue, and the one after a speaker
     next_block_starts_sentence: bool = False
+    configuration_problems: List[str] = field(default_factory=list)
     supplementary_counts: Dict[str, int] = field(default_factory=lambda: {"NOTE": 0, "GAP": 0, "ABBR": 0})
 
     def node_of(self, path: str | None) -> str | None:
@@ -726,6 +740,8 @@ class _Numbering:
         marked: List[Tuple[str, int, int]] = []  # each editorial mark's note, and its first and last segment
         tagged_numeral_positions: Set[int] = set()
         covered_by_note_index: Dict[int, List[int]] = {}
+        edition_expansions_and_positions: List[Tuple[str, List[int]]] = []
+        contraction_positions: List[int] = []
         for index, piece in enumerate(block.pieces):
             if isinstance(piece, LostPassage):
                 segments.append(None)
@@ -750,6 +766,10 @@ class _Numbering:
                 if match is not None and match.piece == index:
                     covered_by_note_index[note_index] = _positions_of_segments_overlapping(
                         piece_segments, match.start, match.end, first_position=len(segments))
+            for expansion in (expansion for expansion in block.expansions if expansion.piece == index):
+                edition_expansions_and_positions.append((expansion.text, _positions_of_segments_overlapping(
+                    piece_segments, expansion.start, expansion.end, first_position=len(segments))))
+            contraction_positions.extend(_positions_of_contractions(piece_segments, first_position=len(segments)))
             printed_words = [cast(str, normalize_digraphs(segment.text)) for segment in piece_segments]
             segments.extend(self.work.spellings_by_printed_word.get(printed, without_ictus_marks(printed))
                             for printed in printed_words)
@@ -783,6 +803,7 @@ class _Numbering:
             self.work,
             {first + position for position in tagged_numeral_positions},
         )
+        self.check_expansions(first, edition_expansions_and_positions, contraction_positions)
         for note_index, note in enumerate(block.notes):
             if not note.text:
                 logging.warning("%s %s: an empty note, which the edition should fill or leave out",
@@ -794,9 +815,81 @@ class _Numbering:
             from_index, to_index = (first + covered[0], first + covered[-1]) if covered else (first, last)
             self.add_supplementary("NOTE", from_index, to_index, note.text)
 
+    def check_expansions(self, first: int, edition_expansions_and_positions: List[Tuple[str, List[int]]],
+                         contraction_positions: List[int]):
+        """Adds a configuration problem for each contraction without both expansions, each expansion with other letters
+        than the edition's (or the printed ones, where it has none), and each other word with an expansion"""
+        convention = self.work.letter_convention
+        tokens = self.contents[first:]
+        edition_expansion_at = {position: text for text, covered in edition_expansions_and_positions
+                                for position in covered}
+        unexpanded: Set[int] = set()
+        for position in contraction_positions:
+            word, apostrophe, s = tokens[position:position + 3]
+            word_expansion, s_expansion = word[9], s[9]
+            edition_expansion = edition_expansion_at.get(position)
+            place = f"{self.work.edition_urn} {word[3]}: {word[2]}{apostrophe[2]}{s[2]} (idx {word[1]})"
+            if word_expansion is None or s_expansion is None:
+                unexpanded.add(position)
+                expanded_as = (f", which the edition expands as {edition_expansion!r}" if edition_expansion is not None
+                               else "")
+                self.configuration_problems.append(
+                    f"{place} is two words run together{expanded_as}, so each needs its whole word in the "
+                    f"configuration's expansions, as locūtus and es for locutu's")
+            elif edition_expansion is None and not (
+                    has_the_letters_of(word[2], word_expansion[:len(word[2])], convention)
+                    and strip_macrons(s_expansion).lower() == 'es'):
+                self.configuration_problems.append(
+                    f"{place} has the expansions {word_expansion!r} and {s_expansion!r}, but the first must start with "
+                    f"the letters of {word[2]!r}, and the second must be es")
+        for edition_expansion, covered in edition_expansions_and_positions:
+            words = [tokens[position] for position in covered if tokens[position][5] <= int(TokenType.NUMERAL)]
+            printed = ' '.join(word[2] for word in words)
+            configured = ' '.join(word[9] if word[9] is not None else '?' for word in words)
+            if words and unexpanded.isdisjoint(covered) and not has_the_letters_of(
+                    edition_expansion, configured, convention):
+                self.configuration_problems.append(
+                    f"{self.work.edition_urn} {words[0][3]}: the edition expands {printed!r} (idx {words[0][1]}) as "
+                    f"{edition_expansion!r}, but the configuration's expansions are {configured!r}, with other letters")
+        words_printed_short = {*contraction_positions, *(position + 2 for position in contraction_positions)}
+        for position, token in enumerate(tokens):
+            if token[5] == TokenType.WORD and token[9] is not None and position not in words_printed_short:
+                self.configuration_problems.append(
+                    f"{self.work.edition_urn} {token[3]}: {token[2]} (idx {token[1]}) has the expansion {token[9]!r}, "
+                    f"but only the two words of a contraction take one, as the locutu and the s of locutu's "
+                    f"(locutus es)")
+
     def add_supplementary(self, typ: str, from_index: int, to_index: int, val: str):
         self.supplementary.append([self.work_id, typ, self.supplementary_counts[typ], from_index, to_index, val])
         self.supplementary_counts[typ] += 1
+
+
+def _macronization_of_word_printed_short(idx: int, word: str, expansion: str, work: WorkConfiguration,
+                                         problems: List[str]) -> str | None:
+    """Returns the word with its expansion's macrons, or else as printed_macronizations has it. Adds a problem and
+    returns None when printed_macronizations lacks it, has it needlessly, or has other letters"""
+    respelled = spelled_with_morpheus_letters(word, work.letter_convention)
+    from_expansion = projected_macronization(respelled, expansion, work.letter_convention)
+    configured = work.printed_macronizations.get(idx)
+    place = f"{work.edition_urn}: '{respelled}' (idx {idx}), printed short for {expansion!r},"
+    if from_expansion is not None and configured is not None:
+        problems.append(f"{place} gets its macrons from its expansion, so printed_macronizations needs no "
+                        f"{configured!r}")
+    elif from_expansion is None and configured is None:
+        problems.append(f"{place} doesn't start or end its expansion's letters, so printed_macronizations needs its "
+                        f"macronization")
+    elif configured is not None and strip_macrons(configured) != respelled:
+        problems.append(f"{place} has the macronization {configured!r} in printed_macronizations, with other letters")
+    else:
+        return from_expansion if from_expansion is not None else configured
+    return None
+
+
+def _raise_for_problems(problems: List[str]):
+    """Raises when the work's configuration lacks something or gets it wrong for its edition, naming each problem"""
+    if problems:
+        raise ValueError("The work's configuration doesn't fit its edition:\n"
+                         + "\n".join(f"    {problem}" for problem in problems))
 
 
 def process_verse(xml_string, output_dir, work: WorkConfiguration):
@@ -836,6 +929,15 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
 
     numbering = _Numbering(work_id, work)
     numbering.add_parts(read_edition(root, work.cited_division_subtypes, work.types_by_n), None, None)
+    problems = numbering.configuration_problems
+    _raise_for_problems(problems)
+    macronizations_of_words_printed_short = {
+        token[1]: _macronization_of_word_printed_short(token[1], token[2], token[9], work, problems)
+        for token in numbering.contents if token[5] == TokenType.WORD and token[9] is not None}
+    problems.extend(
+        f"{work.edition_urn}: the configuration's printed_macronizations has idx {idx}, which isn't a word with an "
+        f"expansion" for idx in sorted(set(work.printed_macronizations) - set(macronizations_of_words_printed_short)))
+    _raise_for_problems(problems)
     work_contents_data = numbering.contents
     work_content_subdivisions_data = numbering.subdivisions
     work_content_supplementary_data = numbering.supplementary
@@ -913,6 +1015,9 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
                 certain_macronizations_by_key[original_word].add(combined_macronized)
                 certain_tokens.append(CertainToken(work_id, content_idx, original_word, token_type,
                                                    proper_noun_state, combined_macronized))
+            elif int(content_idx) in macronizations_of_words_printed_short:
+                work_macronizations_data.append(WorkMacronization(
+                    work_id, content_idx, cast(str, macronizations_of_words_printed_short[int(content_idx)]), 0))
             else:
                 # 4b. Decision logic: store in work-specific or global table
                 lower_word = original_word.lower()

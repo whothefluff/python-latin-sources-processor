@@ -44,6 +44,10 @@ hyphen in front: the *ne* of *tune* is `-ne`, apart from the word `ne`.
 In `work_contents.csv`:
 
 * **Expansion Format:** The `expansion` column is exported display-cased and macronized (e.g., `Mārcus`, not `marcus`).
+* **Words Printed Short:** A word (`tokenType = 1`) has an expansion when it's printed short: its whole word. Plautus
+  and some other poets join es ("you are") to the word before it, and leave letters out: locutus es as `locutu's`.
+  Such a contraction is three tokens: the words locutu (expansion `locūtus`) and s (expansion `es`), with `'` between
+  them. A word printed short has a certain macronization, mask 0, as every token with an expansion has.
 * **Mutual Exclusivity:** A single token will *never* have both an `expansion` and an `enclitic`.
 * **Which Enclitics:** Only the endings listed in [`ENCLITICS.md`](ENCLITICS.md) are split off.
 
@@ -70,6 +74,7 @@ In `work_contents.csv`, every chunk of text is assigned a `tokenType`:
 * `wordIdx` increments if and ONLY if `tokenType <= 3`. Punctuation and editorial marks export a null/empty `wordIdx`.
 * `tokenType == 2` (Abbreviations) are forced to `properNounState = 1`.
 * `tokenType == 3` (Numerals) are forced to `properNounState = 0`.
+* A word with an expansion keeps a word's `properNounState`.
 
 **Numeral Collisions:**
 Valid Roman numerals often collide with valid Latin words (e.g., 'I', 'VI', 'DI'). The global pipeline defaults to
