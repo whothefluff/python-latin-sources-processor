@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from functools import cache
 from pathlib import Path
-from typing import Dict, FrozenSet, List, NamedTuple, Sequence, Set, Tuple, TypedDict, cast
+from typing import Dict, FrozenSet, Iterator, List, NamedTuple, Sequence, Set, Tuple, TypedDict, cast
 
 import pandas as pd
 
@@ -1308,51 +1308,48 @@ def check_contents_not_empty_when_supp_not_empty(errors, work_contents_df, work_
             errors.append(f'Content at index {row["idx"]} is empty but it is part of a supplementary entry.')
 
 
-def find_all_gap_tags(element, namespace, gap_tags=None):
-    if gap_tags is None:
-        gap_tags = []
-    if element.tag == f'{namespace}gap':
-        gap_tags.append(element)
-    for child in element:
-        find_all_gap_tags(child, namespace, gap_tags)
-    return gap_tags
+_TEI = '{' + TEI_NAMESPACE + '}'
+_TAGS_LEFT_OUT_OF_THE_TEXT = (f'{_TEI}note', f'{_TEI}expan')
 
 
-def find_all_p_tags(element, namespace, p_tags=None):
-    if p_tags is None:
-        p_tags = []
-    if element.tag == f'{namespace}p' and not ''.join(element.itertext()).strip().startswith('This pointer pattern'):
-        p_tags.append(element)
+def _elements_outside_notes(element: ET.Element) -> Iterator[ET.Element]:
+    yield element
     for child in element:
-        find_all_p_tags(child, namespace, p_tags)
-    return p_tags
+        if child.tag != f'{_TEI}note':
+            yield from _elements_outside_notes(child)
+
+
+def _body_elements_outside_notes(root: ET.Element, tag: str) -> List[ET.Element]:
+    """Leaves out the header, whose paragraphs aren't the edition's, and notes, whose paragraphs and gaps are part of
+    the note's text"""
+    return [element for body in root.iterfind(f'{_TEI}text/{_TEI}body')
+            for element in _elements_outside_notes(body) if element.tag == f'{_TEI}{tag}']
+
+
+def _expected_text(element: ET.Element) -> str:
+    """Reads the element by the checks' own rules, not by the walker's code, so that they don't share its mistakes.
+    A <choice> holds only its readings, so the whitespace between them isn't text"""
+    if element.tag in _TAGS_LEFT_OUT_OF_THE_TEXT:
+        return ''
+    if element.tag == f'{_TEI}choice':
+        return ''.join(_expected_text(reading) for reading in element)
+    return (element.text or '') + ''.join(_expected_text(child) + (child.tail or '') for child in element)
 
 
 def validate_gap_tags(errors, xml_string, subdivisions, contents, supp_entries):
-    # Parse the XML string
-    root = ET.fromstring(xml_string)
-
-    # Find all <gap> tags in the original XML using a recursive function
-    namespace = "{" + TEI_NAMESPACE + "}"
-    gap_tags = find_all_gap_tags(root, namespace)
-
-    # Every empty content entry, each to check against the gap tags
+    gap_tags = _body_elements_outside_notes(ET.fromstring(xml_string), 'gap')
     gap_indices = [content['idx'] for content in contents if pd.isnull(content['word'])]
 
-    # Check if the number of gap tags is equal to the number of empty content entries
     if len(gap_tags) != len(gap_indices):
         errors.append("Mismatch between the number of <gap> tags and the number of empty content entries.")
 
-    # Check for corresponding subdivision entries
     for idx in gap_indices:
-        # the verse or paragraph that holds it, which can have text before it or after it
-        matching_subdivisions = [sub for sub in subdivisions if sub['typ'] in ('VERS', 'PARA') and
-                                 sub['fromIndex'] <= idx <= sub['toIndex']]
-        if len(matching_subdivisions) != 1:
-            errors.append(
-                f"Expected exactly one subdivision entry for gap tag at idx {idx}, found {len(matching_subdivisions)}")
+        verses_or_paragraphs_holding_it = [sub for sub in subdivisions if sub['typ'] in ('VERS', 'PARA') and
+                                           sub['fromIndex'] <= idx <= sub['toIndex']]
+        if len(verses_or_paragraphs_holding_it) != 1:
+            errors.append(f"Expected exactly one subdivision entry for gap tag at idx {idx}, "
+                          f"found {len(verses_or_paragraphs_holding_it)}")
 
-    # Check for corresponding note entries
     for idx in gap_indices:
         matching_supp_entries = [entry for entry in supp_entries if entry['fromIndex'] == idx and
                                  entry['toIndex'] == idx and
@@ -1364,32 +1361,10 @@ def validate_gap_tags(errors, xml_string, subdivisions, contents, supp_entries):
 
 
 def validate_p_tags(errors, xml_string, subdivisions):
-    # Parse the XML string
-    root = ET.fromstring(xml_string)
+    p_tags = _body_elements_outside_notes(ET.fromstring(xml_string), 'p')
+    paragraph_names = {subdivision['name'] for subdivision in subdivisions if subdivision['typ'] == 'PARA'}
 
-    # Find all <p> tags in the original XML using a recursive function
-    namespace = "{" + TEI_NAMESPACE + "}"
-    p_tags = find_all_p_tags(root, namespace)
-
-    # Count the number of elements in p_tags
-    num_p_tags = len(p_tags)
-
-    # Create a list to store the paragraphs
-    paragraphs = []
-
-    # Iterate over the contents list for as many times as there are elements in p_tags
-    for i in range(num_p_tags):
-        # For each iteration, find the corresponding entry in the subdivisions list, named after the paragraph's text:
-        # its own and that of the elements inside it, without the whitespace around it
-        for subdivision in subdivisions:
-            # If a corresponding entry is found, add entry to the list
-            if subdivision['typ'] == 'PARA' \
-                    and subdivision['name'] == ''.join(p_tags[i].itertext()).strip():
-                paragraphs.append(subdivision)
-                break
-
-    # Check if the number of p tags is equal to the number of paragraph subdivisions
-    if num_p_tags != len(paragraphs):
+    if any(_expected_text(p_tag).strip() not in paragraph_names for p_tag in p_tags):
         errors.append("Mismatch between the number of <p> tags and the number of paragraph subdivisions.")
 
 

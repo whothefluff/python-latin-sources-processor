@@ -38,6 +38,7 @@ The script performs the following key functions:
     -   Sequential index integrity for contents and supplementary data. Subdivisions are counted among their siblings of the same type, from 0 up, whatever the edition numbers them (Phaedrus 4.24 has no verse 4), and a subdivision has one title at most, numbered 0, as the reader's unique index requires.
     -   Edition labels: books, poems, prologues, epilogues and verses have one, and other subdivisions none.
     -   Subdivision parent-child range containment.
+    -   The edition's text against the CSVs, by the checks' own reading and not the walker's: every `<p>` of the body outside notes is a paragraph named after its text, without notes and expansions; every `<gap>` there is a lost passage, with its verse or paragraph and its gap entry.
     -   Proper noun states: 1 for every abbreviation, 0 for every numeral, none for punctuation, editorial marks and other tokens. Words without one, which Morpheus has no analysis for, are logged for review.
     -   Macronization coverage (every word token has its own macronization, or an unambiguous one under the key that the reader looks it up by, which depends on its proper noun state).
     -   Expansion completeness (every abbreviation/numeral token has a supplied expansion).

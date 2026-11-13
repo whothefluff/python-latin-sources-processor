@@ -1,5 +1,6 @@
 import logging
 import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import NamedTuple
 
@@ -1130,6 +1131,97 @@ def test_every_gap_has_its_empty_token_its_verse_and_its_gap_entry(contents, sub
     process_work.validate_gap_tags(found, _TWO_LOST_VERSES, subdivisions, contents, supplementary)
 
     assert found == errors
+
+
+_ORATIO = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Oratio</title><author>Fictor</author></titleStmt>
+  </fileDesc><encodingDesc><refsDecl><cRefPattern><p>This pattern extracts sections</p></cRefPattern></refsDecl>
+  </encodingDesc></teiHeader>
+  <text><body><div type="edition"><div type="textpart" subtype="book" n="1">
+    <div type="textpart" subtype="chapter" n="1">
+      <div type="textpart" subtype="section" n="1">
+        <p>Levis <add>et</add> <sic>iace</sic><note><p>est</p> <gap reason="lost"/> A</note> est.</p>
+      </div>
+      <div type="textpart" subtype="section" n="2">
+        <p><choice> <abbr>L.</abbr> <expan>L<ex>ucius</ex> </expan> </choice> <q>iam</q> <gap reason="lost"/> est.</p>
+      </div>
+    </div>
+  </div></div></body></text>
+</TEI>"""
+_ORATIO_WORK = _COMMENTARIUS_WORK._replace(expansions={5: 'Lūcius'})
+
+
+class _CheckedRows(NamedTuple):
+    subdivisions: list
+    contents: list
+    supplementary: list
+
+
+def _checked_rows(output_dir) -> _CheckedRows:
+    return _CheckedRows(
+        subdivisions=pd.read_csv(output_dir / "work_content_subdivisions.csv").to_dict('records'),
+        contents=pd.read_csv(output_dir / "work_contents.csv").to_dict('records'),
+        supplementary=pd.read_csv(output_dir / "work_content_supplementary.csv").to_dict('records'))
+
+
+@pytest.fixture
+def oratio(monkeypatch, tmp_path) -> _CheckedRows:
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    _macronizer_echoes(monkeypatch)
+    process_work.process_verse(_ORATIO, tmp_path, _ORATIO_WORK)
+    return _checked_rows(tmp_path)
+
+
+def _paragraph_and_gap_errors(subdivisions, contents, supplementary) -> list:
+    errors = []
+    process_work.validate_gap_tags(errors, _ORATIO, subdivisions, contents, supplementary)
+    process_work.validate_p_tags(errors, _ORATIO, subdivisions)
+    return errors
+
+
+def test_validation_leaves_out_the_header_notes_and_expansions(oratio):
+    assert [subdivision["name"] for subdivision in oratio.subdivisions if subdivision["typ"] == "PARA"] == [
+        "Levis et iace est.", "L. iam  est."]
+    assert _paragraph_and_gap_errors(*oratio) == []
+
+
+@pytest.mark.parametrize("paragraph, text", [
+    ('<p><choice> <abbr>L.</abbr> <expan>L<ex>ucio</ex> </expan> </choice> Sulla, quem honoris causa nomino</p>',
+     'L. Sulla, quem honoris causa nomino'),
+    ('<p><abbr>locutu\'s<expan> <ex>locutus es</ex> </expan></abbr> ilico</p>', "locutu's ilico"),
+], ids=["a choice with spaces between its readings", "an expansion inside its abbreviation"])
+def test_validation_reads_an_abbreviation_as_printed_without_its_expansion(paragraph, text):
+    element = ET.fromstring(paragraph.replace('<p>', f'<p xmlns="{process_work.TEI_NAMESPACE}">', 1))
+
+    assert process_work._expected_text(element) == text
+
+
+def _paragraph_renamed(name, to):
+    return lambda subdivisions, contents: (
+        [dict(subdivision, name=to) if subdivision["name"] == name else subdivision for subdivision in subdivisions],
+        contents)
+
+
+@pytest.mark.parametrize("damage", [
+    lambda subdivisions, contents: ([subdivision for subdivision in subdivisions
+                                     if subdivision["name"] != "L. iam  est."], contents),
+    lambda subdivisions, contents: ([dict(subdivision, typ="VERS") if subdivision["name"] == "L. iam  est."
+                                     else subdivision for subdivision in subdivisions], contents),
+    _paragraph_renamed("Levis et iace est.", to="et iace est."),
+    _paragraph_renamed("Levis et iace est.", to="Levis et iacere est."),
+    _paragraph_renamed("Levis et iace est.", to="Levis  iace est."),
+    _paragraph_renamed("Levis et iace est.", to="Levis et  est."),
+    _paragraph_renamed("L. iam  est.", to="L.   est."),
+    lambda subdivisions, contents: (subdivisions, [token for token in contents if not pd.isnull(token["word"])]),
+    lambda subdivisions, contents: (subdivisions, [*contents, {"idx": len(contents), "word": float("nan")}]),
+], ids=["a paragraph left out", "a paragraph written as a verse", "a word left out", "a word changed",
+        "the text of an <add> lost", "the text of a <sic> lost", "the text of a <q> lost", "a lost passage dropped",
+        "a lost passage too many"])
+def test_validation_refuses_paragraphs_or_lost_passages_that_the_walker_lost_or_changed(oratio, damage):
+    subdivisions, contents, supplementary = oratio
+    damaged_subdivisions, damaged_contents = damage(subdivisions, contents)
+
+    assert _paragraph_and_gap_errors(damaged_subdivisions, damaged_contents, supplementary) != []
 
 
 def _subdivisions(*rows):
