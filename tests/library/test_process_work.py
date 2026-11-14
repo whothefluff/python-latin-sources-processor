@@ -20,7 +20,9 @@ _CARMEN_WORK = process_work.WorkConfiguration(
     edition_urn='urn:cts:latinLit:fict001.fict001.fict-lat1',
     cited_division_subtypes=('book', 'poem'), types_by_n={},
     letter_convention=_CARMEN_LETTERS, spellings_by_printed_word={}, token_overrides={}, expansions={},
-    printed_macronizations={}, proper_noun_overrides={}, author_abbreviations=('Fict.',),
+    printed_macronizations={}, unsettled_printed_marks={}, quotations_inside_printed_marks={},
+    proper_noun_overrides={},
+    author_abbreviations=('Fict.',),
     work_about_file=str(_CARMEN_FILES / 'work_about.txt'), author_about_file=str(_CARMEN_FILES / 'author_about.txt'),
     author_image_file=str(_CARMEN_FILES / 'author_image.bin'))
 
@@ -437,15 +439,15 @@ def test_line_groups_and_speeches_are_subdivisions_and_divisions_end_at_their_la
             for typ, cnt, name, parent, from_index, to_index, label in zip(
                 subdivisions["typ"], subdivisions["cnt"], subdivisions["name"], subdivisions["parent"],
                 subdivisions["fromIndex"], subdivisions["toIndex"], subdivisions["editionLabel"])] == [
-        ("BOOK", 0, None, None, 0, 9, "1"),
-        ("POEM", 0, "Carmen", "BOOK", 0, 9, "1"),
+        ("BOOK", 0, None, None, 0, 11, "1"),
+        ("POEM", 0, "Carmen", "BOOK", 0, 11, "1"),
         ("TITL", 0, "Carmen", "POEM", 0, 0, None),
-        ("LGRP", 0, None, "POEM", 1, 5, None),
-        ("VERS", 0, "Roma est levis", "LGRP", 1, 3, "1"),
-        ("VERS", 1, "et", "LGRP", 4, 5, "2"),
-        ("SPCH", 0, "Fictor", "POEM", 6, 9, None),
-        ("TITL", 0, "Fictor", "SPCH", 6, 6, None),
-        ("VERS", 0, "levis est.", "SPCH", 7, 9, "3"),
+        ("LGRP", 0, None, "POEM", 1, 7, None),
+        ("VERS", 0, "Roma “est” levis", "LGRP", 1, 5, "1"),
+        ("VERS", 1, "et", "LGRP", 6, 7, "2"),
+        ("SPCH", 0, "Fictor", "POEM", 8, 11, None),
+        ("TITL", 0, "Fictor", "SPCH", 8, 8, None),
+        ("VERS", 0, "levis est.", "SPCH", 9, 11, "3"),
     ]
 
 
@@ -455,18 +457,35 @@ def test_a_speaker_and_what_is_said_after_it_start_sentences_and_a_lost_passage_
 
     assert list(zip(contents["idx"], contents["word"], contents["sourceReference"], contents["sentenceIdx"],
                     contents["wordIdx"])) == [
-        (0, "Carmen", "1.1", 0, "0"), (1, "Roma", "1.1.1", 0, "1"), (2, "est", "1.1.1", 0, "2"),
-        (3, "levis", "1.1.1", 0, "3"), (4, "et", "1.1.2", 0, "4"), (5, "", "1.1.2", 0, ""),
-        (6, "Fictor", "1.1.3", 1, "0"), (7, "levis", "1.1.3", 2, "0"), (8, "est", "1.1.3", 2, "1"),
-        (9, ".", "1.1.3", 2, ""),
+        (0, "Carmen", "1.1", 0, "0"), (1, "Roma", "1.1.1", 0, "1"), (2, "“", "1.1.1", 0, ""),
+        (3, "est", "1.1.1", 0, "2"), (4, "”", "1.1.1", 0, ""), (5, "levis", "1.1.1", 0, "3"),
+        (6, "et", "1.1.2", 0, "4"), (7, "", "1.1.2", 0, ""), (8, "Fictor", "1.1.3", 1, "0"),
+        (9, "levis", "1.1.3", 2, "0"), (10, "est", "1.1.3", 2, "1"), (11, ".", "1.1.3", 2, ""),
     ]
 
 
 def test_notes_and_headings_in_another_language_cover_what_holds_them_and_a_lost_passage_covers_its_token(
         structures):
     assert pd.read_csv(structures / "work_content_supplementary.csv").drop(columns="workId").values.tolist() == [
-        ["NOTE", 0, 1, 3, "A note."], ["GAP", 0, 5, 5, "lost"], ["NOTE", 1, 1, 5, "Youths"],
-        ["NOTE", 2, 0, 9, "On the book."]]
+        ["NOTE", 0, 1, 5, "A note."], ["GAP", 0, 7, 7, "lost"], ["NOTE", 1, 1, 7, "Youths"],
+        ["NOTE", 2, 0, 11, "On the book."]]
+
+
+# A ‘ in the line group, which code can't follow, and a quotation in the speech after it
+_STRUCTURES_WITH_A_QUOTATION_AFTER_A_SINGLE_MARK = _STRUCTURES.replace('<l n="2">et', '<l n="2">‘et').replace(
+    '<l n="3">levis est.', '<l n="3"><q>levis</q> est.')
+
+
+def test_a_printed_mark_that_code_cant_follow_counts_in_its_poem_and_not_only_in_its_line_group_or_speech(
+        monkeypatch, tmp_path):
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+
+    with pytest.raises(ValueError, match=re.escape(
+            f"{_CARMEN_WORK.edition_urn} 1.1.3: the quotation that opens at idx 10, in '“levis” est.', comes after a "
+            f"printed mark that code can't follow")):
+        process_work.process_verse(_STRUCTURES_WITH_A_QUOTATION_AFTER_A_SINGLE_MARK, tmp_path, _CARMEN_WORK)
+    assert not any(tmp_path.iterdir())
 
 
 _COMMENTARIUS = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
@@ -1143,7 +1162,8 @@ _ORATIO = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
         <p>Levis <add>et</add> <sic>iace</sic><note><p>est</p> <gap reason="lost"/> A</note> est.</p>
       </div>
       <div type="textpart" subtype="section" n="2">
-        <p><choice> <abbr>L.</abbr> <expan>L<ex>ucius</ex> </expan> </choice> <q>iam</q> <gap reason="lost"/> est.</p>
+        <p><choice> <abbr>L.</abbr> <expan>L<ex>ucius</ex> </expan> </choice> <q rend="single">iam</q>
+        <gap reason="lost"/> est.</p>
       </div>
     </div>
   </div></div></body></text>
@@ -1175,13 +1195,13 @@ def oratio(monkeypatch, tmp_path) -> _CheckedRows:
 def _paragraph_and_gap_errors(subdivisions, contents, supplementary) -> list:
     errors = []
     process_work.validate_gap_tags(errors, _ORATIO, subdivisions, contents, supplementary)
-    process_work.validate_p_tags(errors, _ORATIO, subdivisions)
+    process_work.validate_p_tags(errors, _ORATIO, subdivisions, contents, _ORATIO_WORK)
     return errors
 
 
 def test_validation_leaves_out_the_header_notes_and_expansions(oratio):
     assert [subdivision["name"] for subdivision in oratio.subdivisions if subdivision["typ"] == "PARA"] == [
-        "Levis et iace est.", "L. iam  est."]
+        "Levis et iace est.", "L. ‘iam’\n         est."]
     assert _paragraph_and_gap_errors(*oratio) == []
 
 
@@ -1193,7 +1213,12 @@ def test_validation_leaves_out_the_header_notes_and_expansions(oratio):
 def test_validation_reads_an_abbreviation_as_printed_without_its_expansion(paragraph, text):
     element = ET.fromstring(paragraph.replace('<p>', f'<p xmlns="{process_work.TEI_NAMESPACE}">', 1))
 
-    assert process_work._expected_text(element) == text
+    assert process_work._expected_items(element, process_work._QuotationChains({}, set())) == list(text)
+
+
+def test_validation_reads_an_apostrophe_before_a_capital_s_as_the_configuration_says_and_not_as_a_contraction():
+    assert process_work._reading_of_printed_mark(list("et'S"), 2, process_work.UnsettledMark.OPENS, 2, []) == \
+        process_work._ExpectedQuotationMark('single', True)
 
 
 def _paragraph_renamed(name, to):
@@ -1204,14 +1229,14 @@ def _paragraph_renamed(name, to):
 
 @pytest.mark.parametrize("damage", [
     lambda subdivisions, contents: ([subdivision for subdivision in subdivisions
-                                     if subdivision["name"] != "L. iam  est."], contents),
-    lambda subdivisions, contents: ([dict(subdivision, typ="VERS") if subdivision["name"] == "L. iam  est."
+                                     if subdivision["name"] != "L. ‘iam’\n         est."], contents),
+    lambda subdivisions, contents: ([dict(subdivision, typ="VERS") if subdivision["name"] == "L. ‘iam’\n         est."
                                      else subdivision for subdivision in subdivisions], contents),
     _paragraph_renamed("Levis et iace est.", to="et iace est."),
     _paragraph_renamed("Levis et iace est.", to="Levis et iacere est."),
     _paragraph_renamed("Levis et iace est.", to="Levis  iace est."),
     _paragraph_renamed("Levis et iace est.", to="Levis et  est."),
-    _paragraph_renamed("L. iam  est.", to="L.   est."),
+    _paragraph_renamed("L. ‘iam’\n         est.", to="L. “”  est."),
     lambda subdivisions, contents: (subdivisions, [token for token in contents if not pd.isnull(token["word"])]),
     lambda subdivisions, contents: (subdivisions, [*contents, {"idx": len(contents), "word": float("nan")}]),
 ], ids=["a paragraph left out", "a paragraph written as a verse", "a word left out", "a word changed",
@@ -1222,6 +1247,167 @@ def test_validation_refuses_paragraphs_or_lost_passages_that_the_walker_lost_or_
     damaged_subdivisions, damaged_contents = damage(subdivisions, contents)
 
     assert _paragraph_and_gap_errors(damaged_subdivisions, damaged_contents, supplementary) != []
+
+
+_CITATA = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Citata</title><author>Fictor</author></titleStmt>
+  </fileDesc></teiHeader>
+  <text><body><div type="edition"><div type="textpart" subtype="book" n="1">
+    <div type="textpart" subtype="chapter" n="1">
+      <div type="textpart" subtype="section" n="1">
+        <p>"Feliciter!" succlamans, dixit <q rend="single">ave</q> et.</p>
+      </div>
+      <div type="textpart" subtype="section" n="2"><p>“Suspiciones <q>te</q> ne dicat.” Locutu's, talin' iam.</p></div>
+      <div type="textpart" subtype="section" n="3"><p>"Ait <q>iam</q> et."</p></div>
+    </div>
+    <div type="textpart" subtype="chapter" n="2">
+      <head>Dicta <q>alia <q>vera</q></q></head>
+      <div type="textpart" subtype="section" n="1">
+        <p>
+          Dixit <gap reason="lost"/> <q>vale</q> et<note>Cf. <q>salve</q>.</note> <q rend="merge">abiit.</q></p>
+      </div>
+    </div>
+  </div></div></body></text>
+</TEI>"""
+# The edition opens three quotations with double marks, two of them straight, and one with single ones, by its rend.
+# The characters around them don't say that talin' is an apostrophe, and code can't follow straight marks, so the
+# configuration says that ave isn't inside them and the last iam is. The second chapter's title holds a quotation
+# inside another, and its paragraph, which starts with whitespace, a quotation after a lost passage that goes on
+# after a note with a quotation of its own
+_CITATA_WORK = _COMMENTARIUS_WORK._replace(expansions={21: 'locūtus', 23: 'es'},
+                                           unsettled_printed_marks={26: process_work.UnsettledMark.APOSTROPHE},
+                                           quotations_inside_printed_marks={7: False, 31: True})
+
+
+def _process_citata(monkeypatch, output_dir, work=_CITATA_WORK):
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+    process_work.process_verse(_CITATA, output_dir, work)
+
+
+@pytest.fixture
+def citata(monkeypatch, tmp_path) -> _CheckedRows:
+    _process_citata(monkeypatch, tmp_path)
+    return _checked_rows(tmp_path)
+
+
+def test_a_tagged_quotation_gets_the_work_s_marks_and_printed_marks_become_typographic_and_apostrophes_straight(
+        citata):
+    subdivisions, contents, _ = citata
+
+    assert [subdivision["name"] for subdivision in subdivisions if subdivision["typ"] == "PARA"] == [
+        "“Feliciter!” succlamans, dixit “ave” et.", "“Suspiciones ‘te’ ne dicat.” Locutu's, talin' iam.",
+        "“Ait ‘iam’ et.”", "Dixit  “vale et abiit.”"]
+    assert [token["word"] for token in contents if token["tokenType"] == int(TokenType.PUNCTUATION)] == [
+        "“", "!", "”", ",", "“", "”", ".", "“", "‘", "’", ".", "”", "'", ",", "'", ".", "“", "‘", "’", ".", "”",
+        "“", "‘", "’", "”", "“", ".", "”"]
+    assert _citata_paragraph_and_gap_errors(*citata) == []
+
+
+def test_a_title_s_marks_are_in_the_name_of_its_division_too_and_a_note_s_quotation_is_in_no_chain(citata):
+    subdivisions, _, supplementary = citata
+
+    assert [(subdivision["typ"], subdivision["name"]) for subdivision in subdivisions
+            if subdivision["typ"] in ("CHAP", "TITL") and not pd.isnull(subdivision["name"])] == [
+        ("CHAP", "Dicta “alia ‘vera’”"), ("TITL", "Dicta “alia ‘vera’”")]
+    assert [entry["val"] for entry in supplementary if entry["typ"] == "NOTE"] == ["Cf. salve."]
+
+
+def test_a_work_whose_configuration_doesnt_say_what_a_printed_mark_is_raises_and_writes_nothing(monkeypatch,
+                                                                                                 tmp_path):
+    with pytest.raises(ValueError, match=re.escape(
+            f"{_CITATA_WORK.edition_urn} 1.1.2: unsettled_printed_marks must say whether the ' at idx 26, in "
+            f"\"Locutu's, talin' iam.\", opens, closes or is an apostrophe")):
+        _process_citata(monkeypatch, tmp_path, _CITATA_WORK._replace(unsettled_printed_marks={}))
+    assert not any(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("mark", ['«', '»', '„', '`'])
+def test_a_mark_that_no_edition_prints_fails_the_work_and_writes_nothing(monkeypatch, tmp_path, mark):
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+
+    with pytest.raises(ValueError, match=re.escape(
+            f"{_CITATA_WORK.edition_urn} 1.2.1: the {mark} at idx 46, in 'Dixit pristina{mark} fortunae', is a "
+            f"mark that no edition prints")):
+        process_work.process_verse(_CITATA.replace('Dixit <gap', f'Dixit pristina{mark} fortunae <gap'), tmp_path,
+                                   _CITATA_WORK)
+    assert not any(tmp_path.iterdir())
+
+
+def _citata_paragraph_and_gap_errors(subdivisions, contents, supplementary) -> list:
+    errors = []
+    process_work.validate_gap_tags(errors, _CITATA, subdivisions, contents, supplementary)
+    process_work.validate_p_tags(errors, _CITATA, subdivisions, contents, _CITATA_WORK)
+    return errors
+
+
+# A quotation that goes on in the next section, after a heading in another language with a quotation of its own
+_CONTINUATA = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Continuata</title><author>Fictor</author></titleStmt>
+  </fileDesc></teiHeader>
+  <text><body><div type="edition"><div type="textpart" subtype="book" n="1">
+    <div type="textpart" subtype="chapter" n="1">
+      <div type="textpart" subtype="section" n="1"><p>Ait <q>ave</q> et.</p></div>
+      <div type="textpart" subtype="section" n="2">
+        <head xml:lang="eng">The <q>second</q></head>
+        <p><q rend="merge">vale</q> inquit.</p>
+      </div>
+    </div>
+  </div></div></body></text>
+</TEI>"""
+
+
+def test_a_quotation_in_a_heading_in_another_language_is_in_no_chain_of_the_checks_either(monkeypatch, tmp_path):
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+    process_work.process_verse(_CONTINUATA, tmp_path, _COMMENTARIUS_WORK)
+    subdivisions, contents, supplementary = _checked_rows(tmp_path)
+    errors = []
+
+    process_work.validate_gap_tags(errors, _CONTINUATA, subdivisions, contents, supplementary)
+    process_work.validate_p_tags(errors, _CONTINUATA, subdivisions, contents, _COMMENTARIUS_WORK)
+
+    assert [subdivision["name"] for subdivision in subdivisions if subdivision["typ"] == "PARA"] == [
+        "Ait “ave et.", "vale” inquit."]
+    assert errors == []
+
+
+def _first_paragraph_renamed(subdivisions, to):
+    return [dict(subdivision, name=to) if subdivision["name"] == "“Feliciter!” succlamans, dixit “ave” et."
+            else subdivision for subdivision in subdivisions]
+
+
+@pytest.mark.parametrize("damage", [
+    lambda subdivisions, contents: (
+        _first_paragraph_renamed(subdivisions, to="Feliciter!” succlamans, dixit “ave” et."), contents[1:]),
+    lambda subdivisions, contents: (
+        _first_paragraph_renamed(subdivisions, to="““Feliciter!” succlamans, dixit “ave” et."), contents),
+    lambda subdivisions, contents: (
+        _first_paragraph_renamed(subdivisions, to="“Feliciter!” succlamans, dixit “ave et”."), contents),
+    lambda subdivisions, contents: (
+        _first_paragraph_renamed(subdivisions, to="‘Feliciter!” succlamans, dixit “ave” et."),
+        [{**contents[0], "word": "‘"}, *contents[1:]]),
+    lambda subdivisions, contents: (subdivisions, [{**contents[0], "idx": len(contents)}, *contents]),
+], ids=["a mark lost", "a mark added", "a mark moved", "a mark of the wrong style", "a mark's token added"])
+def test_validation_refuses_quotation_marks_that_the_walker_lost_added_moved_or_gave_the_wrong_style(citata, damage):
+    subdivisions, contents, supplementary = citata
+    damaged_subdivisions, damaged_contents = damage(subdivisions, contents)
+
+    assert _citata_paragraph_and_gap_errors(damaged_subdivisions, damaged_contents, supplementary) != []
+
+
+@pytest.mark.parametrize("damage", [
+    lambda contents: [token for token in contents if token["word"] != "“"],
+    lambda contents: [*contents, {"idx": len(contents), "word": "“"}],
+], ids=["a mark's token lost", "a mark's token added"])
+def test_validation_refuses_a_verse_whose_marks_the_walker_lost_or_added(structures, damage):
+    subdivisions, contents, _ = _checked_rows(structures)
+    errors = []
+
+    process_work.validate_p_tags(errors, _STRUCTURES, subdivisions, damage(contents), _CARMEN_WORK)
+
+    assert errors != []
 
 
 def _subdivisions(*rows):

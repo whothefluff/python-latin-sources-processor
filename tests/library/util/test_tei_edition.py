@@ -4,8 +4,8 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from scripts.library.util.tei_edition import (Division, EditorialMark, Expansion, LemmaMatch, LostPassage, Note,
-                                              Numeral, TextBlock, read_edition)
+from scripts.library.util.tei_edition import (AddedQuotationMark, Division, EditorialMark, Expansion, LemmaMatch,
+                                              LostPassage, Note, Numeral, TextBlock, read_edition)
 
 _BOOKS_AND_POEMS = ('book', 'poem')
 _POEMS = ('poem',)
@@ -47,12 +47,15 @@ def _notes(notes) -> tuple:
     return tuple(Note(note) if isinstance(note, str) else note for note in notes)
 
 
-def _verse(n: str, reference: str, *pieces, deleted=False, notes=(), marks=(), expansions=()) -> TextBlock:
-    return TextBlock('VERS', n, reference, pieces, deleted, _notes(notes), marks, (), expansions)
+def _verse(n: str, reference: str, *pieces, deleted=False, notes=(), marks=(), expansions=(),
+           added_quotation_marks=()) -> TextBlock:
+    return TextBlock('VERS', n, reference, pieces, deleted, _notes(notes), marks, (), expansions,
+                     added_quotation_marks)
 
 
-def _paragraph(reference: str, *pieces, notes=(), marks=(), numerals=()) -> TextBlock:
-    return TextBlock('PARA', None, reference, pieces, False, _notes(notes), marks, numerals)
+def _paragraph(reference: str, *pieces, notes=(), marks=(), numerals=(), added_quotation_marks=()) -> TextBlock:
+    return TextBlock('PARA', None, reference, pieces, False, _notes(notes), marks, numerals, (),
+                     added_quotation_marks)
 
 
 def _title(reference: str, text: str) -> TextBlock:
@@ -119,8 +122,44 @@ def test_quotations_milestones_and_notes_inside_a_verse_leave_the_text_around_th
                                   '</l><l n="12"><quote n="inscription">DAPHNIS EGO</quote></l>'))
 
     assert read_edition(edition, _POEMS, {}) == (
-        Division('POEM', '2', (_verse('11', '2.11', 'Tam gratum est mihi quam ferunt', notes=('Quoted.', 'A note.')),
+        Division('POEM', '2', (_verse('11', '2.11', 'Tam “gratum “est”” mihi quam ferunt', notes=('Quoted.', 'A note.'),
+                                      added_quotation_marks=(AddedQuotationMark(True, None, 0, 4, 5),
+                                                             AddedQuotationMark(True, None, 0, 12, 13),
+                                                             AddedQuotationMark(False, None, 0, 16, 17),
+                                                             AddedQuotationMark(False, None, 0, 17, 18))),
                                _verse('12', '2.12', 'DAPHNIS EGO')), ()),)
+
+
+def test_a_quotation_that_merge_continues_goes_on_with_the_last_chain_in_the_chain_that_holds_it():
+    edition = _edition(_poem('67', '<l n="36"><q rend="single">cum illa,</q></l>'
+                                   '<l n="37"><q rend="single; merge">dixerit hic, <q rend="double">quid nosti,</q></q>'
+                                   '</l><l n="38"><q rend="single; merge"><q rend="double; merge">cui licet,</q></q>'
+                                   '</l>'))
+
+    assert read_edition(edition, _POEMS, {}) == (Division('POEM', '67', (
+        _verse('36', '67.36', '“cum illa,', added_quotation_marks=(AddedQuotationMark(True, 'single', 0, 0, 1),)),
+        _verse('37', '67.37', 'dixerit hic, “quid nosti,',
+               added_quotation_marks=(AddedQuotationMark(True, 'double', 0, 13, 14),)),
+        _verse('38', '67.38', 'cui licet,””', added_quotation_marks=(AddedQuotationMark(False, None, 0, 10, 11),
+                                                                      AddedQuotationMark(False, None, 0, 11, 12)))),
+        ()),)
+
+
+def test_a_quotation_that_merge_continues_after_no_quotation_raises():
+    edition = _edition(_poem('1', '<l n="1"><q rend="merge">Haud incerta cano.</q></l>'))
+
+    with pytest.raises(ValueError, match='the edition > poem 1 > l 1 holds a <q rend="merge"> that continues no '
+                                         'quotation before it'):
+        read_edition(edition, _POEMS, {})
+
+
+def test_a_quotation_in_a_heading_in_another_language_is_in_no_chain():
+    edition = _edition(_poem('62', '<lg><head xml:lang="eng">The <q>Youths</q></head>'
+                                   '<l n="1"><q rend="merge">Vesper adest</q></l></lg>'))
+
+    with pytest.raises(ValueError, match='the edition > poem 62 > lg > l 1 holds a <q rend="merge"> that continues no '
+                                         'quotation before it'):
+        read_edition(edition, _POEMS, {})
 
 
 def test_a_lost_passage_is_where_the_edition_marks_it():
@@ -318,8 +357,11 @@ def test_titles_and_paragraphs_read_what_verses_read():
         Division('POEM', '1', (
             TextBlock('TITL', None, '1', ('Roma ', LostPassage('lost'), ' est'), False, (),
                       (EditorialMark('addition', 2, 1, 4),)),
-            _paragraph('1', 'Fabula docet hominem bene.', notes=('Nota.',),
-                       marks=(EditorialMark('deletion', 0, 21, 25),))), ()),
+            _paragraph('1', 'Fabula “docet” hominem bene.', notes=('Nota.',),
+                       marks=(EditorialMark('deletion', 0, 23, 27),),
+                       added_quotation_marks=(AddedQuotationMark(True, None, 0, 7, 8),
+                                              AddedQuotationMark(False, None, 0, 13, 14)))),
+                 ()),
         Division('POEM', '2', (TextBlock('PARA', None, '2', ('Fabula docet.',), True, ()),), ()))
 
 
@@ -338,8 +380,9 @@ def test_an_editorial_mark_around_a_page_break_and_a_quotation_is_one_mark():
     edition = _edition(_poem('1', '<p>tum <add>ma<pb n="2"/>gis <q>ait</q></add> ille</p>'))
 
     assert read_edition(edition, _POEMS, {}) == (
-        Division('POEM', '1', (_paragraph('1', 'tum magis ait ille', marks=(EditorialMark('addition', 0, 4, 13),)),),
-                 ()),)
+        Division('POEM', '1', (_paragraph('1', 'tum magis “ait” ille', marks=(EditorialMark('addition', 0, 4, 15),),
+                                          added_quotation_marks=(AddedQuotationMark(True, None, 0, 10, 11),
+                                                                 AddedQuotationMark(False, None, 0, 14, 15))),), ()),)
 
 
 def test_typography_in_capitals_is_read_as_its_text_and_a_line_break_between_speeches_is_left_out():

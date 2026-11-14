@@ -69,6 +69,19 @@ In `work_contents.csv`, every chunk of text is assigned a `tokenType`:
 * Annotations that span ranges of text (like `<note>`, `<del>`, or `<gap>`) and that are stored in
   `work_content_supplementary.csv` may or may not be accompanied by editorial tokens.
 
+**Quotation Marks and Apostrophes:** Each is a punctuation token of its own, but for the apostrophe of an abbreviation
+such as `M'.`, which is in its token. Quotation marks are typographic, “ ” ‘ ’, and every apostrophe is the straight
+`'`: `locutu's`, `talin'`. A quotation that the edition tags gets marks of the work's pair, and of the other pair inside
+another quotation.
+
+A note's text, in `work_content_supplementary.csv`, is kept as the edition prints it: a straight `"` or `'` stays
+straight, and a `<q>` in a note gets no marks (`originally <q>first-fruits.</q>` is stored `originally first-fruits.`).
+Why: nothing splits a note into tokens or reads its marks, so a straight mark there changes nothing but how it looks;
+and the rules above don't fit notes, many of them in the editor's English, whose possessives (`Slater's note`, `Pol.'s
+reading`) put a `'` after a letter, where only an answer by hand tells an apostrophe from a closing mark. In
+canonical-latinLit @ `95be52a`, 358 of the 126,501 notes in the Latin editions have a straight mark, and 154 hold a
+`<q>`. Marks for them wait for a use of notes that needs them.
+
 **Indexing & Casing Rules:**
 
 * `wordIdx` increments if and ONLY if `tokenType <= 3`. Punctuation and editorial marks export a null/empty `wordIdx`.

@@ -2,6 +2,7 @@
 # both in comments and code. Any other kind of uncertainty should be described with different words
 
 import base64
+import itertools
 import json
 import logging
 import os
@@ -15,7 +16,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from functools import cache
 from pathlib import Path
-from typing import Dict, FrozenSet, Iterator, List, NamedTuple, Sequence, Set, Tuple, TypedDict, cast
+from typing import Dict, FrozenSet, Iterator, List, NamedTuple, Sequence, Set, Tuple, TypedDict, Union, cast
 
 import pandas as pd
 
@@ -26,6 +27,9 @@ from scripts.common.services import MACRONIZER_URL, MORPHEUS_URL
 from scripts.library.util.nomina import NOMINA
 from scripts.library.util.proper_noun import (
     is_proper_noun_lemma, compute_inherent_state, compute_context_aware_state, ProperNounState,
+)
+from scripts.library.util.quotation_marks import (
+    MARK_CHARACTERS, AddedMark, Mark, PrintedMark, UnsettledMark, characters,
 )
 from scripts.library.util.spelling import (
     LetterConvention, differs_in_told_apart_letters, has_the_letters_of, projected_macronization, respell,
@@ -84,6 +88,10 @@ class WorkConfiguration(NamedTuple):
     expansions: Dict[int, str]
     #: Macronizations of words printed short, by token index, where their expansion can't give them
     printed_macronizations: Dict[int, str]
+    #: What each is, by token index: a printed straight mark or ’ that the characters around it don't settle
+    unsettled_printed_marks: Dict[int, UnsettledMark]
+    #: Whether tagged quotations are inside a printed mark that code can't follow, by their opening mark's index
+    quotations_inside_printed_marks: Dict[int, bool]
     #: Proper-noun states by token index, where the script's own would be wrong
     proper_noun_overrides: Dict[int, ProperNounState | None]
     author_abbreviations: Tuple[str, ...]
@@ -672,6 +680,18 @@ def _positions_of_contractions(segments: List[_Segment], first_position: int) ->
             and word.end == apostrophe.start and apostrophe.end == s.start]
 
 
+def _words_around(text: str, start: int, end: int) -> str:
+    """Returns text[start:end] with the rest of the word that holds it, and the word before and the word after"""
+    before = cast(re.Match[str], re.search(r'(\S+\s+)?\S*$', text[:start])).group()
+    after = cast(re.Match[str], re.match(r'\S*(\s+\S+)?', text[end:])).group()
+    return ' '.join((before + text[start:end] + after).split())
+
+
+class _TokenRange(NamedTuple):
+    first: int
+    last: int
+
+
 @dataclass
 class _Numbering:
     """The rows of a work's tokens, subdivisions and supplementary entries, numbered in reading order"""
@@ -680,8 +700,11 @@ class _Numbering:
     contents: List[list] = field(default_factory=list)
     subdivisions: List[list] = field(default_factory=list)
     supplementary: List[list] = field(default_factory=list)
-    #: The text of each block, as the macronizer gets it
-    lines_for_macronizer: List[str] = field(default_factory=list)
+    token_ranges_of_blocks: List[_TokenRange] = field(default_factory=list)
+    marks: List[Mark] = field(default_factory=list)
+    places_in_names_by_mark: Dict[int, List[Tuple[list, int]]] = field(default_factory=dict)
+    rows_named_by_title: Dict[int, list] = field(default_factory=dict)
+    enclosing_textpart_ids: List[str] = field(default_factory=list)
     inherent_states: Dict[str, ProperNounState | None] = field(default_factory=dict)
     next_index: int = 0
     #: Tracks sentences across the whole work, incremented to 0 on the first real sentence
@@ -722,9 +745,16 @@ class _Numbering:
         row = [self.work_id, self.node_of(path), division.typ, cnt, title.printed_text if title else None,
                self.node_of(parent_path), from_index, None, division.edition_label]
         self.subdivisions.append(row)
+        if title is not None:
+            self.rows_named_by_title[id(title)] = row
         if division.typ in ('POEM', 'PROL', 'EPIL'):
             self.next_block_starts_sentence = True
+        is_textpart = division.typ not in ('LGRP', 'SPCH')
+        if is_textpart:
+            self.enclosing_textpart_ids.append(cast(str, self.node_of(path)))
         self.add_parts(division.parts, division, path)
+        if is_textpart:
+            self.enclosing_textpart_ids.pop()
         to_index = self.next_index - 1  # its last token
         row[7] = to_index
         for note in division.notes:
@@ -742,6 +772,8 @@ class _Numbering:
         covered_by_note_index: Dict[int, List[int]] = {}
         edition_expansions_and_positions: List[Tuple[str, List[int]]] = []
         contraction_positions: List[int] = []
+        place_in_printed_text_by_mark: Dict[int, int] = {}
+        printed_so_far = 0
         for index, piece in enumerate(block.pieces):
             if isinstance(piece, LostPassage):
                 segments.append(None)
@@ -770,6 +802,27 @@ class _Numbering:
                 edition_expansions_and_positions.append((expansion.text, _positions_of_segments_overlapping(
                     piece_segments, expansion.start, expansion.end, first_position=len(segments))))
             contraction_positions.extend(_positions_of_contractions(piece_segments, first_position=len(segments)))
+            added_by_position = {_positions_of_segments_overlapping(piece_segments, mark.start, mark.end,
+                                                                    first_position=0)[0]: mark
+                                 for mark in block.added_quotation_marks if mark.piece == index}
+            for position, segment in enumerate(piece_segments):
+                added = added_by_position.get(position)
+                if added is not None or segment.text in MARK_CHARACTERS:
+                    idx = self.next_index + len(segments) + position
+                    textpart_id, reference = self.enclosing_textpart_ids[-1], block.reference
+                    words_around = _words_around(piece, segment.start, segment.end)
+                    self.marks.append(
+                        AddedMark(
+                            idx=idx, opens=added.opens, pair_by_rend=added.pair_by_rend, textpart_id=textpart_id,
+                            reference=reference, words_around=words_around) if added is not None
+                        else PrintedMark(
+                            idx=idx, character=segment.text,
+                            character_before=piece[segment.start - 1:segment.start],
+                            character_after=piece[segment.end:segment.end + 1],
+                            is_contraction_apostrophe=len(segments) + position - 1 in contraction_positions,
+                            textpart_id=textpart_id, reference=reference, words_around=words_around))
+                    place_in_printed_text_by_mark[idx] = printed_so_far + segment.start
+            printed_so_far += len(piece)
             printed_words = [cast(str, normalize_digraphs(segment.text)) for segment in piece_segments]
             segments.extend(self.work.spellings_by_printed_word.get(printed, without_ictus_marks(printed))
                             for printed in printed_words)
@@ -783,9 +836,14 @@ class _Numbering:
                 self.add_supplementary("GAP", first + position, first + position, next(lost_passages).reason)
         for note, from_position, to_position in marked:
             self.add_supplementary("NOTE", first + from_position, first + to_position, note)
-        self.subdivisions.append([self.work_id, self.node_of(path), block.typ, cnt, block.text or None,
-                                  self.node_of(parent_path), first, last, block.edition_label])
-        self.lines_for_macronizer.append(' '.join(segment for segment in segments if segment))
+        row = [self.work_id, self.node_of(path), block.typ, cnt, block.text or None, self.node_of(parent_path),
+               first, last, block.edition_label]
+        self.subdivisions.append(row)
+        self.token_ranges_of_blocks.append(_TokenRange(first, last))
+        stripped = len(block.printed_text) - len(block.printed_text.lstrip())
+        for idx, place in place_in_printed_text_by_mark.items():
+            self.places_in_names_by_mark[idx] = [(row, place - stripped)] + (
+                [(self.rows_named_by_title[id(block)], place)] if id(block) in self.rows_named_by_title else [])
         starts_new_sentence = self.starts_new_sentence or self.next_block_starts_sentence or block.typ == 'TITL'
         self.next_block_starts_sentence = False
         self.next_index, self.sentence_idx, self.word_idx, _, self.starts_new_sentence = _process_text_segments(
@@ -859,6 +917,21 @@ class _Numbering:
                     f"but only the two words of a contraction take one, as the locutu and the s of locutu's "
                     f"(locutus es)")
 
+    def give_marks_their_characters(self):
+        """In their tokens and in the names that hold them, adding the configuration's problems with them"""
+        found, problems = characters(self.marks, self.work.unsettled_printed_marks,
+                                     self.work.quotations_inside_printed_marks, self.work.edition_urn)
+        self.configuration_problems.extend(problems)
+        for idx, character in found.items():
+            self.contents[idx][2] = character
+            for row, position in self.places_in_names_by_mark[idx]:
+                row[4] = row[4][:position] + character + row[4][position + 1:]
+
+    def lines_for_macronizer(self) -> List[str]:
+        """Returns the text of each block, as the macronizer gets it"""
+        return [' '.join(row[2] for row in self.contents[token_range.first:token_range.last + 1] if row[2])
+                for token_range in self.token_ranges_of_blocks]
+
     def add_supplementary(self, typ: str, from_index: int, to_index: int, val: str):
         self.supplementary.append([self.work_id, typ, self.supplementary_counts[typ], from_index, to_index, val])
         self.supplementary_counts[typ] += 1
@@ -929,6 +1002,7 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
 
     numbering = _Numbering(work_id, work)
     numbering.add_parts(read_edition(root, work.cited_division_subtypes, work.types_by_n), None, None)
+    numbering.give_marks_their_characters()
     problems = numbering.configuration_problems
     _raise_for_problems(problems)
     macronizations_of_words_printed_short = {
@@ -941,7 +1015,7 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
     work_contents_data = numbering.contents
     work_content_subdivisions_data = numbering.subdivisions
     work_content_supplementary_data = numbering.supplementary
-    lines_for_macronizer = numbering.lines_for_macronizer
+    lines_for_macronizer = numbering.lines_for_macronizer()
     inherent_states = numbering.inherent_states
 
     # Titles repeat their tokens' text
@@ -1154,7 +1228,8 @@ def validate_csv_files(xml_string, output_dir, work: WorkConfiguration):
     validate_gap_tags(errors, xml_string, work_content_subdivisions_df.to_dict('records'),
                       work_contents_df.to_dict('records'),
                       work_content_supplementary_df.to_dict('records'))
-    validate_p_tags(errors, xml_string, work_content_subdivisions_df.to_dict('records'))
+    validate_p_tags(errors, xml_string, work_content_subdivisions_df.to_dict('records'),
+                    work_contents_df.to_dict('records'), work)
     check_proper_noun_states(errors, work_contents_df)
     check_macronization_coverage(errors, work_contents_df, work_macronizations_df, unambiguous_macronizations_df)
     check_masks_within_their_words(errors, work_macronizations_df)
@@ -1309,6 +1384,7 @@ def check_contents_not_empty_when_supp_not_empty(errors, work_contents_df, work_
 
 
 _TEI = '{' + TEI_NAMESPACE + '}'
+_XML_LANG = '{http://www.w3.org/XML/1998/namespace}lang'
 _TAGS_LEFT_OUT_OF_THE_TEXT = (f'{_TEI}note', f'{_TEI}expan')
 
 
@@ -1326,14 +1402,239 @@ def _body_elements_outside_notes(root: ET.Element, tag: str) -> List[ET.Element]
             for element in _elements_outside_notes(body) if element.tag == f'{_TEI}{tag}']
 
 
-def _expected_text(element: ET.Element) -> str:
-    """Reads the element by the checks' own rules, not by the walker's code, so that they don't share its mistakes.
-    A <choice> holds only its readings, so the whitespace between them isn't text"""
+class _ExpectedAddedMark(NamedTuple):
+    """A mark that the checks add before or after a chain of <q>s, as the producer does"""
+    opens: bool
+    pair_by_rend: str | None
+
+
+@dataclass(frozen=True)
+class _ExpectedLostPassage:
+    pass
+
+
+class _QuotationChains(NamedTuple):
+    """By id: the <q>s that open a chain, with the pair that its rend gives, and those that close one"""
+    opening: Dict[int, str | None]
+    closing: Set[int]
+
+
+_ExpectedItem = Union[str, _ExpectedAddedMark, _ExpectedLostPassage]
+
+
+def _expected_items(element: ET.Element, chains: _QuotationChains) -> List[_ExpectedItem]:
+    """Reads the element by the checks' own rules, not by the walker's code, so that they don't share its mistakes,
+    a character at a time, with the marks around each chain of <q>s. A <choice> holds only its readings, so the
+    whitespace between them isn't text"""
     if element.tag in _TAGS_LEFT_OUT_OF_THE_TEXT:
-        return ''
+        return []
+    if element.tag == f'{_TEI}gap':
+        return [_ExpectedLostPassage()]
     if element.tag == f'{_TEI}choice':
-        return ''.join(_expected_text(reading) for reading in element)
-    return (element.text or '') + ''.join(_expected_text(child) + (child.tail or '') for child in element)
+        return [item for reading in element for item in _expected_items(reading, chains)]
+    items: List[_ExpectedItem] = list(element.text or '')
+    for child in element:
+        items += [*_expected_items(child, chains), *(child.tail or '')]
+    if element.tag == f'{_TEI}q':
+        opening = [_ExpectedAddedMark(True, chains.opening[id(element)])] if id(element) in chains.opening else []
+        closing = [_ExpectedAddedMark(False, None)] if id(element) in chains.closing else []
+        items = [*opening, *items, *closing]
+    return items
+
+
+def _quotation_chains(body: ET.Element) -> _QuotationChains:
+    """Returns the body's chains of <q>s outside notes: a <q> whose rend has merge goes on with the last in the chain
+    that holds it"""
+    opening: Dict[int, str | None] = {}
+    last_chains: Dict[int | None, int] = {}
+    last_elements: Dict[int, int] = {}
+
+    def visit(element: ET.Element, holder: int | None):
+        for child in element:
+            rend = child.get('rend') or ''
+            if child.tag == f'{_TEI}q':
+                chain = last_chains.get(holder, id(child)) if re.search(r'\bmerge\b', rend) else id(child)
+                if chain == id(child):
+                    opening[chain] = 'single' if re.search(r'\bsingle\b', rend) else \
+                        'double' if re.search(r'\bdouble\b', rend) else None
+                last_chains[holder] = chain
+                last_elements[chain] = id(child)
+                visit(child, chain)
+            elif child.tag not in _TAGS_LEFT_OUT_OF_THE_TEXT \
+                    and not (child.tag == f'{_TEI}head' and child.get(_XML_LANG, 'lat') != 'lat'):
+                visit(child, holder)
+
+    visit(body, None)
+    return _QuotationChains(opening, set(last_elements.values()))
+
+
+class _ExpectedBlock(NamedTuple):
+    """A verse, paragraph, Latin title or speaker, as the checks read it"""
+    element: ET.Element
+    div_id: int | None
+    items: List[_ExpectedItem]
+
+
+def _blocks_outside_notes(body: ET.Element) -> Iterator[Tuple[ET.Element, int | None]]:
+    """Yields each verse, paragraph, Latin title and speaker with the id of the <div> that holds it"""
+    def walk(element: ET.Element, div_id: int | None) -> Iterator[Tuple[ET.Element, int | None]]:
+        for child in element:
+            is_heading = child.tag == f'{_TEI}head'
+            is_block = child.tag in (f'{_TEI}l', f'{_TEI}p', f'{_TEI}speaker') or is_heading \
+                and child.get(_XML_LANG, 'lat') == 'lat' and element.get('type') != 'edition'
+            if is_block:
+                yield child, div_id
+            elif child.tag != f'{_TEI}note' and not is_heading:
+                yield from walk(child, id(child) if child.tag == f'{_TEI}div' else div_id)
+    return walk(body, None)
+
+
+_MARK_CHARACTERS = '“”‘’"\''
+_MARK_PAIRS = {'double': '“”', 'single': '‘’'}
+_INNER_MARK_PAIRS = {'double': 'single', 'single': 'double'}
+
+
+class _MarkPlace(NamedTuple):
+    block: int
+    position: int
+
+
+class _ExpectedQuotationMark(NamedTuple):
+    pair: str
+    opens: bool
+
+
+@dataclass(frozen=True)
+class _ExpectedApostrophe:
+    pass
+
+
+_ExpectedReading = Union[_ExpectedQuotationMark, _ExpectedApostrophe]
+
+
+def _expected_texts(root: ET.Element, contents: List[dict], work: WorkConfiguration,
+                    errors: List[str]) -> Dict[int, str]:
+    """Returns each block's text by its element's id. The marks are matched in order with the contents' mark tokens,
+    whose indexes the answers use, and an error says if their counts differ"""
+    texts: Dict[int, str] = {}
+    for body in root.iterfind(f'{_TEI}text/{_TEI}body'):
+        chains = _quotation_chains(body)
+        blocks = [_ExpectedBlock(element, div_id, _expected_items(element, chains)) for element, div_id in
+                  _blocks_outside_notes(body)]
+        mark_places = [_MarkPlace(block, position) for block, expected_block in enumerate(blocks)
+                       for position in _mark_positions(expected_block.items)]
+        mark_token_idxs = [int(token['idx']) for token in contents if isinstance(token['word'], str)
+                           and len(token['word']) == 1 and token['word'] in _MARK_CHARACTERS]
+        if len(mark_places) != len(mark_token_idxs):
+            errors.append(f"The edition's text has {len(mark_places)} quotation marks and apostrophes, and the "
+                          f"contents {len(mark_token_idxs)}.")
+        mark_characters = _expected_mark_characters(blocks, mark_places, mark_token_idxs, work, errors) \
+            if len(mark_places) == len(mark_token_idxs) else {}
+        texts.update((id(expected_block.element),
+                      ''.join(mark_characters.get(_MarkPlace(block, position), item if isinstance(item, str) else '')
+                              for position, item in enumerate(expected_block.items)))
+                     for block, expected_block in enumerate(blocks))
+    return texts
+
+
+def _mark_positions(items: List[_ExpectedItem]) -> List[int]:
+    """Leaves out the apostrophe of an abbreviation such as M', which is in its token"""
+    text = ''.join(item if isinstance(item, str) else ' ' for item in items)
+    in_abbreviations = {match.start() + offset for abbreviation in KNOWN_ABBREVIATIONS if "'" in abbreviation
+                        for match in re.finditer(rf'(?<!\w){re.escape(abbreviation)}\.', text)
+                        for offset, character in enumerate(abbreviation) if character == "'"}
+    return [position for position, item in enumerate(items)
+            if isinstance(item, _ExpectedAddedMark) or isinstance(item, str) and item in _MARK_CHARACTERS
+            and position not in in_abbreviations]
+
+
+def _expected_mark_characters(blocks: List[_ExpectedBlock], mark_places: List[_MarkPlace],
+                              mark_token_idxs: List[int], work: WorkConfiguration,
+                              errors: List[str]) -> Dict[_MarkPlace, str]:
+    """Returns each mark's character by its place: a printed one as it reads, and an added one in the work's pair, or
+    the other pair inside a quotation"""
+    readings = {place: _reading_of_printed_mark(blocks[place.block].items, place.position,
+                                                work.unsettled_printed_marks.get(idx), idx, errors)
+                for place, idx in zip(mark_places, mark_token_idxs)
+                if isinstance(blocks[place.block].items[place.position], str)}
+    openings: Dict[str, float] = defaultdict(float)
+    for place in mark_places:
+        item, reading = blocks[place.block].items[place.position], readings.get(place)
+        if isinstance(item, _ExpectedAddedMark):
+            pair_by_rend = item.pair_by_rend
+            if item.opens and pair_by_rend is not None:
+                openings[pair_by_rend] += 1
+        elif isinstance(reading, _ExpectedQuotationMark) and item in ('"', "'"):
+            openings[reading.pair] += 0.5
+        elif isinstance(reading, _ExpectedQuotationMark) and item in ('“', '‘'):
+            openings[reading.pair] += 1
+    work_pair = max(openings, key=lambda pair: openings[pair]) if openings else 'double'
+    found: Dict[_MarkPlace, str] = {}
+    printed_double_marks_open = 0
+    open_chain_pairs: List[str] = []
+    unfollowed_pair_by_div_id: Dict[int | None, str] = {}
+    for place, idx in zip(mark_places, mark_token_idxs):
+        div_id, items = blocks[place.block].div_id, blocks[place.block].items
+        item, reading = items[place.position], readings.get(place)
+        if isinstance(item, _ExpectedAddedMark) and item.opens:
+            inside = not open_chain_pairs and div_id in unfollowed_pair_by_div_id \
+                and work.quotations_inside_printed_marks.get(idx)
+            holder = open_chain_pairs[-1] if open_chain_pairs \
+                else unfollowed_pair_by_div_id[div_id] if inside \
+                else 'double' if printed_double_marks_open else None
+            open_chain_pairs.append(_INNER_MARK_PAIRS[holder] if holder is not None else work_pair)
+            found[place] = _MARK_PAIRS[open_chain_pairs[-1]][0]
+        elif isinstance(item, _ExpectedAddedMark):
+            found[place] = _MARK_PAIRS[open_chain_pairs.pop()][1]
+        else:
+            found[place] = _MARK_PAIRS[reading.pair][0 if reading.opens else 1] \
+                if isinstance(reading, _ExpectedQuotationMark) else "'"
+        if item == '“':
+            printed_double_marks_open += 1
+        elif item == '”':
+            printed_double_marks_open -= 1
+        elif isinstance(reading, _ExpectedQuotationMark) and item in ('‘', '"', "'", '’') and \
+                (item != '’' or not _character_at(items, place.position - 1).isalpha()):
+            unfollowed_pair_by_div_id[div_id] = reading.pair
+    return found
+
+
+def _reading_of_printed_mark(items: List[_ExpectedItem], position: int, answer: UnsettledMark | None, idx: int,
+                             errors: List[str]) -> _ExpectedReading:
+    item = items[position]
+    before, after = _character_at(items, position - 1), _character_at(items, position + 1)
+    letters_before = ''.join(cast(str, character) for character in
+                             itertools.takewhile(lambda character: isinstance(character, str) and
+                                                 re.fullmatch(r'\w', character) is not None,
+                                                 reversed(items[:position])))
+    is_contraction_apostrophe = item in ("'", '’') and letters_before != '' and letters_before.isalpha() and \
+        after == 's' and not _character_at(items, position + 2).isalnum()
+    spaced_before = before == '' or before.isspace()
+    opens = spaced_before and after.isalpha()
+    closes = not spaced_before and (after == '' or not after.isalnum()) and (item == '"' or not before.isalpha())
+    pair = 'double' if item == '"' else 'single'
+    reading: _ExpectedReading
+    if item in ('“', '”', '‘'):
+        reading = {'“': _ExpectedQuotationMark('double', True), '”': _ExpectedQuotationMark('double', False),
+                   '‘': _ExpectedQuotationMark('single', True)}[cast(str, item)]
+    elif is_contraction_apostrophe:
+        reading = _ExpectedApostrophe()
+    elif opens or closes:
+        reading = _ExpectedQuotationMark(pair, opens)
+    elif answer is None:
+        errors.append(f"The {item} at idx {idx} has no answer in unsettled_printed_marks.")
+        reading = _ExpectedApostrophe()
+    elif answer == UnsettledMark.APOSTROPHE:
+        reading = _ExpectedApostrophe()
+    else:
+        reading = _ExpectedQuotationMark(pair, answer == UnsettledMark.OPENS)
+    return reading
+
+
+def _character_at(items: List[_ExpectedItem], position: int) -> str:
+    """Returns '“' for an added mark, which is punctuation, and '' for a lost passage or past an edge"""
+    item = items[position] if 0 <= position < len(items) else None
+    return item if isinstance(item, str) else '“' if isinstance(item, _ExpectedAddedMark) else ''
 
 
 def validate_gap_tags(errors, xml_string, subdivisions, contents, supp_entries):
@@ -1360,11 +1661,13 @@ def validate_gap_tags(errors, xml_string, subdivisions, contents, supp_entries):
                 f"found {len(matching_supp_entries)}")
 
 
-def validate_p_tags(errors, xml_string, subdivisions):
-    p_tags = _body_elements_outside_notes(ET.fromstring(xml_string), 'p')
+def validate_p_tags(errors, xml_string, subdivisions, contents, work: WorkConfiguration):
+    root = ET.fromstring(xml_string)
+    p_tags = _body_elements_outside_notes(root, 'p')
+    texts = _expected_texts(root, contents, work, errors)
     paragraph_names = {subdivision['name'] for subdivision in subdivisions if subdivision['typ'] == 'PARA'}
 
-    if any(_expected_text(p_tag).strip() not in paragraph_names for p_tag in p_tags):
+    if any(texts[id(p_tag)].strip() not in paragraph_names for p_tag in p_tags):
         errors.append("Mismatch between the number of <p> tags and the number of paragraph subdivisions.")
 
 
