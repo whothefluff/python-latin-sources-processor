@@ -79,7 +79,7 @@ ITYPE_POS_NO_DIGITS_END = re.compile( r"\d+$" )
 
 ETYM_CONTENT = re.compile( r"<etym>(.*?)</etym>" )
 
-UNAMBIGUOUS_VIDE = re.compile( r"<lbl>v.</lbl>" )
+CERTAIN_VIDE = re.compile( r"<lbl>v.</lbl>" )
 
 
 def clean_sense( t ):
@@ -279,7 +279,7 @@ def substitute_etym( text ):
 
 
 def substitute_vide( text ):
-    text = UNAMBIGUOUS_VIDE.sub( "see", text )
+    text = CERTAIN_VIDE.sub( "see", text )
     return text
 
 
