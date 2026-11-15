@@ -5,7 +5,7 @@ This script cross-checks a list of lemmas from a formatted text file against a l
 dictionary CSV to verify which lemmas exist in the database.
 
 It specifically targets lines in the text file starting with the ':le:' tag (e.g., ':le:acer').
-It also handles homograph disambiguators by stripping the '#' character before matching
+It also handles homograph numbers by stripping the '#' character before matching
 (e.g., ':le:acer#2' is searched as 'acer2' in the CSV).
 
 Usage:
