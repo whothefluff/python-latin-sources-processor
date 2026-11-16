@@ -1228,7 +1228,7 @@ def validate_csv_files(xml_string, output_dir, work: WorkConfiguration):
     validate_gap_tags(errors, xml_string, work_content_subdivisions_df.to_dict('records'),
                       work_contents_df.to_dict('records'),
                       work_content_supplementary_df.to_dict('records'))
-    validate_p_tags(errors, xml_string, work_content_subdivisions_df.to_dict('records'),
+    validate_blocks(errors, xml_string, work_content_subdivisions_df.to_dict('records'),
                     work_contents_df.to_dict('records'), work)
     check_proper_noun_states(errors, work_contents_df)
     check_macronization_coverage(errors, work_contents_df, work_macronizations_df, unambiguous_macronizations_df)
@@ -1395,11 +1395,10 @@ def _elements_outside_notes(element: ET.Element) -> Iterator[ET.Element]:
             yield from _elements_outside_notes(child)
 
 
-def _body_elements_outside_notes(root: ET.Element, tag: str) -> List[ET.Element]:
-    """Leaves out the header, whose paragraphs aren't the edition's, and notes, whose paragraphs and gaps are part of
-    the note's text"""
+def _gaps_outside_notes(root: ET.Element) -> List[ET.Element]:
+    """Leaves out the header, which isn't the edition's text, and notes, whose gaps are part of the note's text"""
     return [element for body in root.iterfind(f'{_TEI}text/{_TEI}body')
-            for element in _elements_outside_notes(body) if element.tag == f'{_TEI}{tag}']
+            for element in _elements_outside_notes(body) if element.tag == f'{_TEI}gap']
 
 
 class _ExpectedAddedMark(NamedTuple):
@@ -1424,12 +1423,14 @@ _ExpectedItem = Union[str, _ExpectedAddedMark, _ExpectedLostPassage]
 
 def _expected_items(element: ET.Element, chains: _QuotationChains) -> List[_ExpectedItem]:
     """Reads the element by the checks' own rules, not by the walker's code, so that they don't share its mistakes,
-    a character at a time, with the marks around each chain of <q>s. A <choice> holds only its readings, so the
-    whitespace between them isn't text"""
+    a character at a time, with the marks around each chain of <q>s. A line break separates two words. A <choice>
+    holds only its readings, so the whitespace between them isn't text"""
     if element.tag in _TAGS_LEFT_OUT_OF_THE_TEXT:
         return []
     if element.tag == f'{_TEI}gap':
         return [_ExpectedLostPassage()]
+    if element.tag == f'{_TEI}lb':
+        return [' ']
     if element.tag == f'{_TEI}choice':
         return [item for reading in element for item in _expected_items(reading, chains)]
     items: List[_ExpectedItem] = list(element.text or '')
@@ -1512,29 +1513,38 @@ class _ExpectedApostrophe:
 _ExpectedReading = Union[_ExpectedQuotationMark, _ExpectedApostrophe]
 
 
-def _expected_texts(root: ET.Element, contents: List[dict], work: WorkConfiguration,
-                    errors: List[str]) -> Dict[int, str]:
-    """Returns each block's text by its element's id. The marks are matched in order with the contents' mark tokens,
-    whose indexes the answers use, and an error says if their counts differ"""
-    texts: Dict[int, str] = {}
+class _ExpectedBlockText(NamedTuple):
+    element: ET.Element
+    text: str
+
+
+def _expected_blocks(root: ET.Element) -> List[_ExpectedBlock]:
+    blocks: List[_ExpectedBlock] = []
     for body in root.iterfind(f'{_TEI}text/{_TEI}body'):
         chains = _quotation_chains(body)
-        blocks = [_ExpectedBlock(element, div_id, _expected_items(element, chains)) for element, div_id in
-                  _blocks_outside_notes(body)]
-        mark_places = [_MarkPlace(block, position) for block, expected_block in enumerate(blocks)
-                       for position in _mark_positions(expected_block.items)]
-        mark_token_idxs = [int(token['idx']) for token in contents if isinstance(token['word'], str)
-                           and len(token['word']) == 1 and token['word'] in _MARK_CHARACTERS]
-        if len(mark_places) != len(mark_token_idxs):
-            errors.append(f"The edition's text has {len(mark_places)} quotation marks and apostrophes, and the "
-                          f"contents {len(mark_token_idxs)}.")
-        mark_characters = _expected_mark_characters(blocks, mark_places, mark_token_idxs, work, errors) \
-            if len(mark_places) == len(mark_token_idxs) else {}
-        texts.update((id(expected_block.element),
-                      ''.join(mark_characters.get(_MarkPlace(block, position), item if isinstance(item, str) else '')
-                              for position, item in enumerate(expected_block.items)))
-                     for block, expected_block in enumerate(blocks))
-    return texts
+        blocks += [_ExpectedBlock(element, div_id, _expected_items(element, chains))
+                   for element, div_id in _blocks_outside_notes(body)]
+    return blocks
+
+
+def _mark_places(blocks: List[_ExpectedBlock]) -> List[_MarkPlace]:
+    return [_MarkPlace(block, position) for block, expected_block in enumerate(blocks)
+            for position in _mark_positions(expected_block.items)]
+
+
+def _mark_token_idxs(contents: List[dict]) -> List[int]:
+    """The edition's marks are matched with these tokens, in order, because the configuration's answers use their
+    indexes"""
+    return [int(token['idx']) for token in contents if isinstance(token['word'], str)
+            and len(token['word']) == 1 and token['word'] in _MARK_CHARACTERS]
+
+
+def _expected_block_texts(blocks: List[_ExpectedBlock],
+                          mark_characters: Dict[_MarkPlace, str]) -> List[_ExpectedBlockText]:
+    return [_ExpectedBlockText(expected_block.element, ''.join(
+                mark_characters.get(_MarkPlace(block, position), item if isinstance(item, str) else '')
+                for position, item in enumerate(expected_block.items)).strip())
+            for block, expected_block in enumerate(blocks)]
 
 
 def _mark_positions(items: List[_ExpectedItem]) -> List[int]:
@@ -1638,7 +1648,7 @@ def _character_at(items: List[_ExpectedItem], position: int) -> str:
 
 
 def validate_gap_tags(errors, xml_string, subdivisions, contents, supp_entries):
-    gap_tags = _body_elements_outside_notes(ET.fromstring(xml_string), 'gap')
+    gap_tags = _gaps_outside_notes(ET.fromstring(xml_string))
     gap_indices = [content['idx'] for content in contents if pd.isnull(content['word'])]
 
     if len(gap_tags) != len(gap_indices):
@@ -1661,14 +1671,55 @@ def validate_gap_tags(errors, xml_string, subdivisions, contents, supp_entries):
                 f"found {len(matching_supp_entries)}")
 
 
-def validate_p_tags(errors, xml_string, subdivisions, contents, work: WorkConfiguration):
-    root = ET.fromstring(xml_string)
-    p_tags = _body_elements_outside_notes(root, 'p')
-    texts = _expected_texts(root, contents, work, errors)
-    paragraph_names = {subdivision['name'] for subdivision in subdivisions if subdivision['typ'] == 'PARA'}
+_BLOCK_TYPES_BY_TAG = {f'{_TEI}l': 'VERS', f'{_TEI}p': 'PARA', f'{_TEI}head': 'TITL', f'{_TEI}speaker': 'TITL'}
 
-    if any(texts[id(p_tag)].strip() not in paragraph_names for p_tag in p_tags):
-        errors.append("Mismatch between the number of <p> tags and the number of paragraph subdivisions.")
+
+def validate_blocks(errors, xml_string, subdivisions, contents, work: WorkConfiguration):
+    blocks = _expected_blocks(ET.fromstring(xml_string))
+    mark_places = _mark_places(blocks)
+    mark_token_idxs = _mark_token_idxs(contents)
+    if len(mark_places) != len(mark_token_idxs):
+        errors.append(f"The edition's text has {len(mark_places)} quotation marks and apostrophes, and the "
+                      f"contents {len(mark_token_idxs)}.")
+        return  # A block's text needs each of its marks matched with its token
+    block_texts = _expected_block_texts(
+        blocks, _expected_mark_characters(blocks, mark_places, mark_token_idxs, work, errors))
+    rows = [subdivision for subdivision in subdivisions if subdivision['typ'] in _BLOCK_TYPES_BY_TAG.values()]
+    subdivisions_by_node = {subdivision['node']: subdivision for subdivision in subdivisions}
+    in_the_edition = [(_BLOCK_TYPES_BY_TAG[block_text.element.tag], block_text.text) for block_text in block_texts]
+    in_the_subdivisions = [(row['typ'], _edition_text_as_the_subdivisions_keep_it(row, subdivisions_by_node))
+                           for row in rows]
+    first_that_differs = next(
+        (position for position, (type_and_text_in_the_edition, type_and_text_in_the_subdivisions) in
+         enumerate(itertools.zip_longest(in_the_edition, in_the_subdivisions))
+         if type_and_text_in_the_edition != type_and_text_in_the_subdivisions), None)
+    if first_that_differs is not None:
+        described_block = _described_block(block_texts[first_that_differs]) \
+            if first_that_differs < len(block_texts) else "no more"
+        described_row = _described_row(rows[first_that_differs], subdivisions_by_node, contents) \
+            if first_that_differs < len(rows) else "no more"
+        errors.append("The edition's verses, paragraphs, titles and speakers differ from the subdivisions'. The first "
+                      f"that differs: the edition has {described_block}, and the subdivisions have {described_row}.")
+
+
+def _edition_text_as_the_subdivisions_keep_it(row: dict, subdivisions_by_node: Dict[str, dict]) -> str:
+    """A title's own name is spelled like its tokens, so the edition's spelling is in the name of the division that it
+    heads, which also keeps the whitespace around its head. A block that is only a lost passage has no name"""
+    is_title = row['typ'] == 'TITL'
+    name = subdivisions_by_node[row['parent']]['name'] if is_title else row['name']
+    text = '' if pd.isnull(name) else name
+    return text.strip() if is_title else text
+
+
+def _described_block(block_text: _ExpectedBlockText) -> str:
+    return f"the <{block_text.element.tag.removeprefix(_TEI)}> {block_text.text!r}"
+
+
+def _described_row(row: dict, subdivisions_by_node: Dict[str, dict], contents: List[dict]) -> str:
+    kept_text = _edition_text_as_the_subdivisions_keep_it(row, subdivisions_by_node)
+    type_and_text = f"TITL of the division named {kept_text!r}" if row['typ'] == 'TITL' \
+        else f"{row['typ']} {kept_text!r}"
+    return f"the {type_and_text} at {contents[row['fromIndex']]['sourceReference']} (idx {row['fromIndex']})"
 
 
 def check_proper_noun_states(errors, work_contents_df):
