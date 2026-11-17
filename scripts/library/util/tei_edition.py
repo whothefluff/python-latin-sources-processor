@@ -36,17 +36,21 @@ _NUMBERED_DIVISION_KINDS = ('book', 'poem', 'chapter', 'section', 'act', 'scene'
 #: The kinds of division that the work's configuration can give another type by their n, such as a prologue
 _DIVISION_KINDS_TYPED_BY_N = ('poem', 'act')
 _BLOCK_TYPES_BY_TAG = {'head': 'TITL', 'speaker': 'TITL', 'l': 'VERS', 'p': 'PARA'}
-#: The elements that a block can hold in its text
-_INLINE_TAGS = ('q', 'quote', 'hi', 'emph', 'gap', 'note', 'milestone', 'add', 'del', 'sic', 'corr', 'num', 'abbr',
-                'choice', 'lb', 'pb')
-#: The elements whose text is read as the text around it. A <quote> isn't always a quotation, so it gets no marks yet
-_READ_AS_TEXT_TAGS = ('quote', 'hi', 'emph', 'sic', 'corr', 'add', 'del', 'num')
+#: A <quote> isn't always a quotation, so it gets no marks yet
+_READ_AS_PLAIN_TEXT_TAGS = ('quote',)
+_TYPOGRAPHY_TAGS = ('hi', 'emph')
+_TYPOGRAPHY_RENDS_READ_AS_TEXT = ('uppercase',)
+_EDITORIAL_MARKS_BY_TAG = {'add': 'addition', 'del': 'deletion', 'corr': 'correction', 'sic': 'sic'}
+_READ_AS_MARKED_TEXT_TAGS = (*_EDITORIAL_MARKS_BY_TAG, 'num')
+_READ_AS_TEXT_TAGS = (*_READ_AS_PLAIN_TEXT_TAGS, *_TYPOGRAPHY_TAGS, *_READ_AS_MARKED_TEXT_TAGS)
 _QUOTATION_TAGS = ('q',)
+_READ_EACH_IN_ITS_OWN_WAY_TAGS = ('choice', 'abbr', 'lb', 'gap', 'note')
+_LEFT_OUT_TAGS = ('milestone', 'pb')
+_INLINE_TAGS = (*_READ_AS_TEXT_TAGS, *_QUOTATION_TAGS, *_READ_EACH_IN_ITS_OWN_WAY_TAGS, *_LEFT_OUT_TAGS)
+_LEFT_OUT_OF_AN_ABBREVIATION_TAGS = ('expan',)
 _OPENING_MARK_PLACEHOLDER, _CLOSING_MARK_PLACEHOLDER = '“', '”'
 #: The reasons for a gap that are read, which the gap's supplementary entry keeps
 _GAP_REASONS = ('lost', 'omitted')
-_TYPOGRAPHY_TAGS = ('hi', 'emph')
-_TYPOGRAPHY_RENDS_READ_AS_TEXT = ('uppercase',)
 _WORD = re.compile(r'\w+')
 _LEMMA_ELLIPSIS = re.compile(r'\.\s*\.')
 
@@ -169,11 +173,6 @@ class Division(NamedTuple):
         return first if isinstance(first, TextBlock) and first.typ == 'TITL' else None
 
 
-#: The kind of editorial mark of each element that marks part of a block's text
-_EDITORIAL_MARKS_BY_TAG = {'add': 'addition', 'del': 'deletion', 'corr': 'correction', 'sic': 'sic'}
-_READ_AS_MARKED_TEXT_TAGS = (*_EDITORIAL_MARKS_BY_TAG, 'num')
-
-
 class _QuotationMarkToAdd(NamedTuple):
     opens: bool
     pair_by_rend: str | None
@@ -204,6 +203,20 @@ class _InlineNote(NamedTuple):
 _InlinePiece = Union[_MarkedText, LostPassage, _InlineNote]
 #: A block's text, its lost passages and its notes, in reading order, before the text is joined
 _InlinePieces = List[_InlinePiece]
+
+
+class _MarkedRange(NamedTuple):
+    marking: ET.Element
+    piece: int
+    start: int
+    end: int
+
+
+class _JoinedText(NamedTuple):
+    pieces: Tuple[Union[str, LostPassage], ...]
+    marked_ranges: Tuple[_MarkedRange, ...]
+    notes: Tuple[Note, ...]
+    added_quotation_marks: Tuple[AddedQuotationMark, ...]
 
 
 def read_edition(root: ET.Element, cited_division_subtypes: Tuple[str, ...],
@@ -366,17 +379,17 @@ def _block(element: ET.Element, typ: str, where: str, cited: Tuple[str, ...], ch
     if not reference:
         raise ValueError(f"{where} would have no reference: no division above it is cited.")
     deletion = _whole_deletion(element)
-    joined, ranges, notes, added_quotation_marks = _joined(_inline(deletion if deletion is not None else element,
-                                                                   where, _INLINE_TAGS, chains))
-    if not any(isinstance(piece, LostPassage) or piece.strip() for piece in joined):
+    joined = _joined(_inline(deletion if deletion is not None else element, where, _INLINE_TAGS, chains))
+    if not any(isinstance(piece, LostPassage) or piece.strip() for piece in joined.pieces):
         raise ValueError(f"{where} has no text.")
     marks = tuple(EditorialMark(_EDITORIAL_MARKS_BY_TAG[_tag(marking)], piece, start, end)
-                  for marking, piece, start, end in ranges if _tag(marking) in _EDITORIAL_MARKS_BY_TAG)
-    numerals = tuple(Numeral(piece, start, end) for marking, piece, start, end in ranges if _tag(marking) == 'num')
+                  for marking, piece, start, end in joined.marked_ranges if _tag(marking) in _EDITORIAL_MARKS_BY_TAG)
+    numerals = tuple(Numeral(piece, start, end)
+                     for marking, piece, start, end in joined.marked_ranges if _tag(marking) == 'num')
     expansions = tuple(Expansion(_expansion_text(marking), piece, start, end)
-                       for marking, piece, start, end in ranges if _tag(marking) in ('choice', 'abbr'))
-    return TextBlock(typ, n, reference, joined, deletion is not None, notes, marks, numerals, expansions,
-                     added_quotation_marks)
+                       for marking, piece, start, end in joined.marked_ranges if _tag(marking) in ('choice', 'abbr'))
+    return TextBlock(typ, n, reference, joined.pieces, deletion is not None, joined.notes, marks, numerals, expansions,
+                     joined.added_quotation_marks)
 
 
 def _whole_deletion(element: ET.Element) -> ET.Element | None:
@@ -413,7 +426,8 @@ def _inline(element: ET.Element, where: str, tags: Tuple[str, ...], chains: _Quo
             #  two side by side in a <choice>. Read as a <choice> until their editions are fixed
             if child.find(f'{_TEI}expan') is None:
                 raise ValueError(f"{where} holds an <abbr> without an <expan>, which isn't read there.")
-            pieces.extend(_marked_by(piece, child) for piece in _inline(child, where, ('expan',), chains))
+            pieces.extend(_marked_by(piece, child)
+                          for piece in _inline(child, where, _LEFT_OUT_OF_AN_ABBREVIATION_TAGS, chains))
         elif tag == 'lb':
             pieces.append(_MarkedText(' '))
         elif tag == 'gap':
@@ -460,37 +474,34 @@ def _expansion_text(element: ET.Element) -> str:
     return ' '.join(''.join(cast(ET.Element, element.find(f'{_TEI}expan')).itertext()).split())
 
 
-def _joined(pieces: _InlinePieces) -> Tuple[Tuple[Union[str, LostPassage], ...],
-                                            List[Tuple[ET.Element, int, int, int]], Tuple[Note, ...],
-                                            Tuple[AddedQuotationMark, ...]]:
-    """Returns the pieces with the text between two lost passages in one piece, and no empty ones; where the
-    marking elements are in them, a range in a piece for each element in each piece that it marks; the notes, with
-    where each lemma matches the text before it; and where the added quotation marks are"""
+def _joined(inline_pieces: _InlinePieces) -> _JoinedText:
     joined: List[Union[str, LostPassage]] = []
-    #: The marking elements, by their id and the piece, with their range in it
-    ranges: Dict[Tuple[int, int], Tuple[ET.Element, int, int]] = {}
+    ranges_by_element_id_and_piece: Dict[Tuple[int, int], Tuple[ET.Element, int, int]] = {}
     notes: List[Note] = []
     added_quotation_marks: List[AddedQuotationMark] = []
-    for piece in pieces:
+    for inline_piece in inline_pieces:
         last = joined[-1] if joined else None
-        if isinstance(piece, _InlineNote):
-            notes.append(_note(piece, last if isinstance(last, str) else '', len(joined) - 1))
-        elif isinstance(piece, LostPassage):
-            joined.append(piece)
-        elif piece.text and isinstance(last, str):
-            joined[-1] = last + piece.text
-        elif piece.text:
-            joined.append(piece.text)
-        if isinstance(piece, _MarkedText) and piece.text:
+        if isinstance(inline_piece, _InlineNote):
+            notes.append(_note(inline_piece, last if isinstance(last, str) else '', len(joined) - 1))
+        elif isinstance(inline_piece, LostPassage):
+            joined.append(inline_piece)
+        elif inline_piece.text and isinstance(last, str):
+            joined[-1] = last + inline_piece.text
+        elif inline_piece.text:
+            joined.append(inline_piece.text)
+        if isinstance(inline_piece, _MarkedText) and inline_piece.text:
             index, end = len(joined) - 1, len(cast(str, joined[-1]))
-            for element in piece.marking:
-                start = ranges.get((id(element), index), (element, end - len(piece.text), end))[1]
-                ranges[(id(element), index)] = (element, start, end)
-            if piece.holds_the_place_of is not None:
+            for element in inline_piece.marking:
+                start = ranges_by_element_id_and_piece.get((id(element), index),
+                                                           (element, end - len(inline_piece.text), end))[1]
+                ranges_by_element_id_and_piece[(id(element), index)] = (element, start, end)
+            if inline_piece.holds_the_place_of is not None:
                 added_quotation_marks.append(AddedQuotationMark(
-                    piece.holds_the_place_of.opens, piece.holds_the_place_of.pair_by_rend, index, end - 1, end))
-    return (tuple(joined), [(element, index, start, end) for (_, index), (element, start, end) in ranges.items()],
-            tuple(notes), tuple(added_quotation_marks))
+                    inline_piece.holds_the_place_of.opens, inline_piece.holds_the_place_of.pair_by_rend, index,
+                    end - 1, end))
+    marked_ranges = tuple(_MarkedRange(element, index, start, end)
+                          for (_, index), (element, start, end) in ranges_by_element_id_and_piece.items())
+    return _JoinedText(tuple(joined), marked_ranges, tuple(notes), tuple(added_quotation_marks))
 
 
 def _lemma(note: ET.Element, where: str) -> str | None:
