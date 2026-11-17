@@ -129,14 +129,28 @@ class TextBlock(NamedTuple):
     added_quotation_marks: Tuple[AddedQuotationMark, ...] = ()
 
     @property
-    def printed_text(self) -> str:
-        """Its text as the edition prints it, without its notes and lost passages"""
-        return ''.join(piece for piece in self.pieces if isinstance(piece, str))
+    def name(self) -> str:
+        return _name_of(self.pieces)
 
-    @property
-    def text(self) -> str:
-        """Its printed text without the whitespace around it"""
-        return self.printed_text.strip()
+    def place_in_name_of_the_mark_at(self, piece: int, place_in_piece: int) -> int:
+        name_that_ends_with_the_mark = _name_of(
+            (*self.pieces[:piece], cast(str, self.pieces[piece])[:place_in_piece + 1]))
+        return len(name_that_ends_with_the_mark) - 1
+
+
+# Editions type dots as text, and none has them between square brackets
+_LOST_PASSAGE_IN_A_NAME = '[...]'
+
+
+def _name_of(pieces: Sequence[Union[str, LostPassage]]) -> str:
+    """Whitespace in the XML is layout"""
+    text_with_its_lost_passages = ''.join(
+        _LOST_PASSAGE_IN_A_NAME if isinstance(piece, LostPassage) else piece for piece in pieces)
+    return _with_single_spaces_inside_and_none_around(text_with_its_lost_passages)
+
+
+def _with_single_spaces_inside_and_none_around(text: str) -> str:
+    return ' '.join(text.split())
 
 
 class Division(NamedTuple):

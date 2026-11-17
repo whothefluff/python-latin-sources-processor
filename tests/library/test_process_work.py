@@ -444,7 +444,7 @@ def test_line_groups_and_speeches_are_subdivisions_and_divisions_end_at_their_la
         ("TITL", 0, "Carmen", "POEM", 0, 0, None),
         ("LGRP", 0, None, "POEM", 1, 7, None),
         ("VERS", 0, "Roma “est” levis", "LGRP", 1, 5, "1"),
-        ("VERS", 1, "et", "LGRP", 6, 7, "2"),
+        ("VERS", 1, "et [...]", "LGRP", 6, 7, "2"),
         ("SPCH", 0, "Fictor", "POEM", 8, 11, None),
         ("TITL", 0, "Fictor", "SPCH", 8, 8, None),
         ("VERS", 0, "levis est.", "SPCH", 9, 11, "3"),
@@ -1201,7 +1201,7 @@ def _block_and_gap_errors(subdivisions, contents, supplementary) -> list:
 
 def test_validation_leaves_out_the_header_notes_and_expansions(oratio):
     assert [subdivision["name"] for subdivision in oratio.subdivisions if subdivision["typ"] == "PARA"] == [
-        "Levis et iace est.", "L. ‘iam’\n         est."]
+        "Levis et iace est.", "L. ‘iam’ [...] est."]
     assert _block_and_gap_errors(*oratio) == []
 
 
@@ -1227,26 +1227,46 @@ def _paragraph_renamed(name, to):
         contents)
 
 
-@pytest.mark.parametrize("damage", [
-    lambda subdivisions, contents: ([subdivision for subdivision in subdivisions
-                                     if subdivision["name"] != "L. ‘iam’\n         est."], contents),
-    lambda subdivisions, contents: ([dict(subdivision, typ="VERS") if subdivision["name"] == "L. ‘iam’\n         est."
-                                     else subdivision for subdivision in subdivisions], contents),
-    _paragraph_renamed("Levis et iace est.", to="et iace est."),
-    _paragraph_renamed("Levis et iace est.", to="Levis et iacere est."),
-    _paragraph_renamed("Levis et iace est.", to="Levis  iace est."),
-    _paragraph_renamed("Levis et iace est.", to="Levis et  est."),
-    _paragraph_renamed("L. ‘iam’\n         est.", to="L. “”  est."),
-    lambda subdivisions, contents: (subdivisions, [token for token in contents if not pd.isnull(token["word"])]),
-    lambda subdivisions, contents: (subdivisions, [*contents, {"idx": len(contents), "word": float("nan")}]),
+def _first_block_that_differs(in_the_edition: str, in_the_subdivisions: str) -> str:
+    return ("The edition's verses, paragraphs, titles and speakers differ from the subdivisions'. The first that "
+            f"differs: the edition has {in_the_edition}, and the subdivisions have {in_the_subdivisions}.")
+
+
+_ORATIO_S_SECOND_PARAGRAPH = "the <p> 'L. ‘iam’ [...] est.'"
+
+
+@pytest.mark.parametrize("damage, errors", [
+    (lambda subdivisions, contents: ([subdivision for subdivision in subdivisions
+                                      if subdivision["name"] != "L. ‘iam’ [...] est."], contents),
+     ["Expected exactly one subdivision entry for gap tag at idx 9, found 0",
+      _first_block_that_differs(_ORATIO_S_SECOND_PARAGRAPH, "no more")]),
+    (lambda subdivisions, contents: ([dict(subdivision, typ="VERS") if subdivision["name"] == "L. ‘iam’ [...] est."
+                                      else subdivision for subdivision in subdivisions], contents),
+     [_first_block_that_differs(_ORATIO_S_SECOND_PARAGRAPH, "the VERS 'L. ‘iam’ [...] est.' at 1.1.2 (idx 5)")]),
+    (_paragraph_renamed("Levis et iace est.", to="et iace est."),
+     [_first_block_that_differs("the <p> 'Levis et iace est.'", "the PARA 'et iace est.' at 1.1.1 (idx 0)")]),
+    (_paragraph_renamed("Levis et iace est.", to="Levis et iacere est."),
+     [_first_block_that_differs("the <p> 'Levis et iace est.'", "the PARA 'Levis et iacere est.' at 1.1.1 (idx 0)")]),
+    (_paragraph_renamed("Levis et iace est.", to="Levis iace est."),
+     [_first_block_that_differs("the <p> 'Levis et iace est.'", "the PARA 'Levis iace est.' at 1.1.1 (idx 0)")]),
+    (_paragraph_renamed("Levis et iace est.", to="Levis et est."),
+     [_first_block_that_differs("the <p> 'Levis et iace est.'", "the PARA 'Levis et est.' at 1.1.1 (idx 0)")]),
+    (_paragraph_renamed("L. ‘iam’ [...] est.", to="L. “” [...] est."),
+     [_first_block_that_differs(_ORATIO_S_SECOND_PARAGRAPH, "the PARA 'L. “” [...] est.' at 1.1.2 (idx 5)")]),
+    (lambda subdivisions, contents: (subdivisions, [token for token in contents if not pd.isnull(token["word"])]),
+     ["Mismatch between the number of <gap> tags and the number of empty content entries."]),
+    (lambda subdivisions, contents: (subdivisions, [*contents, {"idx": len(contents), "word": float("nan")}]),
+     ["Mismatch between the number of <gap> tags and the number of empty content entries.",
+      "Expected exactly one subdivision entry for gap tag at idx 12, found 0",
+      "Expected exactly one supplementary entry for gap tag at idx 12, found 0"]),
 ], ids=["a paragraph left out", "a paragraph written as a verse", "a word left out", "a word changed",
         "the text of an <add> lost", "the text of a <sic> lost", "the text of a <q> lost", "a lost passage dropped",
         "a lost passage too many"])
-def test_validation_refuses_paragraphs_or_lost_passages_that_the_walker_lost_or_changed(oratio, damage):
+def test_validation_refuses_paragraphs_or_lost_passages_that_the_walker_lost_or_changed(oratio, damage, errors):
     subdivisions, contents, supplementary = oratio
     damaged_subdivisions, damaged_contents = damage(subdivisions, contents)
 
-    assert _block_and_gap_errors(damaged_subdivisions, damaged_contents, supplementary) != []
+    assert _block_and_gap_errors(damaged_subdivisions, damaged_contents, supplementary) == errors
 
 
 _CITATA = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
@@ -1297,7 +1317,7 @@ def test_a_tagged_quotation_gets_the_work_s_marks_and_printed_marks_become_typog
 
     assert [subdivision["name"] for subdivision in subdivisions if subdivision["typ"] == "PARA"] == [
         "“Feliciter!” succlamans, dixit “ave” et.", "“Suspiciones ‘te’ ne dicat.” Locutu's, talin' iam.",
-        "“Ait ‘iam’ et.”", "Dixit  “vale et abiit.”"]
+        "“Ait ‘iam’ et.”", "Dixit [...] “vale et abiit.”"]
     assert [token["word"] for token in contents if token["tokenType"] == int(TokenType.PUNCTUATION)] == [
         "“", "!", "”", ",", "“", "”", ".", "“", "‘", "’", ".", "”", "'", ",", "'", ".", "“", "‘", "’", ".", "”",
         "“", "‘", "’", "”", "“", ".", "”"]
@@ -1378,23 +1398,35 @@ def _first_paragraph_renamed(subdivisions, to):
             else subdivision for subdivision in subdivisions]
 
 
-@pytest.mark.parametrize("damage", [
-    lambda subdivisions, contents: (
+_CITATA_S_FIRST_PARAGRAPH = "the <p> '“Feliciter!” succlamans, dixit “ave” et.'"
+
+
+@pytest.mark.parametrize("damage, errors", [
+    (lambda subdivisions, contents: (
         _first_paragraph_renamed(subdivisions, to="Feliciter!” succlamans, dixit “ave” et."), contents[1:]),
-    lambda subdivisions, contents: (
+     ["The edition's text has 20 quotation marks and apostrophes, and the contents 19."]),
+    (lambda subdivisions, contents: (
         _first_paragraph_renamed(subdivisions, to="““Feliciter!” succlamans, dixit “ave” et."), contents),
-    lambda subdivisions, contents: (
+     [_first_block_that_differs(_CITATA_S_FIRST_PARAGRAPH,
+                                "the PARA '““Feliciter!” succlamans, dixit “ave” et.' at 1.1.1 (idx 0)")]),
+    (lambda subdivisions, contents: (
         _first_paragraph_renamed(subdivisions, to="“Feliciter!” succlamans, dixit “ave et”."), contents),
-    lambda subdivisions, contents: (
+     [_first_block_that_differs(_CITATA_S_FIRST_PARAGRAPH,
+                                "the PARA '“Feliciter!” succlamans, dixit “ave et”.' at 1.1.1 (idx 0)")]),
+    (lambda subdivisions, contents: (
         _first_paragraph_renamed(subdivisions, to="‘Feliciter!” succlamans, dixit “ave” et."),
         [{**contents[0], "word": "‘"}, *contents[1:]]),
-    lambda subdivisions, contents: (subdivisions, [{**contents[0], "idx": len(contents)}, *contents]),
+     [_first_block_that_differs(_CITATA_S_FIRST_PARAGRAPH,
+                                "the PARA '‘Feliciter!” succlamans, dixit “ave” et.' at 1.1.1 (idx 0)")]),
+    (lambda subdivisions, contents: (subdivisions, [{**contents[0], "idx": len(contents)}, *contents]),
+     ["The edition's text has 20 quotation marks and apostrophes, and the contents 21."]),
 ], ids=["a mark lost", "a mark added", "a mark moved", "a mark of the wrong style", "a mark's token added"])
-def test_validation_refuses_quotation_marks_that_the_walker_lost_added_moved_or_gave_the_wrong_style(citata, damage):
+def test_validation_refuses_quotation_marks_that_the_walker_lost_added_moved_or_gave_the_wrong_style(
+        citata, damage, errors):
     subdivisions, contents, supplementary = citata
     damaged_subdivisions, damaged_contents = damage(subdivisions, contents)
 
-    assert _citata_block_and_gap_errors(damaged_subdivisions, damaged_contents, supplementary) != []
+    assert _citata_block_and_gap_errors(damaged_subdivisions, damaged_contents, supplementary) == errors
 
 
 @pytest.mark.parametrize("damage, error", [
@@ -1483,9 +1515,23 @@ def _poem(n: str, blocks: str) -> str:
 
 
 @pytest.mark.parametrize("xml, work, names", [
-    (_carmina(_poem("1", '<p>Roma est.</p><p> <gap reason="lost"/>  </p>')), _CARMEN_WORK, [("PARA", "Roma est.")]),
+    (_carmina(_poem("1", '<p>Roma est.</p><p> <gap reason="lost"/>  </p>')), _CARMEN_WORK,
+     [("PARA", "Roma est."), ("PARA", "[...]")]),
+    (_carmina(_poem("1", '<l n="1">Roma est.</l><l n="2"><gap reason="lost"/></l>')), _CARMEN_WORK,
+     [("VERS", "Roma est."), ("VERS", "[...]")]),
+    (_carmina(_poem("1", '<l n="1">Roma <gap reason="omitted"/> est.</l>')), _CARMEN_WORK,
+     [("VERS", "Roma [...] est.")]),
+    (_carmina(_poem("1", '<l n="1"><gap reason="lost"/>est iam.</l>')), _CARMEN_WORK, [("VERS", "[...]est iam.")]),
+    (_carmina(_poem("1", '<l n="1">Roma est <gap reason="omitted"/>?<gap reason="omitted"/> </l>')), _CARMEN_WORK,
+     [("VERS", "Roma est [...]?[...]")]),
     (_carmina(_poem("1", '<head>Roma et levis\n      </head><l n="1">Roma est.</l>')), _CARMEN_WORK,
-     [("POEM", "Roma et levis\n      "), ("TITL", "Roma et levis"), ("VERS", "Roma est.")]),
+     [("POEM", "Roma et levis"), ("TITL", "Roma et levis"), ("VERS", "Roma est.")]),
+    (_carmina(_poem("1", '<head>Roma\n      et  levis</head><l n="1">Roma est.</l>')), _CARMEN_WORK,
+     [("POEM", "Roma et levis"), ("TITL", "Roma et levis"), ("VERS", "Roma est.")]),
+    (_carmina(_poem("1", '<l n="1">Roma  est\tiam.</l><p>Levis est\n      iam.</p>')), _CARMEN_WORK,
+     [("VERS", "Roma est iam."), ("PARA", "Levis est iam.")]),
+    (_carmina(_poem("1", '<head>Roma  <q>et</q> levis</head><l n="1"> Ait  <q>iam</q>\n      et.</l>')), _CARMEN_WORK,
+     [("POEM", "Roma “et” levis"), ("TITL", "Roma “et” levis"), ("VERS", "Ait “iam” et.")]),
     (_carmina(_poem("1", '<l n="1">Roma est.</l>')).replace('<div type="edition">',
                                                              '<div type="edition"><head>Carmina</head>'),
      _CARMEN_WORK, [("VERS", "Roma est.")]),
@@ -1503,7 +1549,11 @@ def _poem(n: str, blocks: str) -> str:
      [("VERS", "“Ave Roma’ dixit ‘iam’ et.")]),
     (_carmina(_poem("1", '<l n="1">Roma est.</l><note resp="editor">vulg. <l n="2"><del>Levis est.</del></l></note>'
                          '<l n="2">Iam est.</l>')), _CARMEN_WORK, [("VERS", "Roma est."), ("VERS", "Iam est.")]),
-], ids=["a paragraph that is only a lost passage", "a title with whitespace after it", "the edition's own heading",
+], ids=["a paragraph that is only a lost passage", "a verse that is only a lost passage",
+        "a lost passage between two words", "a lost passage against the word after it",
+        "two lost passages with a sign between them", "a title with whitespace after it", "a title over two lines",
+        "runs of whitespace in a verse and in a paragraph", "quotation marks after runs of whitespace",
+        "the edition's own heading",
         "an abbreviation with an apostrophe", "a closing mark before a word that starts with s",
         "two straight pairs against three single openings",
         "a quotation inside a straight mark, after a ’ that follows a letter",
@@ -1555,6 +1605,79 @@ def test_validation_refuses_a_paragraph_named_with_whitespace_around_its_text(mo
     assert errors == [
         "The edition's verses, paragraphs, titles and speakers differ from the subdivisions'. The first that differs: "
         "the edition has the <p> 'Levis est.', and the subdivisions have the PARA ' Levis est.' at 1.pr (idx 0)."]
+
+
+@pytest.mark.parametrize("blocks, typ, name, renamed, in_the_edition, in_the_subdivisions", [
+    ('<l n="1">Roma  est.</l>', "VERS", "Roma est.", "Roma  est.",
+     "the <l> 'Roma est.'", "the VERS 'Roma  est.' at 1.1.1 (idx 0)"),
+    ('<head>Roma et levis\n      </head><l n="1">Roma est.</l>', "POEM", "Roma et levis", "Roma et levis\n      ",
+     "the <head> 'Roma et levis'", "the TITL of the division named 'Roma et levis\\n      ' at 1.1 (idx 0)"),
+    ('<l n="1">Roma <gap reason="omitted"/> est.</l>', "VERS", "Roma [...] est.", "Roma est.",
+     "the <l> 'Roma [...] est.'", "the VERS 'Roma est.' at 1.1.1 (idx 0)"),
+], ids=["a verse's name that keeps a run of whitespace", "a division's name that keeps the whitespace after its head",
+        "a name without its lost passage"])
+def test_validation_refuses_a_name_written_otherwise_than_the_checks_read_its_block(
+        monkeypatch, tmp_path, blocks, typ, name, renamed, in_the_edition, in_the_subdivisions):
+    xml = _carmina(_poem("1", blocks))
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+    process_work.process_verse(xml, tmp_path, _CARMEN_WORK)
+    subdivisions, contents, _ = _checked_rows(tmp_path)
+    errors = []
+
+    process_work.validate_blocks(
+        errors, xml, [dict(subdivision, name=renamed) if (subdivision["typ"], subdivision["name"]) == (typ, name)
+                      else subdivision for subdivision in subdivisions], contents, _CARMEN_WORK)
+
+    assert errors == [_first_block_that_differs(in_the_edition, in_the_subdivisions)]
+
+
+def _rename_in_the_csv(output_dir, typ: str, name: str, renamed: str | None):
+    path = output_dir / "work_content_subdivisions.csv"
+    subdivisions = pd.read_csv(path, dtype={"editionLabel": str})
+    subdivisions.loc[(subdivisions["typ"] == typ) & (subdivisions["name"] == name), "name"] = renamed
+    subdivisions.to_csv(path, index=False)
+
+
+def test_validation_refuses_a_verse_that_is_only_a_lost_passage_and_has_no_name(monkeypatch, tmp_path):
+    xml = _carmina(_poem("1", '<l n="1">Roma est.</l><l n="2"><gap reason="lost"/></l>'))
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+    process_work.process_verse(xml, tmp_path, _CARMEN_WORK)
+    _rename_in_the_csv(tmp_path, "VERS", "[...]", None)
+
+    with pytest.raises(ValueError, match="^" + re.escape("Validation errors found:\n    " + _first_block_that_differs(
+            "the <l> '[...]'", "the VERS nan at 1.1.2 (idx 3)")) + "$"):
+        process_work.validate_csv_files(xml, tmp_path, _CARMEN_WORK)
+
+
+def test_validation_refuses_a_lost_passage_written_at_the_other_end_of_its_verse(monkeypatch, tmp_path):
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+    process_work.process_verse(_carmina(_poem("1", '<l n="1"><gap reason="omitted"/> Roma est?</l>')), tmp_path,
+                               _CARMEN_WORK)
+
+    with pytest.raises(ValueError, match="^" + re.escape("Validation errors found:\n    " + _first_block_that_differs(
+            "the <l> 'Roma est? [...]'", "the VERS '[...] Roma est?' at 1.1.1 (idx 0)")) + "$"):
+        process_work.validate_csv_files(_carmina(_poem("1", '<l n="1">Roma est? <gap reason="omitted"/> </l>')),
+                                        tmp_path, _CARMEN_WORK)
+
+
+@pytest.mark.parametrize("name, renamed, error", [
+    ("Carmen jam", "xyzzy", "The TITL at 1.1 (idx 3) is named 'xyzzy', and its tokens are 'Carmen', 'jam'."),
+    ("Carmen jam", "Carmen iam", "The TITL at 1.1 (idx 3) is named 'Carmen iam', and its tokens are 'Carmen', 'jam'."),
+    ("Carmen jam", "carmen jam", "The TITL at 1.1 (idx 3) is named 'carmen jam', and its tokens are 'Carmen', 'jam'."),
+    ("Carmen jam", "jam Carmen", "The TITL at 1.1 (idx 3) is named 'jam Carmen', and its tokens are 'Carmen', 'jam'."),
+    ("Fictor", "Fictrix", "The TITL at 1.1.4 (idx 17) is named 'Fictrix', and its tokens are 'Fictor'."),
+], ids=["a title named with other words", "a title with the edition's spelling of a word that its token respells",
+        "a title with other capitals", "a title with its words in another order", "a speaker named with another word"])
+def test_validation_refuses_a_title_s_own_name_that_isn_t_its_tokens_in_order(
+        monkeypatch, tmp_path, name, renamed, error):
+    _process_mixta(monkeypatch, tmp_path)
+    _rename_in_the_csv(tmp_path, "TITL", name, renamed)
+
+    with pytest.raises(ValueError, match="^" + re.escape(f"Validation errors found:\n    {error}") + "$"):
+        process_work.validate_csv_files(_MIXTA, tmp_path, _CARMEN_WORK)
 
 
 def _subdivisions(*rows):

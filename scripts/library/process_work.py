@@ -742,7 +742,7 @@ class _Numbering:
     def add_division(self, division: Division, cnt: int, path: str, parent_path: str | None):
         title = division.title
         from_index = self.next_index
-        row = [self.work_id, self.node_of(path), division.typ, cnt, title.printed_text if title else None,
+        row = [self.work_id, self.node_of(path), division.typ, cnt, title.name if title else None,
                self.node_of(parent_path), from_index, None, division.edition_label]
         self.subdivisions.append(row)
         if title is not None:
@@ -772,8 +772,7 @@ class _Numbering:
         covered_by_note_index: Dict[int, List[int]] = {}
         edition_expansions_and_positions: List[Tuple[str, List[int]]] = []
         contraction_positions: List[int] = []
-        place_in_printed_text_by_mark: Dict[int, int] = {}
-        printed_so_far = 0
+        place_in_name_by_mark: Dict[int, int] = {}
         for index, piece in enumerate(block.pieces):
             if isinstance(piece, LostPassage):
                 segments.append(None)
@@ -821,8 +820,7 @@ class _Numbering:
                             character_after=piece[segment.end:segment.end + 1],
                             is_contraction_apostrophe=len(segments) + position - 1 in contraction_positions,
                             textpart_id=textpart_id, reference=reference, words_around=words_around))
-                    place_in_printed_text_by_mark[idx] = printed_so_far + segment.start
-            printed_so_far += len(piece)
+                    place_in_name_by_mark[idx] = block.place_in_name_of_the_mark_at(index, segment.start)
             printed_words = [cast(str, normalize_digraphs(segment.text)) for segment in piece_segments]
             segments.extend(self.work.spellings_by_printed_word.get(printed, without_ictus_marks(printed))
                             for printed in printed_words)
@@ -836,13 +834,12 @@ class _Numbering:
                 self.add_supplementary("GAP", first + position, first + position, next(lost_passages).reason)
         for note, from_position, to_position in marked:
             self.add_supplementary("NOTE", first + from_position, first + to_position, note)
-        row = [self.work_id, self.node_of(path), block.typ, cnt, block.text or None, self.node_of(parent_path),
+        row = [self.work_id, self.node_of(path), block.typ, cnt, block.name, self.node_of(parent_path),
                first, last, block.edition_label]
         self.subdivisions.append(row)
         self.token_ranges_of_blocks.append(_TokenRange(first, last))
-        stripped = len(block.printed_text) - len(block.printed_text.lstrip())
-        for idx, place in place_in_printed_text_by_mark.items():
-            self.places_in_names_by_mark[idx] = [(row, place - stripped)] + (
+        for idx, place in place_in_name_by_mark.items():
+            self.places_in_names_by_mark[idx] = [(row, place)] + (
                 [(self.rows_named_by_title[id(block)], place)] if id(block) in self.rows_named_by_title else [])
         starts_new_sentence = self.starts_new_sentence or self.next_block_starts_sentence or block.typ == 'TITL'
         self.next_block_starts_sentence = False
@@ -1230,6 +1227,7 @@ def validate_csv_files(xml_string, output_dir, work: WorkConfiguration):
                       work_content_supplementary_df.to_dict('records'))
     validate_blocks(errors, xml_string, work_content_subdivisions_df.to_dict('records'),
                     work_contents_df.to_dict('records'), work)
+    check_title_names_against_their_tokens(errors, work_content_subdivisions_df, work_contents_df)
     check_proper_noun_states(errors, work_contents_df)
     check_macronization_coverage(errors, work_contents_df, work_macronizations_df, unambiguous_macronizations_df)
     check_masks_within_their_words(errors, work_macronizations_df)
@@ -1306,6 +1304,18 @@ def check_edition_labels(errors, work_content_subdivisions_df):
     for typ, node in zip(subdivisions[~labelled & has_label]['typ'], subdivisions[~labelled & has_label]['node']):
         errors.append(f"{typ} {node} has an editionLabel, which only "
                       f"{', '.join(SUBDIVISION_TYPES_WITH_EDITION_LABELS)} have.")
+
+
+def check_title_names_against_their_tokens(errors, work_content_subdivisions_df, work_contents_df):
+    """The reader's index shows a title's own name, which no other check reads"""
+    words_by_idx = dict(zip(work_contents_df['idx'], work_contents_df['word']))
+    references_by_idx = dict(zip(work_contents_df['idx'], work_contents_df['sourceReference']))
+    titles = work_content_subdivisions_df[work_content_subdivisions_df['typ'] == 'TITL']
+    for name, first, last in zip(titles['name'], titles['fromIndex'], titles['toIndex']):
+        tokens = [words_by_idx[idx] for idx in range(first, last + 1)]
+        if [segment.text for segment in _segments_of(name)] != tokens:
+            errors.append(f"The TITL at {references_by_idx[first]} (idx {first}) is named {name!r}, and its tokens "
+                          f"are {', '.join(map(repr, tokens))}.")
 
 
 def check_to_index_always_gt_from_index_in_sub(errors, work_content_subdivisions_df):
@@ -1539,12 +1549,28 @@ def _mark_token_idxs(contents: List[dict]) -> List[int]:
             and len(token['word']) == 1 and token['word'] in _MARK_CHARACTERS]
 
 
+# Written again here, as the walker has it, because the checks read the edition by their own code
+_EXPECTED_LOST_PASSAGE_IN_A_NAME = '[...]'
+
+
 def _expected_block_texts(blocks: List[_ExpectedBlock],
                           mark_characters: Dict[_MarkPlace, str]) -> List[_ExpectedBlockText]:
-    return [_ExpectedBlockText(expected_block.element, ''.join(
-                mark_characters.get(_MarkPlace(block, position), item if isinstance(item, str) else '')
-                for position, item in enumerate(expected_block.items)).strip())
+    return [_ExpectedBlockText(expected_block.element, _with_single_spaces_inside_and_none_around(''.join(
+                _expected_item_text(item, _MarkPlace(block, position), mark_characters)
+                for position, item in enumerate(expected_block.items))))
             for block, expected_block in enumerate(blocks)]
+
+
+def _expected_item_text(item: _ExpectedItem, place: _MarkPlace, mark_characters: Dict[_MarkPlace, str]) -> str:
+    if isinstance(item, _ExpectedLostPassage):
+        return _EXPECTED_LOST_PASSAGE_IN_A_NAME
+    if isinstance(item, _ExpectedAddedMark):
+        return mark_characters[place]
+    return mark_characters.get(place, item)
+
+
+def _with_single_spaces_inside_and_none_around(text: str) -> str:
+    return ' '.join(text.split())
 
 
 def _mark_positions(items: List[_ExpectedItem]) -> List[int]:
@@ -1704,11 +1730,8 @@ def validate_blocks(errors, xml_string, subdivisions, contents, work: WorkConfig
 
 def _edition_text_as_the_subdivisions_keep_it(row: dict, subdivisions_by_node: Dict[str, dict]) -> str:
     """A title's own name is spelled like its tokens, so the edition's spelling is in the name of the division that it
-    heads, which also keeps the whitespace around its head. A block that is only a lost passage has no name"""
-    is_title = row['typ'] == 'TITL'
-    name = subdivisions_by_node[row['parent']]['name'] if is_title else row['name']
-    text = '' if pd.isnull(name) else name
-    return text.strip() if is_title else text
+    heads"""
+    return subdivisions_by_node[row['parent']]['name'] if row['typ'] == 'TITL' else row['name']
 
 
 def _described_block(block_text: _ExpectedBlockText) -> str:

@@ -123,6 +123,12 @@ In `work_content_subdivisions.csv`:
   `VERS` and `PARA`. The roots are the books, the acts, or, in a work without books, its poems, prologues and
   epilogues. A play's prologue is an act that the configuration types `PROL`, as Amphitruo's is.
 * **`cnt`:** a subdivision's position among its siblings of the same type, from 0, whatever the edition numbers it.
+* **`name`:** the text of a verse, a paragraph or a title, and for a division the text of the title that heads it.
+  It has one space for each run of whitespace in the edition, and none around it: whitespace in the XML is layout.
+  Where the edition marks a passage as lost, it has `[...]`, and a verse or a paragraph that is only a lost passage
+  is named `[...]`. The contents have no such mark: there a lost passage is a token with no word. A `TITL`'s own name
+  is spelled like its tokens (section 5), and split as text is split into tokens it's their words, in order. The
+  division that it heads keeps the edition's spelling.
 * **`editionLabel`:** the subdivision's TEI `n`, preserved as text. Books, poems, prologues, epilogues, chapters,
   sections, acts, scenes and verses have one (`1`, `appendix`, `prologus`, `14a`, `3ff`, `pr`), and other subdivisions
   none.
