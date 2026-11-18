@@ -1410,10 +1410,14 @@ def _elements_outside_notes(element: ET.Element) -> Iterator[ET.Element]:
             yield from _elements_outside_notes(child)
 
 
+def _body_of(root: ET.Element) -> ET.Element:
+    """The walker has read the edition, so it has a body"""
+    return cast(ET.Element, root.find(f'{_TEI}text/{_TEI}body'))
+
+
 def _gaps_outside_notes(root: ET.Element) -> List[ET.Element]:
     """Leaves out the header, which isn't the edition's text, and notes, whose gaps are part of the note's text"""
-    return [element for body in root.iterfind(f'{_TEI}text/{_TEI}body')
-            for element in _elements_outside_notes(body) if element.tag == f'{_TEI}gap']
+    return [element for element in _elements_outside_notes(_body_of(root)) if element.tag == f'{_TEI}gap']
 
 
 class _ExpectedAddedMark(NamedTuple):
@@ -1534,12 +1538,10 @@ class _ExpectedBlockText(NamedTuple):
 
 
 def _expected_blocks(root: ET.Element) -> List[_ExpectedBlock]:
-    blocks: List[_ExpectedBlock] = []
-    for body in root.iterfind(f'{_TEI}text/{_TEI}body'):
-        chains = _quotation_chains(body)
-        blocks += [_ExpectedBlock(element, div_id, _expected_items(element, chains))
-                   for element, div_id in _blocks_outside_notes(body)]
-    return blocks
+    body = _body_of(root)
+    chains = _quotation_chains(body)
+    return [_ExpectedBlock(element, div_id, _expected_items(element, chains))
+            for element, div_id in _blocks_outside_notes(body)]
 
 
 def _mark_places(blocks: List[_ExpectedBlock]) -> List[_MarkPlace]:
