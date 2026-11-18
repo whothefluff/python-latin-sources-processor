@@ -9,6 +9,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from scripts.common.publishing import publish, raise_for_publication_leftovers
+from scripts.library.util.csv_reading import read_csv_with_only_empty_fields_as_missing
 from scripts.library.util.unambiguous_macronizations import (
     CertainToken, agreed_macronizations, lookup_key, work_macronizations_where_lookup_differs,
 )
@@ -219,7 +220,7 @@ def read_library_files(output_dir: Path, work_dirs: List[Path]) -> List[Dict[str
                 problems.append(f"{path} is missing")
                 continue
             try:
-                df = pd.read_csv(path, dtype=TYPE_BY_FILE_AND_COLUMN.get(file_name))
+                df = read_csv_with_only_empty_fields_as_missing(path, TYPE_BY_FILE_AND_COLUMN.get(file_name))
             except Exception as e:
                 problems.append(f"{path} can't be read: {e}")
                 continue

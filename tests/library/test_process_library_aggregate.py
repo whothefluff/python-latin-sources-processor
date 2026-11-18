@@ -201,6 +201,20 @@ def test_a_word_that_the_reader_would_look_up_under_a_numeral_gets_its_own_macro
 
 
 @pytest.mark.parametrize('runs', list(AGGREGATION_RUNS.values()), ids=list(AGGREGATION_RUNS))
+def test_a_word_that_pandas_takes_for_a_missing_value_is_aggregated_as_a_word(tmp_path, runs):
+    works = _copy_of_both_works(tmp_path)
+    _add_rows(works / 'carmina_prima' / 'work_contents.csv', [
+        (CARMINA_PRIMA_ID, 11, 'nan', '1.1.3', 0, 1, 3, 0, None, None, 0)])
+    _add_rows(works / 'carmina_prima' / 'unambiguous_macronizations.csv', [('nan', 'nan')])
+
+    _aggregate_in_turn(works, runs, tmp_path / 'aggregate')
+
+    assert (CARMINA_PRIMA_ID, '11', 'nan', '1.1.3', '0', '1', '3', '0', '', '', '0') in _rows(
+        _read(tmp_path / 'aggregate', 'work_contents.csv'))
+    assert ('nan', 'nan') in _rows(_read(tmp_path / 'aggregate', 'unambiguous_macronizations.csv'))
+
+
+@pytest.mark.parametrize('runs', list(AGGREGATION_RUNS.values()), ids=list(AGGREGATION_RUNS))
 @pytest.mark.parametrize('rows_in_carmina_altera', [
     {'authors.csv': [(CARMINA_ALTERA_AUTHOR_ID, 'Fictor', 'Another poet.', 'Zml4dHVyZQ==')]},
     {'author_abbreviations.csv': [(CARMINA_ALTERA_AUTHOR_ID, 0, 'Fic.')]},

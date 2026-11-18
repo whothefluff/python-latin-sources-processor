@@ -24,6 +24,7 @@ import requests
 from scripts.common.macrons import strip_macrons
 from scripts.common.publishing import publish
 from scripts.common.services import MACRONIZER_URL, MORPHEUS_URL
+from scripts.library.util.csv_reading import read_csv_with_only_empty_fields_as_missing
 from scripts.library.util.nomina import NOMINA
 from scripts.library.util.proper_noun import (
     is_proper_noun_lemma, compute_inherent_state, compute_context_aware_state, ProperNounState,
@@ -1204,13 +1205,17 @@ def validate_csv_files(xml_string, output_dir, work: WorkConfiguration):
     errors = []
 
     # Load the relevant CSV files
-    work_contents_df = pd.read_csv(os.path.join(output_dir, 'work_contents.csv'))
-    work_content_subdivisions_df = pd.read_csv(os.path.join(output_dir, 'work_content_subdivisions.csv'),
-                                               dtype={'editionLabel': str})
-    work_content_supplementary_df = pd.read_csv(os.path.join(output_dir, 'work_content_supplementary.csv'))
-    author_abbreviations_df = pd.read_csv(os.path.join(output_dir, 'author_abbreviations.csv'))
-    work_macronizations_df = pd.read_csv(os.path.join(output_dir, 'work_macronizations.csv'))
-    unambiguous_macronizations_df = pd.read_csv(os.path.join(output_dir, 'unambiguous_macronizations.csv'))
+    work_contents_df = read_csv_with_only_empty_fields_as_missing(os.path.join(output_dir, 'work_contents.csv'))
+    work_content_subdivisions_df = read_csv_with_only_empty_fields_as_missing(
+        os.path.join(output_dir, 'work_content_subdivisions.csv'), dtype={'editionLabel': str})
+    work_content_supplementary_df = read_csv_with_only_empty_fields_as_missing(
+        os.path.join(output_dir, 'work_content_supplementary.csv'))
+    author_abbreviations_df = read_csv_with_only_empty_fields_as_missing(
+        os.path.join(output_dir, 'author_abbreviations.csv'))
+    work_macronizations_df = read_csv_with_only_empty_fields_as_missing(
+        os.path.join(output_dir, 'work_macronizations.csv'))
+    unambiguous_macronizations_df = read_csv_with_only_empty_fields_as_missing(
+        os.path.join(output_dir, 'unambiguous_macronizations.csv'))
 
     check_seq_unique_ints_from_0(errors, author_abbreviations_df, 'author abbreviations', 'id', ['authorId'])
     check_subdivision_numbers(errors, work_content_subdivisions_df)

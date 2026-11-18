@@ -366,6 +366,27 @@ def test_a_lost_passage_inside_a_verse_passes_validation(monkeypatch, tmp_path):
     assert _rows(tmp_path / "work_content_supplementary.csv", "workId") == [("GAP", 0, 10, 10, "lost")]
 
 
+@pytest.mark.parametrize("word", ["nan", "null", "NA", "None"])
+def test_a_word_that_pandas_takes_for_a_missing_value_passes_validation_as_a_word(monkeypatch, tmp_path, word):
+    carmen_with_the_word = _CARMEN.replace("iacere et iacere iam.", f"iacere {word} iacere iam.")
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    process_work.determine_proper_noun_state.cache_clear()
+    _macronizer_echoes(monkeypatch)
+    process_work.process_verse(carmen_with_the_word, tmp_path, _CARMEN_WORK)
+
+    process_work.validate_csv_files(carmen_with_the_word, tmp_path, _CARMEN_WORK)
+
+
+def test_a_verse_that_is_only_a_word_that_pandas_takes_for_a_missing_value_passes_validation(monkeypatch, tmp_path):
+    carmen_with_the_verse = _CARMEN.replace("iacere et iacere iam.", "nan")
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    process_work.determine_proper_noun_state.cache_clear()
+    _macronizer_echoes(monkeypatch)
+    process_work.process_verse(carmen_with_the_verse, tmp_path, _CARMEN_WORK)
+
+    process_work.validate_csv_files(carmen_with_the_verse, tmp_path, _CARMEN_WORK)
+
+
 def test_lost_lines_get_no_macronizer_results(monkeypatch, tmp_path):
     _process_carmen(monkeypatch, tmp_path, xml=_CARMEN_WITH_GAPS)
 
