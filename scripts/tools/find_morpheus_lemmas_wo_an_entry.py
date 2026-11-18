@@ -9,7 +9,7 @@ It also handles homograph numbers by stripping the '#' character before matching
 (e.g., ':le:acer#2' is searched as 'acer2' in the CSV).
 
 Usage:
-    python -m scripts.tools.find_morpheus_lemmas_without_an_entry <path_to_txt_file> <path_to_csv_file>
+    python -m scripts.tools.find_morpheus_lemmas_wo_an_entry <path_to_txt_file> <path_to_csv_file>
 
     for example a stemsrc file of the Morpheus fork, such as stemlib/Latin/stemsrc/vbs.latin.irreg, and the
     dictionary_entries.csv that scripts/dictionary/process_lexica.py writes.
