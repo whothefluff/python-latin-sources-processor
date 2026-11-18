@@ -366,6 +366,17 @@ def test_a_lost_passage_inside_a_verse_passes_validation(monkeypatch, tmp_path):
     assert _rows(tmp_path / "work_content_supplementary.csv", "workId") == [("GAP", 0, 10, 10, "lost")]
 
 
+def test_validation_refuses_a_lost_passage_whose_supplementary_row_is_missing(monkeypatch, tmp_path):
+    _process_carmen(monkeypatch, tmp_path, xml=_CARMEN_WITH_A_LOST_END)
+    supplementary = pd.read_csv(tmp_path / "work_content_supplementary.csv")
+    supplementary[supplementary["typ"] != "GAP"].to_csv(tmp_path / "work_content_supplementary.csv", index=False)
+
+    with pytest.raises(ValueError, match="^" + re.escape(
+            "Validation errors found:\n"
+            "    Expected exactly one supplementary entry for gap tag at idx 10, found 0") + "$"):
+        process_work.validate_csv_files(_CARMEN_WITH_A_LOST_END, tmp_path, _CARMEN_WORK)
+
+
 @pytest.mark.parametrize("word", ["nan", "null", "NA", "None"])
 def test_a_word_that_pandas_takes_for_a_missing_value_passes_validation_as_a_word(monkeypatch, tmp_path, word):
     carmen_with_the_word = _CARMEN.replace("iacere et iacere iam.", f"iacere {word} iacere iam.")
