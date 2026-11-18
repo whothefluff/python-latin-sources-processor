@@ -461,6 +461,8 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
      "the edition > poem 1 > l 1 holds a <choice> of <corr> and <sic>, which isn't read there."),
     (_poem('1', '<l n="1"><choice><abbr>locutu<hi rend="uppercase">\'</hi>s</abbr><expan>locutus es</expan>'
                 '</choice></l>'), _POEMS, "the edition > poem 1 > l 1 holds <hi>, which isn't read there."),
+    (_poem('1', '<l n="1"><choice><abbr>locutu\'s<expan>locutus es</expan></abbr><expan>locutus es</expan>'
+                '</choice></l>'), _POEMS, "the edition > poem 1 > l 1 holds <expan>, which isn't read there."),
     (_poem('1', '<l n="1"><choice>locutu\'s <abbr>locutu\'s</abbr><expan>locutus es</expan></choice></l>'), _POEMS,
      "the edition > poem 1 > l 1 has text outside its parts, which isn't read."),
     ('<head>M. Tulli Ciceroni in Q. Caecilium Oratio</head><head>Quae Divinatio Dicitur</head>'
@@ -477,6 +479,7 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
         "an expansion outside an abbreviation", "an abbreviation without its expansion", "a note with two lemmas",
         "a note with a lemma between verses",
         "a choice of a misprint and its correction", "an element in a choice's abbreviation",
+        "an expansion in a choice's abbreviation",
         "text in a choice outside its readings", "a second heading in the edition"])
 def test_a_structure_that_isnt_read_raises(body, cited, error):
     with pytest.raises(ValueError, match=re.escape(error)):
