@@ -128,7 +128,8 @@ In `work_content_subdivisions.csv`:
   Where the edition marks a passage as lost, it has `[...]`, and a verse or a paragraph that is only a lost passage
   is named `[...]`. The contents have no such mark: there a lost passage is a token with no word. A `TITL`'s own name
   is spelled like its tokens (section 5), and split as text is split into tokens it's their words, in order. The
-  division that it heads keeps the edition's spelling.
+  division that it heads keeps the edition's spelling. A `VERS`'s or a `PARA`'s name, split the same way with each
+  `[...]` as one token, has as many tokens as its row has between its `fromIndex` and its `toIndex`.
 * **`editionLabel`:** the subdivision's TEI `n`, preserved as text. Books, poems, prologues, epilogues, chapters,
   sections, acts, scenes and verses have one (`1`, `appendix`, `prologus`, `14a`, `3ff`, `pr`), and other subdivisions
   none.

@@ -1233,6 +1233,8 @@ def validate_csv_files(xml_string, output_dir, work: WorkConfiguration):
     validate_blocks(errors, xml_string, work_content_subdivisions_df.to_dict('records'),
                     work_contents_df.to_dict('records'), work)
     check_title_names_against_their_tokens(errors, work_content_subdivisions_df, work_contents_df)
+    check_verse_and_paragraph_names_against_the_number_of_their_tokens(errors, work_content_subdivisions_df,
+                                                                       work_contents_df)
     check_proper_noun_states(errors, work_contents_df)
     check_macronization_coverage(errors, work_contents_df, work_macronizations_df, unambiguous_macronizations_df)
     check_masks_within_their_words(errors, work_macronizations_df)
@@ -1321,6 +1323,26 @@ def check_title_names_against_their_tokens(errors, work_content_subdivisions_df,
         if [segment.text for segment in _segments_of(name)] != tokens:
             errors.append(f"The TITL at {references_by_idx[first]} (idx {first}) is named {name!r}, and its tokens "
                           f"are {', '.join(map(repr, tokens))}.")
+
+
+def check_verse_and_paragraph_names_against_the_number_of_their_tokens(errors, work_content_subdivisions_df,
+                                                                         work_contents_df):
+    """The reader draws a verse or a paragraph from its row's tokens, which no other check ties to the row"""
+    references_by_idx = dict(zip(work_contents_df['idx'], work_contents_df['sourceReference']))
+    named_blocks = work_content_subdivisions_df[work_content_subdivisions_df['typ'].isin(('VERS', 'PARA'))
+                                                & work_content_subdivisions_df['name'].notna()]
+    for typ, name, first, last in zip(named_blocks['typ'], named_blocks['name'], named_blocks['fromIndex'],
+                                      named_blocks['toIndex']):
+        tokens_of_the_row, tokens_in_the_name = last - first + 1, _number_of_tokens_in(name)
+        if tokens_in_the_name != tokens_of_the_row:
+            errors.append(f"The {typ} at {references_by_idx[first]} (idx {first}) has {tokens_of_the_row} tokens, and "
+                          f"its name splits into {tokens_in_the_name}: {name!r}")
+
+
+def _number_of_tokens_in(name: str) -> int:
+    """A lost passage is one token, with no word to split"""
+    texts_between_lost_passages = name.split(_EXPECTED_LOST_PASSAGE_IN_A_NAME)
+    return sum(len(_segments_of(text)) for text in texts_between_lost_passages) + len(texts_between_lost_passages) - 1
 
 
 def check_to_index_always_gt_from_index_in_sub(errors, work_content_subdivisions_df):

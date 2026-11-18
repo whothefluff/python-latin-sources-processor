@@ -1712,6 +1712,31 @@ def test_validation_refuses_a_title_s_own_name_that_isn_t_its_tokens_in_order(
         process_work.validate_csv_files(_MIXTA, tmp_path, _CARMEN_WORK)
 
 
+def _set_in_the_csv(output_dir, from_index: int, column: str, value: int):
+    path = output_dir / "work_content_subdivisions.csv"
+    subdivisions = pd.read_csv(path, dtype={"editionLabel": str})
+    is_the_block = subdivisions["typ"].isin(["VERS", "PARA"]) & (subdivisions["fromIndex"] == from_index)
+    subdivisions.loc[is_the_block, column] = value
+    subdivisions.to_csv(path, index=False)
+
+
+@pytest.mark.parametrize("moved, errors", [
+    ([(5, "toIndex", 6), (8, "fromIndex", 7)],
+     ["The VERS at 1.1.1 (idx 5) has 2 tokens, and its name splits into 3: 'Roma est.'",
+      "The VERS at 1.1.1 (idx 7) has 7 tokens, and its name splits into 6: 'Levis “et” iam.'"]),
+    ([(0, "toIndex", 1)], ["The PARA at 1.pr (idx 0) has 2 tokens, and its name splits into 3: 'Levis est.'"]),
+], ids=["a verse's last token in the next verse's row", "a paragraph's last token in no row"])
+def test_validation_refuses_a_verse_or_a_paragraph_whose_row_has_another_number_of_tokens_than_its_name(
+        monkeypatch, tmp_path, moved, errors):
+    _process_mixta(monkeypatch, tmp_path)
+    for from_index, column, value in moved:
+        _set_in_the_csv(tmp_path, from_index, column, value)
+
+    with pytest.raises(ValueError, match="^" + re.escape(
+            "Validation errors found:\n" + "\n".join(f"    {error}" for error in errors)) + "$"):
+        process_work.validate_csv_files(_MIXTA, tmp_path, _CARMEN_WORK)
+
+
 def _subdivisions(*rows):
     """Returns the subdivisions of one work, each given as (node, typ, cnt, parent)"""
     return pd.DataFrame([("w", *row) for row in rows], columns=["workId", "node", "typ", "cnt", "parent"])
