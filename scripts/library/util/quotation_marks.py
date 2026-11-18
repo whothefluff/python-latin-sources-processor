@@ -173,7 +173,8 @@ def _reading(mark: PrintedMark, answer: UnsettledMark | None, urn: str, problems
     elif answer == UnsettledMark.APOSTROPHE:
         reading = _ApostropheReading()
     else:
-        reading = _QuotationMarkReading(_PAIR_BY_MARK_OF_SEVERAL_READINGS[mark.character], answer == UnsettledMark.OPENS)
+        reading = _QuotationMarkReading(_PAIR_BY_MARK_OF_SEVERAL_READINGS[mark.character],
+                                        answer == UnsettledMark.OPENS)
     return reading
 
 
