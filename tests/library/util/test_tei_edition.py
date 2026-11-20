@@ -10,6 +10,10 @@ from scripts.library.util.tei_edition import (AddedQuotationMark, Division, Edit
 _BOOKS_AND_POEMS = ('book', 'poem')
 _POEMS = ('poem',)
 _BOOKS_CHAPTERS_AND_SECTIONS = ('book', 'chapter', 'section')
+_BOOKS = ('book',)
+_CHAPTERS = ('chapter',)
+_BOOKS_AND_SECTIONS = ('book', 'section')
+_SECTIONS = ('section',)
 _LINES_ONLY = ()
 
 
@@ -191,6 +195,56 @@ def test_books_of_chapters_of_sections_hold_paragraphs_with_the_references_of_bo
                                    Division('SECT', '2', (_paragraph('1.1.2', 'Hi omnes lingua differunt.'),), ())),
                      ()),
             Division('CHAP', '2', (Division('SECT', '1', (_paragraph('1.2.1', 'Apud Helvetios.'),), ()),), ())), ()),)
+
+
+def test_a_book_holds_verses_with_the_references_of_book_and_line():
+    edition = _edition(_book('1', '<head>Liber primus</head><milestone n="1" unit="card"/>'
+                                  '<l n="1">In nova fert animus</l><l n="2">corpora</l>')
+                       + _book('2', '<l n="1">Regia Solis erat</l>'))
+
+    assert read_edition(edition, _BOOKS, {}) == (
+        Division('BOOK', '1', (_title('1', 'Liber primus'), _verse('1', '1.1', 'In nova fert animus'),
+                               _verse('2', '1.2', 'corpora')), ()),
+        Division('BOOK', '2', (_verse('1', '2.1', 'Regia Solis erat'),), ()))
+
+
+def test_chapters_straight_in_the_edition_hold_paragraphs_or_sections():
+    edition = _edition('<head>Bellum Iugurthinum</head><pb n="p.53"/>'
+                       + _chapter('1', '<p>Falso queritur.</p><p>Nam contra.</p>')
+                       + _chapter('2', _section('1', '<p>Germania omnis.</p>')))
+
+    assert read_edition(edition, ('chapter', 'section'), {}) == (
+        Division('CHAP', '1', (_paragraph('1', 'Falso queritur.'), _paragraph('1', 'Nam contra.')), ()),
+        Division('CHAP', '2', (Division('SECT', '1', (_paragraph('2.1', 'Germania omnis.'),), ()),), ()))
+
+
+def test_sections_straight_in_the_edition_hold_paragraphs():
+    edition = _edition(_section('1', '<p>credo ego vos, iudices, mirari</p>') + _section('2', '<p>quae me igitur</p>'))
+
+    assert read_edition(edition, _SECTIONS, {}) == (
+        Division('SECT', '1', (_paragraph('1', 'credo ego vos, iudices, mirari'),), ()),
+        Division('SECT', '2', (_paragraph('2', 'quae me igitur'),), ()))
+
+
+def test_sections_straight_in_a_book_hold_paragraphs():
+    edition = _edition(_book('1', _section('1', '<p>Saepe et multum</p>') + _section('2', '<p>ac me quidem</p>')))
+
+    assert read_edition(edition, _BOOKS_AND_SECTIONS, {}) == (
+        Division('BOOK', '1', (Division('SECT', '1', (_paragraph('1.1', 'Saepe et multum'),), ()),
+                               Division('SECT', '2', (_paragraph('1.2', 'ac me quidem'),), ())), ()),)
+
+
+def test_a_poem_holds_poems_each_typed_by_its_n_and_cited_as_the_poem_that_holds_it_is():
+    edition = _edition(_poem('25', '<head>Epithalamium</head>'
+                                   + _poem('praef', '<head>Praefatio</head><l n="1">Carmina per thalamum</l>')
+                                   + _poem('1', '<l n="1">Forte Venus</l>')))
+
+    assert read_edition(edition, _POEMS, {'praef': 'PROL'}) == (
+        Division('POEM', '25', (
+            _title('25', 'Epithalamium'),
+            Division('PROL', 'praef', (_title('25.praef', 'Praefatio'),
+                                       _verse('1', '25.praef.1', 'Carmina per thalamum')), ()),
+            Division('POEM', '1', (_verse('1', '25.1.1', 'Forte Venus'),), ())), ()),)
 
 
 def test_acts_of_scenes_hold_speeches_whose_speakers_take_the_reference_of_their_first_line():
@@ -418,12 +472,14 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
     ('<div type="textpart" subtype="poem"><l n="1">Roma</l></div>', _POEMS, "A poem in the edition has no n."),
     (_book('1', _poem('1', '<l n="1">Roma</l>')) + _poem('2', '<l n="1">est</l>'), _POEMS,
      "the edition holds books and poems, but only one kind of division is read in the edition."),
-    (_poem('1', _book('1', '<l n="1">Roma</l>')), _POEMS, "the edition > poem 1 holds <div>, which isn't read in a "
-                                                          "poem."),
+    (_poem('1', _book('1', '<l n="1">Roma</l>')), _POEMS,
+     'the edition > poem 1 holds <div type="textpart" subtype="book">, but only poems are read there.'),
     (_book('1', _book('2', _poem('1', '<l n="1">Roma</l>'))), _POEMS,
-     'the edition > book 1 holds <div type="textpart" subtype="book">, but only poems and chapters are read there.'),
+     'the edition > book 1 holds <div type="textpart" subtype="book">, but only poems, chapters and sections are read '
+     'there.'),
     ('<div type="textpart" subtype="speech" n="1"><p>Roma</p></div>', _POEMS,
-     'the edition holds <div type="textpart" subtype="speech">, but only books, poems and acts are read there.'),
+     'the edition holds <div type="textpart" subtype="speech">, but only books, poems, chapters, sections and acts are '
+     'read there.'),
     (_poem('1', '<lg><sp><speaker>Damon</speaker><l n="1">Roma</l></sp></lg>'), _POEMS,
      "the edition > poem 1 > lg holds <sp>, which isn't read in a line group."),
     (_poem('1', '<lg><p>Roma est.</p></lg>'), _POEMS, "the edition > poem 1 > lg holds <p>, which isn't read in a line "
@@ -445,7 +501,8 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
      'the edition > book 1 > chapter 1 holds <div type="textpart" subtype="chapter">, but only sections are read '
      'there.'),
     (_scene('1', '<sp><speaker>Sosia</speaker><l n="1">Roma</l></sp>'), _LINES_ONLY,
-     'the edition holds <div type="textpart" subtype="scene">, but only books, poems and acts are read there.'),
+     'the edition holds <div type="textpart" subtype="scene">, but only books, poems, chapters, sections and acts are '
+     'read there.'),
     ('<div type="textpart" subtype="act">' + _scene('1', '<sp><l n="1">Roma</l></sp>') + '</div>', _LINES_ONLY,
      "An act in the edition has no n."),
     (_poem('1', '<sp><speaker>Sosia</speaker></sp>'), _POEMS, "the edition > poem 1 > sp has no text."),
@@ -467,7 +524,28 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
      "the edition > poem 1 > l 1 has text outside its parts, which isn't read."),
     ('<head>M. Tulli Ciceroni in Q. Caecilium Oratio</head><head>Quae Divinatio Dicitur</head>'
      + _poem('1', '<l n="1">Roma</l>'), _POEMS,
-     'the edition holds <head type="" subtype="">, but only books, poems and acts are read there.'),
+     'the edition holds <head type="" subtype="">, but only books, poems, chapters, sections and acts are read there.'),
+    (_book('1', '<lg><l n="1">Roma</l></lg>'), _BOOKS, "the edition > book 1 holds <lg>, which isn't read in a book."),
+    (_book('1', '<p>Roma est.</p>'), _BOOKS, "the edition > book 1 holds <p>, which isn't read in a book."),
+    (_act('1', _scene('3', '<l n="667">Roma</l>')), _LINES_ONLY,
+     "the edition > act 1 > scene 3 holds <l>, which isn't read in a scene."),
+    (_act('front', '<l n="cast">Roma</l>'), _LINES_ONLY,
+     "the edition > act front holds <l>, which isn't read in an act."),
+    (_poem('1', '<lg><l n="1">Roma</l></lg>' + _poem('2', '<l n="1">est</l>')), _POEMS,
+     "the edition > poem 1 holds divisions and <lg>, but only divisions or text of its own are read in a poem, not "
+     "both."),
+    (_poem('1', _poem('2', '<l n="1">Roma</l>') + '<sp><speaker>Fictor</speaker><l n="2">est</l></sp>'), _POEMS,
+     "the edition > poem 1 holds divisions and <sp>, but only divisions or text of its own are read in a poem, not "
+     "both."),
+    (_book('1', '<l n="1">Roma</l>' + _poem('1', '<l n="1">est</l>')), _BOOKS_AND_POEMS,
+     "the edition > book 1 holds divisions and <l>, but only divisions or text of its own are read in a book, not "
+     "both."),
+    (_book('1', _chapter('1', '<p>Roma</p>' + _section('1', '<p>est</p>'))), _BOOKS_CHAPTERS_AND_SECTIONS,
+     "the edition > book 1 > chapter 1 holds divisions and <p>, but only divisions or text of its own are read in a "
+     "chapter, not both."),
+    (_poem('1', _poem('2', '<l n="1">Roma</l>') + '<l n="1">est</l>'), _POEMS,
+     "the edition > poem 1 holds divisions and <l>, but only divisions or text of its own are read in a poem, not "
+     "both."),
 ], ids=["an element in a verse that isn't read",
         "a gap for another reason", "text outside a verse", "a verse without n", "a poem without n",
         "books and poems at the top", "a book in a poem", "a book in a book", "another subtype",
@@ -480,7 +558,10 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
         "a note with a lemma between verses",
         "a choice of a misprint and its correction", "an element in a choice's abbreviation",
         "an expansion in a choice's abbreviation",
-        "text in a choice outside its readings", "a second heading in the edition"])
+        "text in a choice outside its readings", "a second heading in the edition",
+        "a line group in a book", "a paragraph in a book", "a verse in a scene", "a verse in an act",
+        "a poem of a line group and poems", "a poem of poems and a speech",
+        "a book of verses and poems", "a chapter of paragraphs and sections", "a poem of poems and verses"])
 def test_a_structure_that_isnt_read_raises(body, cited, error):
     with pytest.raises(ValueError, match=re.escape(error)):
         read_edition(_edition(body), cited, {})

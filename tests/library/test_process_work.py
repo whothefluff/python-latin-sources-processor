@@ -1601,6 +1601,62 @@ def test_validation_passes_an_edition_with(monkeypatch, tmp_path, xml, work, nam
     assert [(typ, name) for typ, name in zip(subdivisions["typ"], subdivisions["name"]) if not pd.isna(name)] == names
 
 
+def _edition_of(parts: str) -> str:
+    """Returns a TEI file of Carmen with the parts given straight in its edition"""
+    return f"""<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader><fileDesc><titleStmt><title xml:lang="lat">Carmen</title><author>Fictor</author></titleStmt></fileDesc>
+  </teiHeader>
+  <text><body><div type="edition">{parts}</div></body></text>
+</TEI>"""
+
+
+def _division(subtype: str, n: str, parts: str) -> str:
+    return f'<div type="textpart" subtype="{subtype}" n="{n}">{parts}</div>'
+
+
+@pytest.mark.parametrize("xml, work, subdivisions, references", [
+    (_carmina('<head>Liber</head><l n="1">Roma est.</l><l n="2">Levis est.</l>'),
+     _CARMEN_WORK._replace(cited_division_subtypes=('book',)),
+     [("BOOK", 0, None, 0, 6, "1"), ("TITL", 0, "BOOK", 0, 0, None), ("VERS", 0, "BOOK", 1, 3, "1"),
+      ("VERS", 1, "BOOK", 4, 6, "2")],
+     [("Liber", "1"), ("Roma", "1.1"), ("est", "1.1"), (".", "1.1"), ("Levis", "1.2"), ("est", "1.2"), (".", "1.2")]),
+    (_edition_of(_division("chapter", "1", "<p>Roma est.</p>")
+                 + _division("chapter", "2", _division("section", "1", "<p>Levis est.</p>"))),
+     _CARMEN_WORK._replace(cited_division_subtypes=('chapter', 'section')),
+     [("CHAP", 0, None, 0, 2, "1"), ("PARA", 0, "CHAP", 0, 2, None), ("CHAP", 1, None, 3, 5, "2"),
+      ("SECT", 0, "CHAP", 3, 5, "1"), ("PARA", 0, "SECT", 3, 5, None)],
+     [("Roma", "1"), ("est", "1"), (".", "1"), ("Levis", "2.1"), ("est", "2.1"), (".", "2.1")]),
+    (_edition_of(_division("section", "1", "<p>Roma est.</p>") + _division("section", "2", "<p>Levis est.</p>")),
+     _CARMEN_WORK._replace(cited_division_subtypes=('section',)),
+     [("SECT", 0, None, 0, 2, "1"), ("PARA", 0, "SECT", 0, 2, None), ("SECT", 1, None, 3, 5, "2"),
+      ("PARA", 0, "SECT", 3, 5, None)],
+     [("Roma", "1"), ("est", "1"), (".", "1"), ("Levis", "2"), ("est", "2"), (".", "2")]),
+    (_carmina(_division("section", "1", "<p>Roma est.</p>") + _division("section", "2", "<p>Levis est.</p>")),
+     _CARMEN_WORK._replace(cited_division_subtypes=('book', 'section')),
+     [("BOOK", 0, None, 0, 5, "1"), ("SECT", 0, "BOOK", 0, 2, "1"), ("PARA", 0, "SECT", 0, 2, None),
+      ("SECT", 1, "BOOK", 3, 5, "2"), ("PARA", 0, "SECT", 3, 5, None)],
+     [("Roma", "1.1"), ("est", "1.1"), (".", "1.1"), ("Levis", "1.2"), ("est", "1.2"), (".", "1.2")]),
+    (_edition_of(_division("poem", "25", '<head>Carmen</head>'
+                                         + _division("poem", "praef", '<l n="1">Roma est.</l>')
+                                         + _division("poem", "1", '<l n="1">Levis est.</l>'))),
+     _CARMEN_WORK._replace(cited_division_subtypes=('poem',), types_by_n={'praef': 'PROL'}),
+     [("POEM", 0, None, 0, 6, "25"), ("TITL", 0, "POEM", 0, 0, None), ("PROL", 0, "POEM", 1, 3, "praef"),
+      ("VERS", 0, "PROL", 1, 3, "1"), ("POEM", 0, "POEM", 4, 6, "1"), ("VERS", 0, "POEM", 4, 6, "1")],
+     [("Carmen", "25"), ("Roma", "25.praef.1"), ("est", "25.praef.1"), (".", "25.praef.1"), ("Levis", "25.1.1"),
+      ("est", "25.1.1"), (".", "25.1.1")]),
+], ids=["verses straight in a book", "chapters straight in the edition, of paragraphs and of sections",
+        "sections straight in the edition", "sections straight in a book", "a poem of a preface and a poem"])
+def test_a_work_passes_validation_with(monkeypatch, tmp_path, xml, work, subdivisions, references):
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+    process_work.process_verse(xml, tmp_path, work)
+
+    process_work.validate_csv_files(xml, tmp_path, work)
+
+    assert _subdivision_rows(tmp_path) == subdivisions
+    assert _references(tmp_path) == references
+
+
 _QUOTATION_AFTER_A_STRAIGHT_MARK_IN_ANOTHER_POEM = _carmina(
     _poem("1", '<l n="1">"Ave Roma.</l>') + _poem("2", '<l n="1">Ait <q>iam</q> et.</l>'))
 

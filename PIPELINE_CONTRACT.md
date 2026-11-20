@@ -118,10 +118,14 @@ morphology forms:
 
 In `work_content_subdivisions.csv`:
 
-* **Types:** `BOOK`, `POEM`, `PROL`, `EPIL`, `CHAP` (a chapter), `SECT` (a section of a chapter), `ACT`, `SCEN` (a
-  scene of an act), `LGRP` (a group of lines, `<lg>`), `SPCH` (a speech, `<sp>`, whose `TITL` is its speaker), `TITL`,
-  `VERS` and `PARA`. The roots are the books, the acts, or, in a work without books, its poems, prologues and
-  epilogues. A play's prologue is an act that the configuration types `PROL`, as Amphitruo's is.
+* **Types:** `BOOK`, `POEM`, `PROL`, `EPIL`, `CHAP` (a chapter), `SECT` (a section of a chapter, of a book or of the
+  work), `ACT`, `SCEN` (a scene of an act), `LGRP` (a group of lines, `<lg>`), `SPCH` (a speech, `<sp>`, whose `TITL`
+  is its speaker), `TITL`, `VERS` and `PARA`.
+* **What holds what:** a book holds poems, chapters, sections or verses; a chapter, sections or paragraphs; a poem,
+  poems or its own verses, line groups, speeches and paragraphs. One that holds books, poems, chapters, sections, acts
+  or scenes holds them all of one kind, and no verse, line group, speech or paragraph of its own.
+* **The roots** are all of one type: books, chapters, sections, acts or poems. A prologue or an epilogue counts as the
+  poem or the act that the configuration types by its n: a play's prologue is an act typed `PROL`, as Amphitruo's is.
 * **`cnt`:** a subdivision's position among its siblings of the same type, from 0, whatever the edition numbers it.
 * **`name`:** the text of a verse, a paragraph or a title, and for a division the text of the title that heads it.
   It has one space for each run of whitespace in the edition, and none around it: whitespace in the XML is layout.

@@ -11,16 +11,17 @@ _XML_LANG = '{http://www.w3.org/XML/1998/namespace}lang'
 
 #: The kinds of division that the edition and each kind of division can hold, one kind at a time
 _DIVISION_KINDS_BY_HOLDER: Dict[str, Tuple[str, ...]] = {
-    'edition': ('book', 'poem', 'act'),
-    'book': ('poem', 'chapter'),
+    'edition': ('book', 'poem', 'chapter', 'section', 'act'),
+    'book': ('poem', 'chapter', 'section'),
+    'poem': ('poem',),
     'chapter': ('section',),
     'act': ('scene',),
 }
 #: The elements that each kind of division can hold
 _PARTS_BY_DIVISION_KIND: Dict[str, Tuple[str, ...]] = {
-    'book': ('head', 'div', 'note', 'milestone', 'lb', 'pb'),
-    'poem': ('head', 'l', 'lg', 'sp', 'p', 'note', 'milestone', 'lb', 'pb'),
-    'chapter': ('head', 'div', 'note', 'milestone', 'lb', 'pb'),
+    'book': ('head', 'div', 'l', 'note', 'milestone', 'lb', 'pb'),
+    'poem': ('head', 'div', 'l', 'lg', 'sp', 'p', 'note', 'milestone', 'lb', 'pb'),
+    'chapter': ('head', 'div', 'p', 'note', 'milestone', 'lb', 'pb'),
     'section': ('head', 'p', 'note', 'milestone', 'lb', 'pb'),
     'act': ('head', 'div', 'note', 'milestone', 'lb', 'pb'),
     'scene': ('head', 'sp', 'note', 'milestone', 'lb', 'pb'),
@@ -36,6 +37,8 @@ _NUMBERED_DIVISION_KINDS = ('book', 'poem', 'chapter', 'section', 'act', 'scene'
 #: The kinds of division that the work's configuration can give another type by their n, such as a prologue
 _DIVISION_KINDS_TYPED_BY_N = ('poem', 'act')
 _BLOCK_TYPES_BY_TAG = {'head': 'TITL', 'speaker': 'TITL', 'l': 'VERS', 'p': 'PARA'}
+#: The elements with a division's own text, which a division that holds divisions doesn't have
+_TEXT_OF_ITS_OWN_TAGS = ('l', 'lg', 'sp', 'p')
 #: A <quote> isn't always a quotation, so it gets no marks yet
 _READ_AS_PLAIN_TEXT_TAGS = ('quote',)
 _TYPOGRAPHY_TAGS = ('hi', 'emph')
@@ -307,6 +310,10 @@ def _listed(kinds: Tuple[str, ...]) -> str:
     return f"{', '.join(names[:-1])} and {names[-1]}" if len(names) > 1 else names[0]
 
 
+def _with_its_article(name: str) -> str:
+    return f"{'an' if name.startswith('a') else 'a'} {name}"
+
+
 def _division(element: ET.Element, kind: str, where: str, cited: Tuple[str, ...],
               cited_division_subtypes: Tuple[str, ...], types_by_n: Dict[str, str],
               chains: _QuotationChains) -> Division:
@@ -322,8 +329,13 @@ def _division(element: ET.Element, kind: str, where: str, cited: Tuple[str, ...]
     children = _children(element, where)
     for child in children:
         if _tag(child) not in _PARTS_BY_DIVISION_KIND[kind]:
-            raise ValueError(f"{where} holds <{_tag(child)}>, which isn't read in a {_DIVISION_KIND_NAMES[kind]}.")
+            raise ValueError(f"{where} holds <{_tag(child)}>, which isn't read in "
+                             f"{_with_its_article(_DIVISION_KIND_NAMES[kind])}.")
     division_kind = _division_kind_held(children, kind, where)
+    text_of_its_own = next((child for child in children if _tag(child) in _TEXT_OF_ITS_OWN_TAGS), None)
+    if division_kind is not None and text_of_its_own is not None:
+        raise ValueError(f"{where} holds divisions and <{_tag(text_of_its_own)}>, but only divisions or text of its "
+                         f"own are read in {_with_its_article(_DIVISION_KIND_NAMES[kind])}, not both.")
     parts: List[Union[Division, TextBlock]] = []
     notes: List[str] = []
     speaker: ET.Element | None = None
