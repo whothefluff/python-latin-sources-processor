@@ -1821,6 +1821,56 @@ def test_the_divisions_that_the_edition_numbers_and_verses_have_an_edition_label
     assert found == errors
 
 
+@pytest.mark.parametrize("subdivisions, errors", [
+    (_subdivisions(("b1", "BOOK", 0, None), ("b2", "BOOK", 1, None), ("p1", "POEM", 0, "b1"), ("v1", "VERS", 0, "p1")),
+     []),
+    (_subdivisions(("p1", "PROL", 0, None), ("p2", "POEM", 0, None), ("p3", "POEM", 1, None), ("p4", "EPIL", 0, None)),
+     []),
+    (_subdivisions(("a1", "PROL", 0, None), ("a2", "ACT", 0, None), ("s1", "SCEN", 0, "a2")), []),
+    (_subdivisions(("b1", "BOOK", 0, None), ("p1", "POEM", 0, None), ("v1", "VERS", 0, "p1")),
+     ["The subdivisions without a parent are BOOK and POEM, but in a work they're all of one type, where a PROL or an "
+      "EPIL counts as a POEM or an ACT."]),
+    (_subdivisions(("p1", "POEM", 0, None), ("v1", "VERS", 0, "p1"), ("v2", "VERS", 0, None)),
+     ["The subdivisions without a parent are POEM and VERS, but in a work they're all of one type, where a PROL or an "
+      "EPIL counts as a POEM or an ACT."]),
+    (_subdivisions(("b1", "BOOK", 0, None), ("p1", "PROL", 0, None), ("p2", "POEM", 0, "b1")),
+     ["The subdivisions without a parent are BOOK and PROL, but in a work they're all of one type, where a PROL or an "
+      "EPIL counts as a POEM or an ACT."]),
+    (_subdivisions(("b1", "BOOK", 0, None), ("p1", "POEM", 0, "b1"), ("p2", "EPIL", 0, None)),
+     ["The subdivisions without a parent are BOOK and EPIL, but in a work they're all of one type, where a PROL or an "
+      "EPIL counts as a POEM or an ACT."]),
+    (_subdivisions(("p1", "PROL", 0, None), ("p2", "POEM", 0, None), ("a1", "ACT", 0, None)),
+     ["The subdivisions without a parent are ACT and POEM and PROL, but in a work they're all of one type, where a "
+      "PROL or an EPIL counts as a POEM or an ACT."]),
+], ids=["books", "poems with a prologue and an epilogue", "acts with a prologue", "a poem that lost its book",
+        "a verse that lost its poem", "a prologue that lost its book", "an epilogue that lost its book",
+        "a prologue beside a poem and an act"])
+def test_a_work_s_subdivisions_without_a_parent_are_of_one_type_where_a_prologue_or_an_epilogue_is_a_poem_or_an_act(
+        subdivisions, errors):
+    found = []
+
+    process_work.check_subdivisions_without_a_parent_are_of_one_type(found, subdivisions)
+
+    assert found == errors
+
+
+def test_validation_refuses_a_prologue_that_lost_its_book(monkeypatch, tmp_path):
+    xml = _carmina(_poem("prologus", '<l n="1">Roma est.</l>'))
+    work = _CARMEN_WORK._replace(types_by_n={"prologus": "PROL"})
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+    process_work.process_verse(xml, tmp_path, work)
+    path = tmp_path / "work_content_subdivisions.csv"
+    subdivisions = pd.read_csv(path, dtype={"editionLabel": str})
+    subdivisions.loc[subdivisions["typ"] == "PROL", "parent"] = None
+    subdivisions.to_csv(path, index=False)
+
+    with pytest.raises(ValueError, match="^" + re.escape(
+            "Validation errors found:\n    The subdivisions without a parent are BOOK and PROL, but in a work they're "
+            "all of one type, where a PROL or an EPIL counts as a POEM or an ACT.") + "$"):
+        process_work.validate_csv_files(xml, tmp_path, work)
+
+
 @pytest.mark.parametrize("word, token_type, proper_noun_state, errors", [
     ("Fictor", TokenType.WORD, ProperNounState.EITHER, []),
     ("Fictor", TokenType.WORD, None, ["Found 1 words without a properNounState: 'Fictor' at index 0"]),

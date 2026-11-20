@@ -1219,6 +1219,7 @@ def validate_csv_files(xml_string, output_dir, work: WorkConfiguration):
 
     check_seq_unique_ints_from_0(errors, author_abbreviations_df, 'author abbreviations', 'id', ['authorId'])
     check_subdivision_numbers(errors, work_content_subdivisions_df)
+    check_subdivisions_without_a_parent_are_of_one_type(errors, work_content_subdivisions_df)
     check_edition_labels(errors, work_content_subdivisions_df)
     check_seq_unique_ints_from_0(errors, work_contents_df, 'contents', 'idx', ['workId'])
     check_seq_unique_ints_from_0(errors, work_content_supplementary_df, 'supplementary', 'cnt', ['workId', 'typ'])
@@ -1298,6 +1299,18 @@ def check_subdivision_numbers(errors, work_content_subdivisions_df):
         errors.append(f"Subdivision {parent} has more than one title.")
     check_seq_unique_ints_from_0(errors, subdivisions[subdivisions['typ'] != 'TITL'], 'subs', 'cnt',
                                  ['workId', 'parent', 'typ'])
+
+
+def check_subdivisions_without_a_parent_are_of_one_type(errors, work_content_subdivisions_df):
+    """The reader takes a subdivision without a parent whatever the others are, so one that lost its parent would reach
+    it as wrong structure. A prologue or an epilogue is a poem or an act that the work's configuration typed by its n"""
+    subdivisions = work_content_subdivisions_df
+    types = set(subdivisions[subdivisions['parent'].isnull()]['typ'])
+    typed_by_their_n = types & {'PROL', 'EPIL'}
+    others = types - typed_by_their_n
+    if len(others) > 1 or (typed_by_their_n and not others <= {'POEM', 'ACT'}):
+        errors.append(f"The subdivisions without a parent are {' and '.join(sorted(types))}, but in a work they're "
+                      f"all of one type, where a PROL or an EPIL counts as a POEM or an ACT.")
 
 
 def check_edition_labels(errors, work_content_subdivisions_df):
