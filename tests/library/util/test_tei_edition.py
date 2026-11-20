@@ -405,6 +405,25 @@ def test_an_omitted_passage_is_a_lost_passage_with_its_reason_in_a_verse_or_a_pa
                                _paragraph('1', 'tamen ', LostPassage('lost'), ' Caesar')), ()),)
 
 
+def test_an_ellipsis_is_an_omitted_passage_wherever_it_is_in_a_verse_or_a_paragraph():
+    edition = _edition(_poem('1', '<l n="12"><gap reason="ellipsis" rend=" . . . "/> nam istis qui linguam</l>'
+                                  '<p>quos Traianus impensius diligebat,\n<gap reason="ellipsis"/>\n</p>'))
+
+    assert read_edition(edition, _POEMS, {}, {}) == (
+        Division('POEM', '1', (_verse('12', '1.12', LostPassage('omitted'), ' nam istis qui linguam'),
+                               _paragraph('1', 'quos Traianus impensius diligebat,\n', LostPassage('omitted'), '\n')),
+                 ()),)
+
+
+def test_a_regularized_word_outside_a_choice_is_read_as_its_text_and_nothing_is_kept_of_its_tag():
+    edition = _edition(_section('1', '<p rend="align(indent)"><milestone n="1" unit="chapter"/> <reg>credo</reg> ego '
+                                     'vos, <q><reg>iudices</reg>, mirari</q></p>'))
+
+    assert read_edition(edition, _SECTIONS, {}, {}) == (
+        Division('SECT', '1', (_paragraph('1', ' credo ego vos, “iudices, mirari”', added_quotation_marks=(
+            AddedQuotationMark(True, None, 0, 16, 17), AddedQuotationMark(False, None, 0, 32, 33))),), ()),)
+
+
 def test_a_note_with_a_lemma_is_about_the_last_words_before_it_that_match_the_lemma():
     edition = _edition(_poem('1', '<p>cum tot, cum<note><app><lem>cum</lem></app> quom A</note> summi oratores</p>'
                                   '<p>Postea, cum ut hoc intellegatis'
@@ -585,7 +604,7 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
     (_poem('1', '<l n="1">Roma <foreign>est</foreign></l>'), _POEMS,
      "the edition > poem 1 > l 1 holds <foreign>, which isn't read there."),
     (_poem('1', '<l n="1"><gap reason="illegible"/></l>'), _POEMS, "the edition > poem 1 > l 1 has a gap whose reason "
-                                                                  "isn't lost or omitted."),
+                                                                  "isn't lost, omitted or ellipsis."),
     (_poem('1', 'Roma est.<l n="1">Roma</l>'), _POEMS, "the edition > poem 1 has text outside its parts"),
     (_poem('1', '<l>Roma est.</l>'), _POEMS, "A line in the edition > poem 1 has no n."),
     ('<div type="textpart" subtype="poem"><l n="1">Roma</l></div>', _POEMS, "A poem in the edition has no n."),

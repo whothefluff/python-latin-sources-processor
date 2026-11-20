@@ -1683,6 +1683,19 @@ def test_a_work_passes_validation_with(monkeypatch, tmp_path, xml, work, subdivi
     assert _references(tmp_path) == references
 
 
+def test_a_regularized_word_outside_a_choice_gets_no_note_and_an_ellipsis_is_an_omitted_passage(monkeypatch, tmp_path):
+    xml = _edition_of(_division("section", "1", '<p><reg>Roma</reg> est, <gap reason="ellipsis"/></p>'))
+    work = _CARMEN_WORK._replace(cited_division_subtypes=('section',))
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+
+    process_work.process_verse(xml, tmp_path, work)
+    process_work.validate_csv_files(xml, tmp_path, work)
+
+    assert _references(tmp_path) == [("Roma", "1"), ("est", "1"), (",", "1"), ("", "1")]
+    assert _rows(tmp_path / "work_content_supplementary.csv", "workId") == [("GAP", 0, 3, 3, "omitted")]
+
+
 def test_a_printed_mark_that_code_cant_follow_in_a_verse_that_no_division_holds_counts_in_the_whole_edition(
         monkeypatch, tmp_path):
     xml = _edition_of('<l n="1">‘Roma est.</l><l n="2">Ait <q>iam</q> et.</l>')

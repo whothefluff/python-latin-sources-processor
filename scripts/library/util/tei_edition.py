@@ -44,8 +44,9 @@ _BLOCK_TYPES_BY_TAG = {'head': 'TITL', 'speaker': 'TITL', 'l': 'VERS', 'p': 'PAR
 _LEFT_OUT_BETWEEN_PARTS_TAGS = ('milestone', 'lb', 'pb')
 #: The elements with a division's own text, which a division that holds divisions doesn't have
 _TEXT_OF_ITS_OWN_TAGS = ('l', 'lg', 'sp', 'p')
-#: A <quote> isn't always a quotation, so it gets no marks yet
-_READ_AS_PLAIN_TEXT_TAGS = ('quote',)
+#: A <quote> isn't always a quotation, so it gets no marks yet. A <reg> outside a <choice> has no other spelling
+#: beside it to keep
+_READ_AS_PLAIN_TEXT_TAGS = ('quote', 'reg')
 _TYPOGRAPHY_TAGS = ('hi', 'emph')
 _TYPOGRAPHY_RENDS_READ_AS_TEXT = ('uppercase',)
 _EDITORIAL_MARKS_BY_TAG = {'add': 'addition', 'del': 'deletion', 'corr': 'correction', 'sic': 'sic'}
@@ -57,8 +58,7 @@ _LEFT_OUT_TAGS = ('milestone', 'pb')
 _INLINE_TAGS = (*_READ_AS_TEXT_TAGS, *_QUOTATION_TAGS, *_READ_EACH_IN_ITS_OWN_WAY_TAGS, *_LEFT_OUT_TAGS)
 _LEFT_OUT_OF_AN_ABBREVIATION_TAGS = ('expan',)
 _OPENING_MARK_PLACEHOLDER, _CLOSING_MARK_PLACEHOLDER = '“', '”'
-#: The reasons for a gap that are read, which the gap's supplementary entry keeps
-_GAP_REASONS = ('lost', 'omitted')
+_LOST_PASSAGE_REASONS_BY_GAP_REASON = {'lost': 'lost', 'omitted': 'omitted', 'ellipsis': 'omitted'}
 _WORD = re.compile(r'\w+')
 _LEMMA_ELLIPSIS = re.compile(r'\.\s*\.')
 
@@ -472,9 +472,11 @@ def _inline(element: ET.Element, where: str, tags: Tuple[str, ...], chains: _Quo
         elif tag == 'lb':
             pieces.append(_MarkedText(' '))
         elif tag == 'gap':
-            if child.get('reason') not in _GAP_REASONS:
-                raise ValueError(f"{where} has a gap whose reason isn't {' or '.join(_GAP_REASONS)}.")
-            pieces.append(LostPassage(cast(str, child.get('reason'))))
+            reason = _LOST_PASSAGE_REASONS_BY_GAP_REASON.get(child.get('reason', ''))
+            if reason is None:
+                *reasons, last = _LOST_PASSAGE_REASONS_BY_GAP_REASON
+                raise ValueError(f"{where} has a gap whose reason isn't {', '.join(reasons)} or {last}.")
+            pieces.append(LostPassage(reason))
         elif tag == 'note':
             pieces.append(_InlineNote(_note_text(child), _lemma(child, where)))
         pieces.append(_MarkedText(child.tail or ''))
