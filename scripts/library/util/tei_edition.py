@@ -126,7 +126,8 @@ class TextBlock(NamedTuple):
     #: A verse's TEI n
     edition_label: str | None
     #: The reference of its tokens: the TEI n of each division above it that the edition cites, then a verse's own.
-    #: A speaker's is the reference of the first verse or paragraph of its speech
+    #: A speaker's is the reference of the first verse or paragraph of its speech, and that of a heading above which
+    #: no division is cited is its division's first verse's or paragraph's
     reference: str
     #: Its text in reading order, without its notes
     pieces: Tuple[Union[str, LostPassage], ...]
@@ -363,7 +364,8 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
                          f"own are read in {_with_its_article(_DIVISION_KIND_NAMES[holder])}, not both.")
     parts: List[Union[Division, TextBlock]] = []
     notes: List[str] = []
-    speaker: ET.Element | None = None
+    # A speaker, or a heading above which no division is cited
+    title_placed_by_its_text: ET.Element | None = None
     for child in children:
         tag = _tag(child)
         if tag == 'note':
@@ -374,12 +376,12 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
         elif tag == 'head' and child.get(_XML_LANG, 'lat') != 'lat':
             notes.append(''.join(child.itertext()).strip())
         elif tag in ('head', 'speaker'):
-            if parts or speaker is not None:
+            if parts or title_placed_by_its_text is not None:
                 raise ValueError(f"{where} has a title after its text or another title.")
-            if tag == 'head':
+            if tag == 'head' and cited:
                 parts.append(_block(child, 'TITL', where, cited, chains))
             else:
-                speaker = child
+                title_placed_by_its_text = child
         elif tag == 'div':
             parts.append(_division(child, cast(str, division_kind), where, cited, cited_division_subtypes,
                                    types_by_n, types_by_subtype, chains))
@@ -389,10 +391,11 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
         elif tag in ('l', 'p'):
             parts.append(_block(child, _BLOCK_TYPES_BY_TAG[tag], where, cited, chains))
     first_said = next(_blocks_said(parts), None)
-    if first_said is None and (speaker is not None or not parts):
+    if first_said is None and (title_placed_by_its_text is not None or not parts):
         raise ValueError(f"{where} has no text.")
-    if speaker is not None:
-        parts.insert(0, _block(speaker, 'TITL', where, cited, chains, cast(TextBlock, first_said).reference))
+    if title_placed_by_its_text is not None:
+        parts.insert(0, _block(title_placed_by_its_text, 'TITL', where, cited, chains,
+                               cast(TextBlock, first_said).reference))
     return tuple(parts), tuple(notes)
 
 

@@ -247,6 +247,28 @@ def test_a_poem_holds_poems_each_typed_by_its_n_and_cited_as_the_poem_that_holds
             Division('POEM', '1', (_verse('1', '25.1.1', 'Forte Venus'),), ())), ()),)
 
 
+@pytest.mark.parametrize("body, cited, types_by_subtype, divisions", [
+    (_book('1', '<pb n="p.2"/><head>Praefatio</head><l n="1">Per quinquennia iam decem,</l>'), _LINES_ONLY, {},
+     (Division('BOOK', '1', (_title('1', 'Praefatio'), _verse('1', '1', 'Per quinquennia iam decem,')), ()),)),
+    (_section('1', '<head>CONCLUSIO</head><l n="1">Hactenus adscripsi fastos</l>')
+     + _section('2', '<head>SUPPUTATIO AB URBE CONDITA</head><l n="11">Annis undecies centum</l>'), _LINES_ONLY,
+     {'section': 'POEM'},
+     (Division('POEM', '1', (_title('1', 'CONCLUSIO'), _verse('1', '1', 'Hactenus adscripsi fastos')), ()),
+      Division('POEM', '2', (_title('11', 'SUPPUTATIO AB URBE CONDITA'),
+                             _verse('11', '11', 'Annis undecies centum')), ()))),
+    (_act('prologue', _scene('pr', '<head>PROLOGVS</head><sp><l n="1">Hoc agite sultis</l></sp>')), _LINES_ONLY, {},
+     (Division('ACT', 'prologue', (Division('SCEN', 'pr', (
+         _title('1', 'PROLOGVS'), Division('SPCH', None, (_verse('1', '1', 'Hoc agite sultis'),), ())), ()),), ()),)),
+    (_book('lyrics', '<head>Polymetra</head>' + _poem('1', '<l n="1">Cui dono</l>')), _POEMS, {},
+     (Division('BOOK', 'lyrics', (_title('1.1', 'Polymetra'),
+                                  Division('POEM', '1', (_verse('1', '1.1', 'Cui dono'),), ())), ()),)),
+], ids=["a book's heading in a work cited by line", "each section's heading where the verses are numbered through them",
+        "a scene's heading before its first speech", "the heading of a book that isn't cited, above poems that are"])
+def test_a_heading_above_which_no_division_is_cited_takes_the_reference_of_its_division_s_first_verse(
+        body, cited, types_by_subtype, divisions):
+    assert read_edition(_edition(body), cited, {}, types_by_subtype) == divisions
+
+
 _SECTIONS_ARE_POEMS = {'section': 'POEM'}
 
 
@@ -587,8 +609,9 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
      "the edition > poem 1 has a title after its text or another title."),
     (_poem('1', '<l n="1"> </l>'), _POEMS, "the edition > poem 1 > l 1 has no text."),
     (_poem('1', '<note>Desunt cetera.</note>'), _POEMS, "the edition > poem 1 has no text."),
-    (_book('lyrics', '<head>Polymetra</head>' + _poem('1', '<l n="1">Roma</l>')), _POEMS,
-     "the edition > book lyrics > head would have no reference: no division above it is cited."),
+    (_section('praef', '<head>Ausonius Gregorio filio sal.</head><p n="pr">En umquam vidisti</p>'), _LINES_ONLY,
+     "the edition > section praef > p would have no reference: no division above it is cited."),
+    (_book('1', '<head>Praefatio</head>'), _LINES_ONLY, "the edition > book 1 has no text."),
     ('', _POEMS, "the edition has no text."),
     (_book('1', _poem('1', '<l n="1">Roma</l>') + _chapter('1', _section('1', '<p>est</p>'))), _POEMS,
      "the edition > book 1 holds chapters and poems, but only one kind of division is read in the book."),
@@ -654,7 +677,8 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
         "books and poems at the top", "a book in a poem", "a book in a book", "another subtype",
         "a speech in a line group", "a paragraph in a line group",
         "a title after a verse", "two titles",
-        "a verse without text", "a poem without text", "a title of a book that the edition doesn't cite",
+        "a verse without text", "a poem without text", "a paragraph under no division that the edition cites",
+        "a heading without text under no division that the edition cites",
         "an empty edition", "a book of poems and chapters", "a verse in a section", "a chapter in a chapter",
         "a scene at the top", "an act without n", "a speech without what is said",
         "an expansion outside an abbreviation", "an abbreviation without its expansion", "a note with two lemmas",

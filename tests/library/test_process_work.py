@@ -1663,11 +1663,15 @@ def _division(subtype: str, n: str, parts: str) -> str:
      [("PROL", 0, None, 0, 3, "pr1"), ("TITL", 0, "PROL", 0, 0, None), ("PARA", 0, "PROL", 1, 3, None),
       ("POEM", 0, None, 4, 6, "1"), ("VERS", 0, "POEM", 4, 6, "1")],
      [("Roma", "pr1"), ("Levis", "pr1"), ("est", "pr1"), (".", "pr1"), ("Roma", "1.1"), ("est", "1.1"), (".", "1.1")]),
+    (_carmina('<head>Liber</head><l n="1">Roma est.</l>'), _CARMEN_WORK._replace(cited_division_subtypes=()),
+     [("BOOK", 0, None, 0, 3, "1"), ("TITL", 0, "BOOK", 0, 0, None), ("VERS", 0, "BOOK", 1, 3, "1")],
+     [("Liber", "1"), ("Roma", "1"), ("est", "1"), (".", "1")]),
 ], ids=["verses straight in a book", "chapters straight in the edition, of paragraphs and of sections",
         "sections straight in the edition", "sections straight in a book", "a poem of a preface and a poem",
         "verses straight in the edition, with printed marks",
         "speeches straight in the edition, with a tagged quotation",
-        "sections that the configuration types as poems"])
+        "sections that the configuration types as poems",
+        "a heading above which no division is cited"])
 def test_a_work_passes_validation_with(monkeypatch, tmp_path, xml, work, subdivisions, references):
     _morpheus(monkeypatch, {})
     _macronizer_echoes(monkeypatch)
