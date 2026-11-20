@@ -720,6 +720,9 @@ class _Numbering:
     configuration_problems: List[str] = field(default_factory=list)
     supplementary_counts: Dict[str, int] = field(default_factory=lambda: {"NOTE": 0, "GAP": 0, "ABBR": 0})
 
+    def __post_init__(self):
+        self.enclosing_textpart_ids.append(self.work_id)  # the edition, which holds the text that no division does
+
     def node_of(self, path: str | None) -> str | None:
         """Returns the id of the subdivision at the path, the type and count of each subdivision down to it, such as
         BOOK 0/POEM 3/VERS 12: the same on every run, and in no other work"""

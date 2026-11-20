@@ -401,6 +401,44 @@ def test_the_heading_with_the_works_title_straight_in_the_edition_is_left_out():
         Division('BOOK', '1', (Division('POEM', '1', (_verse('1', '1.1.1', 'Arma gravi numero'),), ()),), ()),)
 
 
+@pytest.mark.parametrize("before", ['<lb/>', '<milestone unit="card" n="1"/>', '<pb n="1"/><lb/>'],
+                         ids=["a line break", "a milestone", "a page break and a line break"])
+def test_the_heading_with_the_works_title_is_left_out_after_what_is_left_out_between_parts_too(before):
+    edition = _edition(f'{before}<head>Ciris</head><l n="1">Etsi me uario</l>')
+
+    assert read_edition(edition, _LINES_ONLY, {}) == (_verse('1', '1', 'Etsi me uario'),)
+
+
+def test_verses_straight_in_the_edition_are_cited_by_their_n():
+    edition = _edition('<pb xml:id="p.103"/><l n="1"><milestone unit="alt" n="1"/>Tempus ad hoc</l><lb/>'
+                       '<l n="2">omne fuit Musae</l>')
+
+    assert read_edition(edition, _LINES_ONLY, {}) == (_verse('1', '1', 'Tempus ad hoc'),
+                                                      _verse('2', '2', 'omne fuit Musae'))
+
+
+def test_speeches_straight_in_the_edition_hold_their_verses():
+    edition = _edition('<milestone n="1" unit="card"/><pb n="p.51"/>'
+                       '<sp><speaker>Hecvba</speaker><l n="1">Quicumque regno fidit</l></sp>'
+                       '<milestone n="2" unit="card"/><sp><speaker>Chorvs</speaker><l n="67">Non rude vulgus</l></sp>')
+
+    assert read_edition(edition, _LINES_ONLY, {}) == (
+        Division('SPCH', None, (_title('1', 'Hecvba'), _verse('1', '1', 'Quicumque regno fidit')), ()),
+        Division('SPCH', None, (_title('67', 'Chorvs'), _verse('67', '67', 'Non rude vulgus')), ()))
+
+
+def test_milestones_line_breaks_and_page_breaks_between_the_divisions_of_the_edition_are_left_out():
+    edition = _edition('<head>ORATIO CVM SENATVI GRATIAS EGIT</head><milestone n="1" unit="chapter"/>'
+                       + _section('1', '<p>Si, patres conscripti</p>') + '<lb/><pb n="2"/>'
+                       + _section('2', '<p>quod si parentes</p>') + '<milestone n="2" unit="chapter"/>'
+                       + _section('3', '<p>nec enim plus</p>'))
+
+    assert read_edition(edition, _SECTIONS, {}) == (
+        Division('SECT', '1', (_paragraph('1', 'Si, patres conscripti'),), ()),
+        Division('SECT', '2', (_paragraph('2', 'quod si parentes'),), ()),
+        Division('SECT', '3', (_paragraph('3', 'nec enim plus'),), ()))
+
+
 def test_titles_and_paragraphs_read_what_verses_read():
     edition = _edition(_poem('1', '<head>Roma <gap reason="lost"/> <add>est</add></head>'
                                   '<p>Fabula<note>Nota.</note> <q>docet</q><lb/>hominem <del>bene</del>.'
@@ -492,7 +530,7 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
     (_poem('1', '<note>Desunt cetera.</note>'), _POEMS, "the edition > poem 1 has no text."),
     (_book('lyrics', '<head>Polymetra</head>' + _poem('1', '<l n="1">Roma</l>')), _POEMS,
      "the edition > book lyrics > head would have no reference: no division above it is cited."),
-    ('', _POEMS, "The edition is empty."),
+    ('', _POEMS, "the edition has no text."),
     (_book('1', _poem('1', '<l n="1">Roma</l>') + _chapter('1', _section('1', '<p>est</p>'))), _POEMS,
      "the edition > book 1 holds chapters and poems, but only one kind of division is read in the book."),
     (_book('1', _chapter('1', _section('1', '<l n="1">Roma</l>'))), _BOOKS_CHAPTERS_AND_SECTIONS,
@@ -524,7 +562,7 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
      "the edition > poem 1 > l 1 has text outside its parts, which isn't read."),
     ('<head>M. Tulli Ciceroni in Q. Caecilium Oratio</head><head>Quae Divinatio Dicitur</head>'
      + _poem('1', '<l n="1">Roma</l>'), _POEMS,
-     'the edition holds <head type="" subtype="">, but only books, poems, chapters, sections and acts are read there.'),
+     "the edition holds <head>, which isn't read in the edition."),
     (_book('1', '<lg><l n="1">Roma</l></lg>'), _BOOKS, "the edition > book 1 holds <lg>, which isn't read in a book."),
     (_book('1', '<p>Roma est.</p>'), _BOOKS, "the edition > book 1 holds <p>, which isn't read in a book."),
     (_act('1', _scene('3', '<l n="667">Roma</l>')), _LINES_ONLY,
@@ -546,6 +584,12 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
     (_poem('1', _poem('2', '<l n="1">Roma</l>') + '<l n="1">est</l>'), _POEMS,
      "the edition > poem 1 holds divisions and <l>, but only divisions or text of its own are read in a poem, not "
      "both."),
+    ('<note>Desunt cetera.</note>' + _poem('1', '<l n="1">Roma</l>'), _POEMS,
+     "the edition holds <note>, which isn't read in the edition."),
+    ('<lg><l n="1">Roma</l></lg>', _LINES_ONLY, "the edition holds <lg>, which isn't read in the edition."),
+    ('<p>Roma est.</p>', _LINES_ONLY, "the edition holds <p>, which isn't read in the edition."),
+    ('<l n="1">Roma</l>' + _poem('1', '<l n="1">est</l>'), _POEMS,
+     "the edition holds divisions and <l>, but only divisions or text of its own are read in the edition, not both."),
 ], ids=["an element in a verse that isn't read",
         "a gap for another reason", "text outside a verse", "a verse without n", "a poem without n",
         "books and poems at the top", "a book in a poem", "a book in a book", "another subtype",
@@ -561,7 +605,9 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
         "text in a choice outside its readings", "a second heading in the edition",
         "a line group in a book", "a paragraph in a book", "a verse in a scene", "a verse in an act",
         "a poem of a line group and poems", "a poem of poems and a speech",
-        "a book of verses and poems", "a chapter of paragraphs and sections", "a poem of poems and verses"])
+        "a book of verses and poems", "a chapter of paragraphs and sections", "a poem of poems and verses",
+        "a note in the edition", "a line group in the edition", "a paragraph in the edition",
+        "an edition of verses and poems"])
 def test_a_structure_that_isnt_read_raises(body, cited, error):
     with pytest.raises(ValueError, match=re.escape(error)):
         read_edition(_edition(body), cited, {})

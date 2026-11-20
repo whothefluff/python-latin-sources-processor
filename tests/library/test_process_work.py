@@ -1644,8 +1644,22 @@ def _division(subtype: str, n: str, parts: str) -> str:
       ("VERS", 0, "PROL", 1, 3, "1"), ("POEM", 0, "POEM", 4, 6, "1"), ("VERS", 0, "POEM", 4, 6, "1")],
      [("Carmen", "25"), ("Roma", "25.praef.1"), ("est", "25.praef.1"), (".", "25.praef.1"), ("Levis", "25.1.1"),
       ("est", "25.1.1"), (".", "25.1.1")]),
+    (_edition_of('<pb n="1"/><l n="1">"Roma est." ait.</l><lb/><l n="2">Levis est.</l>'),
+     _CARMEN_WORK._replace(cited_division_subtypes=()),
+     [("VERS", 0, None, 0, 6, "1"), ("VERS", 1, None, 7, 9, "2")],
+     [("“", "1"), ("Roma", "1"), ("est", "1"), (".", "1"), ("”", "1"), ("ait", "1"), (".", "1"), ("Levis", "2"),
+      ("est", "2"), (".", "2")]),
+    (_edition_of('<milestone unit="card" n="1"/><sp><speaker>Fictor</speaker><l n="1">Ait <q>iam</q> et.</l></sp>'
+                 '<sp><speaker>Fictor</speaker><l n="2">Levis est.</l></sp>'),
+     _CARMEN_WORK._replace(cited_division_subtypes=()),
+     [("SPCH", 0, None, 0, 6, None), ("TITL", 0, "SPCH", 0, 0, None), ("VERS", 0, "SPCH", 1, 6, "1"),
+      ("SPCH", 1, None, 7, 10, None), ("TITL", 0, "SPCH", 7, 7, None), ("VERS", 0, "SPCH", 8, 10, "2")],
+     [("Fictor", "1"), ("Ait", "1"), ("“", "1"), ("iam", "1"), ("”", "1"), ("et", "1"), (".", "1"), ("Fictor", "2"),
+      ("Levis", "2"), ("est", "2"), (".", "2")]),
 ], ids=["verses straight in a book", "chapters straight in the edition, of paragraphs and of sections",
-        "sections straight in the edition", "sections straight in a book", "a poem of a preface and a poem"])
+        "sections straight in the edition", "sections straight in a book", "a poem of a preface and a poem",
+        "verses straight in the edition, with printed marks",
+        "speeches straight in the edition, with a tagged quotation"])
 def test_a_work_passes_validation_with(monkeypatch, tmp_path, xml, work, subdivisions, references):
     _morpheus(monkeypatch, {})
     _macronizer_echoes(monkeypatch)
@@ -1655,6 +1669,20 @@ def test_a_work_passes_validation_with(monkeypatch, tmp_path, xml, work, subdivi
 
     assert _subdivision_rows(tmp_path) == subdivisions
     assert _references(tmp_path) == references
+
+
+def test_a_printed_mark_that_code_cant_follow_in_a_verse_that_no_division_holds_counts_in_the_whole_edition(
+        monkeypatch, tmp_path):
+    xml = _edition_of('<l n="1">‘Roma est.</l><l n="2">Ait <q>iam</q> et.</l>')
+    work = _CARMEN_WORK._replace(cited_division_subtypes=())
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+
+    with pytest.raises(ValueError, match=re.escape(
+            f"{work.edition_urn} 2: the quotation that opens at idx 5, in 'Ait “iam” et.', comes after a printed mark "
+            f"that code can't follow")):
+        process_work.process_verse(xml, tmp_path, work)
+    assert not any(tmp_path.iterdir())
 
 
 _QUOTATION_AFTER_A_STRAIGHT_MARK_IN_ANOTHER_POEM = _carmina(
