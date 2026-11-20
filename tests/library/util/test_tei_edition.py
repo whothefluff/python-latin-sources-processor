@@ -72,7 +72,7 @@ def test_books_poems_titles_verses_and_paragraphs_get_the_references_of_the_divi
                                   + _poem('2', '<head>Lupus et agnus.</head><p>Fabula docet.</p>'
                                                '<l n="1">Ad rivum.</l>')))
 
-    assert read_edition(edition, _BOOKS_AND_POEMS, {'prologus': 'PROL'}) == (
+    assert read_edition(edition, _BOOKS_AND_POEMS, {'prologus': 'PROL'}, {}) == (
         Division('BOOK', '1', (
             _title('1', 'Liber Primus'),
             Division('PROL', 'prologus', (_title('1.prologus', 'PROLOGUS'),
@@ -86,7 +86,7 @@ def test_a_work_without_books_has_its_poems_at_the_top():
     edition = _edition(_poem('1', '<head>ECLOGA I.</head><l n="1">Tityre, tu</l>')
                        + _poem('2', '<l n="1">Formosum</l>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '1', (_title('1', 'ECLOGA I.'), _verse('1', '1.1', 'Tityre, tu')), ()),
         Division('POEM', '2', (_verse('1', '2.1', 'Formosum'),), ()))
 
@@ -94,7 +94,7 @@ def test_a_work_without_books_has_its_poems_at_the_top():
 def test_books_that_the_edition_doesnt_cite_are_left_out_of_the_references_and_keep_their_edition_label():
     edition = _edition(_book('lyrics', _poem('14a', '<l n="1">Si qui forte</l><l n="3ff">lectores</l>')))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('BOOK', 'lyrics', (
             Division('POEM', '14a', (_verse('1', '14a.1', 'Si qui forte'), _verse('3ff', '14a.3ff', 'lectores')), ()),
         ), ()),)
@@ -104,7 +104,7 @@ def test_line_groups_and_speeches_hold_their_verses_without_an_edition_label_and
     edition = _edition(_poem('8', '<lg n="1"><l n="1">Pastorum musam</l><lg><l n="2">Tu mihi</l></lg></lg>'
                                   '<sp><speaker>Damon</speaker><l n="3">Nascere</l><lg><l n="4">Incipe</l></lg></sp>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '8', (
             Division('LGRP', None, (_verse('1', '8.1', 'Pastorum musam'),
                                     Division('LGRP', None, (_verse('2', '8.2', 'Tu mihi'),), ())), ()),
@@ -116,7 +116,7 @@ def test_a_heading_in_another_language_than_latin_is_a_note_of_its_division():
     edition = _edition(_poem('62', '<lg><head xml:lang="eng" resp="perseus">Youths</head><l n="1">Vesper adest</l>'
                                    '</lg>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '62', (Division('LGRP', None, (_verse('1', '62.1', 'Vesper adest'),), ('Youths',)),), ()),)
 
 
@@ -125,7 +125,7 @@ def test_quotations_milestones_and_notes_inside_a_verse_leave_the_text_around_th
                                   '<note>Quoted.</note></q></q> mihi<note resp="perseus">A note.</note> quam ferunt'
                                   '</l><l n="12"><quote n="inscription">DAPHNIS EGO</quote></l>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '2', (_verse('11', '2.11', 'Tam “gratum “est”” mihi quam ferunt', notes=('Quoted.', 'A note.'),
                                       added_quotation_marks=(AddedQuotationMark(True, None, 0, 4, 5),
                                                              AddedQuotationMark(True, None, 0, 12, 13),
@@ -140,7 +140,7 @@ def test_a_quotation_that_merge_continues_goes_on_with_the_last_chain_in_the_cha
                                    '</l><l n="38"><q rend="single; merge"><q rend="double; merge">cui licet,</q></q>'
                                    '</l>'))
 
-    assert read_edition(edition, _POEMS, {}) == (Division('POEM', '67', (
+    assert read_edition(edition, _POEMS, {}, {}) == (Division('POEM', '67', (
         _verse('36', '67.36', '“cum illa,', added_quotation_marks=(AddedQuotationMark(True, 'single', 0, 0, 1),)),
         _verse('37', '67.37', 'dixerit hic, “quid nosti,',
                added_quotation_marks=(AddedQuotationMark(True, 'double', 0, 13, 14),)),
@@ -154,7 +154,7 @@ def test_a_quotation_that_merge_continues_after_no_quotation_raises():
 
     with pytest.raises(ValueError, match='the edition > poem 1 > l 1 holds a <q rend="merge"> that continues no '
                                          'quotation before it'):
-        read_edition(edition, _POEMS, {})
+        read_edition(edition, _POEMS, {}, {})
 
 
 def test_a_quotation_in_a_heading_in_another_language_is_in_no_chain():
@@ -163,14 +163,14 @@ def test_a_quotation_in_a_heading_in_another_language_is_in_no_chain():
 
     with pytest.raises(ValueError, match='the edition > poem 62 > lg > l 1 holds a <q rend="merge"> that continues no '
                                          'quotation before it'):
-        read_edition(edition, _POEMS, {})
+        read_edition(edition, _POEMS, {}, {})
 
 
 def test_a_lost_passage_is_where_the_edition_marks_it():
     edition = _edition(_poem('64', '<l n="23b">progenies, salvete iterum <gap reason="lost" rend=". . ."/></l>'
                                    '<l n="23c"><gap reason="lost"/><note>Lost.</note></l>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '64', (_verse('23b', '64.23b', 'progenies, salvete iterum ', LostPassage('lost')),
                                 _verse('23c', '64.23c', LostPassage('lost'), notes=('Lost.',))), ()),)
 
@@ -178,7 +178,7 @@ def test_a_lost_passage_is_where_the_edition_marks_it():
 def test_a_verse_that_the_edition_marks_for_deletion_keeps_its_text():
     edition = _edition(_poem('3', '<l n="13">\n  <del>Hac re probatur.</del>\n</l>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '3', (_verse('13', '3.13', 'Hac re probatur.', deleted=True),), ()),)
 
 
@@ -188,7 +188,7 @@ def test_books_of_chapters_of_sections_hold_paragraphs_with_the_references_of_bo
                                              + _section('2', '<p>Hi omnes lingua differunt.</p>'))
                                   + _chapter('2', _section('1', '<p>Apud Helvetios.</p>'))))
 
-    assert read_edition(edition, _BOOKS_CHAPTERS_AND_SECTIONS, {}) == (
+    assert read_edition(edition, _BOOKS_CHAPTERS_AND_SECTIONS, {}, {}) == (
         Division('BOOK', '1', (
             _title('1', 'COMMENTARIUS PRIMUS'),
             Division('CHAP', '1', (Division('SECT', '1', (_paragraph('1.1.1', 'Gallia est omnis divisa.'),), ()),
@@ -202,7 +202,7 @@ def test_a_book_holds_verses_with_the_references_of_book_and_line():
                                   '<l n="1">In nova fert animus</l><l n="2">corpora</l>')
                        + _book('2', '<l n="1">Regia Solis erat</l>'))
 
-    assert read_edition(edition, _BOOKS, {}) == (
+    assert read_edition(edition, _BOOKS, {}, {}) == (
         Division('BOOK', '1', (_title('1', 'Liber primus'), _verse('1', '1.1', 'In nova fert animus'),
                                _verse('2', '1.2', 'corpora')), ()),
         Division('BOOK', '2', (_verse('1', '2.1', 'Regia Solis erat'),), ()))
@@ -213,7 +213,7 @@ def test_chapters_straight_in_the_edition_hold_paragraphs_or_sections():
                        + _chapter('1', '<p>Falso queritur.</p><p>Nam contra.</p>')
                        + _chapter('2', _section('1', '<p>Germania omnis.</p>')))
 
-    assert read_edition(edition, ('chapter', 'section'), {}) == (
+    assert read_edition(edition, ('chapter', 'section'), {}, {}) == (
         Division('CHAP', '1', (_paragraph('1', 'Falso queritur.'), _paragraph('1', 'Nam contra.')), ()),
         Division('CHAP', '2', (Division('SECT', '1', (_paragraph('2.1', 'Germania omnis.'),), ()),), ()))
 
@@ -221,7 +221,7 @@ def test_chapters_straight_in_the_edition_hold_paragraphs_or_sections():
 def test_sections_straight_in_the_edition_hold_paragraphs():
     edition = _edition(_section('1', '<p>credo ego vos, iudices, mirari</p>') + _section('2', '<p>quae me igitur</p>'))
 
-    assert read_edition(edition, _SECTIONS, {}) == (
+    assert read_edition(edition, _SECTIONS, {}, {}) == (
         Division('SECT', '1', (_paragraph('1', 'credo ego vos, iudices, mirari'),), ()),
         Division('SECT', '2', (_paragraph('2', 'quae me igitur'),), ()))
 
@@ -229,7 +229,7 @@ def test_sections_straight_in_the_edition_hold_paragraphs():
 def test_sections_straight_in_a_book_hold_paragraphs():
     edition = _edition(_book('1', _section('1', '<p>Saepe et multum</p>') + _section('2', '<p>ac me quidem</p>')))
 
-    assert read_edition(edition, _BOOKS_AND_SECTIONS, {}) == (
+    assert read_edition(edition, _BOOKS_AND_SECTIONS, {}, {}) == (
         Division('BOOK', '1', (Division('SECT', '1', (_paragraph('1.1', 'Saepe et multum'),), ()),
                                Division('SECT', '2', (_paragraph('1.2', 'ac me quidem'),), ())), ()),)
 
@@ -239,12 +239,71 @@ def test_a_poem_holds_poems_each_typed_by_its_n_and_cited_as_the_poem_that_holds
                                    + _poem('praef', '<head>Praefatio</head><l n="1">Carmina per thalamum</l>')
                                    + _poem('1', '<l n="1">Forte Venus</l>')))
 
-    assert read_edition(edition, _POEMS, {'praef': 'PROL'}) == (
+    assert read_edition(edition, _POEMS, {'praef': 'PROL'}, {}) == (
         Division('POEM', '25', (
             _title('25', 'Epithalamium'),
             Division('PROL', 'praef', (_title('25.praef', 'Praefatio'),
                                        _verse('1', '25.praef.1', 'Carmina per thalamum')), ()),
             Division('POEM', '1', (_verse('1', '25.1.1', 'Forte Venus'),), ())), ()),)
+
+
+_SECTIONS_ARE_POEMS = {'section': 'POEM'}
+
+
+def test_a_division_whose_subtype_the_configuration_types_is_read_as_one_of_that_type_and_cited_by_its_own_subtype():
+    edition = _edition(_section('pr1', '<head>Praefatio in prosa</head><p n="1">Scio versiculis meis evenire</p>')
+                       + _section('1', '<head>IULIUS AUSONIUS PATER</head><l n="1">PRIMUS in his pater Ausonius</l>'))
+
+    assert read_edition(edition, _SECTIONS, {'pr1': 'PROL'}, _SECTIONS_ARE_POEMS) == (
+        Division('PROL', 'pr1', (_title('pr1', 'Praefatio in prosa'),
+                                 _paragraph('pr1', 'Scio versiculis meis evenire')), ()),
+        Division('POEM', '1', (_title('1', 'IULIUS AUSONIUS PATER'),
+                               _verse('1', '1.1', 'PRIMUS in his pater Ausonius')), ()))
+
+
+def test_sections_that_the_configuration_types_as_poems_are_poems_in_a_book_and_in_a_poem():
+    edition = _edition(_book('1', _section('pr', '<l n="1">Paulus, praeco Dei</l>')
+                                  + _poem('7', '<head>De quadriga marmorea.</head>'
+                                          + _section('1', '<l n="1">Quis dedit innumeros</l>')
+                                          + _section('2', '<l n="1">Quadriiugos</l>'))))
+
+    assert read_edition(edition, ('book', 'poem', 'section'), {'pr': 'PROL'}, _SECTIONS_ARE_POEMS) == (
+        Division('BOOK', '1', (
+            Division('PROL', 'pr', (_verse('1', '1.pr.1', 'Paulus, praeco Dei'),), ()),
+            Division('POEM', '7', (
+                _title('1.7', 'De quadriga marmorea.'),
+                Division('POEM', '1', (_verse('1', '1.7.1.1', 'Quis dedit innumeros'),), ()),
+                Division('POEM', '2', (_verse('1', '1.7.2.1', 'Quadriiugos'),), ())), ())), ()),)
+
+
+@pytest.mark.parametrize("body, types_by_subtype, error", [
+    (_book('2', '<div type="textpart" subtype="chaper" n="pr"><p>Seneca Novato salutem.</p></div>'),
+     {'chaper': 'CHAP'},
+     'the edition > book 2 holds <div type="textpart" subtype="chaper">, but only poems, chapters and sections are '
+     'read there.'),
+    ('<div type="textpart" subtype="section"><l n="1">Roma</l></div>', _SECTIONS_ARE_POEMS,
+     "A section in the edition has no n."),
+    (_section('1', '<l>Roma est.</l>'), _SECTIONS_ARE_POEMS, "A line in the edition > section 1 has no n."),
+    (_chapter('1', _section('1', '<l n="1">Roma</l>')), _SECTIONS_ARE_POEMS,
+     'the edition > chapter 1 holds <div type="textpart" subtype="section">, which types_by_subtype makes POEM, but '
+     'only sections are read there.'),
+    (_chapter('1', '<p>Roma est.</p>') + _section('2', '<l n="1">Levis est.</l>'), _SECTIONS_ARE_POEMS,
+     "the edition holds chapters and sections, but only one kind of division is read in the edition."),
+], ids=["a subtype that isn't read, whatever type it's given", "a typed section without n",
+        "a verse without n in a typed section", "a section typed as a poem in a chapter",
+        "a chapter beside a section typed as a poem"])
+def test_a_typed_subtype_raises_as_any_other_with_the_edition_s_own_subtype_in_the_error(body, types_by_subtype,
+                                                                                         error):
+    with pytest.raises(ValueError, match=re.escape(error)):
+        read_edition(_edition(body), ('book', 'chapter', 'section'), {}, types_by_subtype)
+
+
+def test_a_poem_and_a_section_that_the_configuration_types_as_a_poem_are_one_kind_of_division_in_a_holder():
+    edition = _edition(_poem('1', '<l n="1">Roma est.</l>') + _section('2', '<l n="1">Levis est.</l>'))
+
+    assert read_edition(edition, ('poem', 'section'), {}, _SECTIONS_ARE_POEMS) == (
+        Division('POEM', '1', (_verse('1', '1.1', 'Roma est.'),), ()),
+        Division('POEM', '2', (_verse('1', '2.1', 'Levis est.'),), ()))
 
 
 def test_acts_of_scenes_hold_speeches_whose_speakers_take_the_reference_of_their_first_line():
@@ -253,7 +312,7 @@ def test_acts_of_scenes_hold_speeches_whose_speakers_take_the_reference_of_their
                                                      '<lb ed="actscene" n="5"/><l n="2">emundis</l></sp>'))
                        + _act('1', _scene('1', '<sp><speaker>Sosia</speaker><lg><l n="153">Qui me</l></lg></sp>')))
 
-    assert read_edition(edition, _LINES_ONLY, {'prologue': 'PROL'}) == (
+    assert read_edition(edition, _LINES_ONLY, {'prologue': 'PROL'}, {}) == (
         Division('PROL', 'prologue', (
             Division('SCEN', 'pr', (
                 Division('SPCH', None, (_title('1', 'Mercvrivs'), _verse('1', '1', 'Vt vos'),
@@ -271,7 +330,7 @@ def test_the_editors_additions_are_read_where_they_are_and_marked():
 
     first = _paragraph('1.1.1', 'Hoc ab illo.', marks=(EditorialMark('addition', 0, 4, 6),))
     second = _paragraph('2.1.1', 'Erus Amphitruost occupatus.', marks=(EditorialMark('addition', 0, 14, 16),))
-    assert read_edition(edition, _BOOKS_CHAPTERS_AND_SECTIONS, {}) == (
+    assert read_edition(edition, _BOOKS_CHAPTERS_AND_SECTIONS, {}, {}) == (
         Division('BOOK', '1', (Division('CHAP', '1', (Division('SECT', '1', (first,), ()),), ()),), ()),
         Division('BOOK', '2', (Division('CHAP', '1', (Division('SECT', '1', (second,), ()),), ()),), ()))
 
@@ -279,7 +338,7 @@ def test_the_editors_additions_are_read_where_they_are_and_marked():
 def test_an_addition_after_a_lost_passage_is_found_in_the_piece_after_it():
     edition = _edition(_poem('1', '<l n="1">quo <gap reason="omitted"/> te <add>avortisti</add>?</l>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '1', (_verse('1', '1.1', 'quo ', LostPassage('omitted'), ' te avortisti?',
                                       marks=(EditorialMark('addition', 2, 4, 13),)),), ()),)
 
@@ -287,7 +346,7 @@ def test_an_addition_after_a_lost_passage_is_found_in_the_piece_after_it():
 def test_a_word_that_the_edition_marks_for_deletion_inside_a_verse_is_read_and_marked():
     edition = _edition(_poem('1', '<l n="237"> <del>vicimus</del> vi feroces.</l>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '1', (_verse('237', '1.237', ' vicimus vi feroces.',
                                       marks=(EditorialMark('deletion', 0, 1, 8),)),), ()),)
 
@@ -296,7 +355,7 @@ def test_an_abbreviation_is_read_without_its_expansion_and_a_line_break_separate
     edition = _edition(_poem('1', '<l n="1">coicerent si <abbr>exercituru\'s<expan> <ex>exerciturus es'
                                   '</ex> </expan></abbr>, quaeso</l><l n="2">Quid hoc sit<lb/>hominis?</l>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '1', (_verse('1', '1.1', "coicerent si exercituru's, quaeso",
                                       expansions=(Expansion('exerciturus es', 0, 13, 25),)),
                                _verse('2', '1.2', 'Quid hoc sit hominis?')), ()),)
@@ -307,7 +366,7 @@ def test_sic_and_a_correction_of_the_editors_are_read_and_marked():
                        + _poem('9', '<l n="1">lapides ac tela <sic>coicerent</sic></l>')
                        + _poem('10', '<p>Milia passuum <sic>XV</sic>.</p>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '8', (_verse('19', '8.19', 'quod ut superbo provoces ab inguine,',
                                       marks=(EditorialMark('correction', 0, 16, 24),)),), ()),
         Division('POEM', '9', (_verse('1', '9.1', 'lapides ac tela coicerent',
@@ -319,7 +378,7 @@ def test_an_omitted_passage_is_a_lost_passage_with_its_reason_in_a_verse_or_a_pa
     edition = _edition(_poem('1', '<l n="45">deorum <gap reason="omitted"/> architectus</l>'
                                   '<p>tamen <gap reason="lost"/> Caesar</p>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '1', (_verse('45', '1.45', 'deorum ', LostPassage('omitted'), ' architectus'),
                                _paragraph('1', 'tamen ', LostPassage('lost'), ' Caesar')), ()),)
 
@@ -333,7 +392,7 @@ def test_a_note_with_a_lemma_is_about_the_last_words_before_it_that_match_the_le
                                   '<note><app><lem/></app> om. C</note>.</p>'
                                   '<p>et levis est<note><app><lem>et levis ... levis est</lem></app> om. D</note></p>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '1', (
             _paragraph('1', 'cum tot, cum summi oratores', notes=(Note('cum quom A', 'cum', LemmaMatch(0, 9, 12)),)),
             _paragraph('1', 'Postea, cum ut hoc intellegatis cum.', notes=(
@@ -351,7 +410,7 @@ def test_two_dots_or_more_spaced_or_not_even_across_lines_stand_for_the_words_th
                                   '<l n="59">quia me meruisse videbam'
                                   '<note><app><lem>quia . . . videbam</lem></app> quoniam videbar</note></l>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '1', (
             _verse('53', '1.53', 'unus in hoc nemo est populo,',
                    notes=(Note('nemo . . populo populo vix est', 'nemo . . populo', LemmaMatch(0, 12, 27)),)),
@@ -366,7 +425,7 @@ def test_one_dot_in_a_lemma_is_punctuation_and_leaves_out_no_words():
     edition = _edition(_poem('1', '<l n="1">tum Roma, tum Caesar'
                                   '<note><app><lem>Roma. Caesar</lem></app> om. B</note></l>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '1', (
             _verse('1', '1.1', 'tum Roma, tum Caesar', notes=(Note('Roma. Caesar om. B', 'Roma. Caesar'),)),
         ), ()),)
@@ -377,7 +436,7 @@ def test_an_abbreviation_in_a_choice_is_read_as_printed_with_the_edition_s_expan
                                   '</choice> ilico</l><l n="177"><del><choice> <abbr>L.</abbr> '
                                   '<expan>L<ex>ucio</ex></expan> </choice></del> Sulla</l>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '1', (_verse('176', '1.176', "locutu's ilico", expansions=(Expansion('locutus es', 0, 0, 8),)),
                                _verse('177', '1.177', 'L. Sulla', marks=(EditorialMark('deletion', 0, 0, 2),),
                                       expansions=(Expansion('Lucio', 0, 0, 2),))), ()),)
@@ -389,7 +448,7 @@ def test_a_page_break_is_left_out_wherever_it_is_and_one_inside_a_word_leaves_it
                              '<pb n="4"/><p>plurima beneficia, sum<pb n="160"/>ma</p>'))))
                          + '</div></body></text></TEI>')
 
-    assert read_edition(root, _BOOKS_CHAPTERS_AND_SECTIONS, {}) == (
+    assert read_edition(root, _BOOKS_CHAPTERS_AND_SECTIONS, {}, {}) == (
         Division('BOOK', '1', (_title('1', 'Liber'), Division('CHAP', '1', (
             Division('SECT', '1', (_paragraph('1.1.1', 'plurima beneficia, summa'),), ()),), ())), ()),)
 
@@ -397,7 +456,7 @@ def test_a_page_break_is_left_out_wherever_it_is_and_one_inside_a_word_leaves_it
 def test_the_heading_with_the_works_title_straight_in_the_edition_is_left_out():
     edition = _edition('<head>Amores</head>' + _book('1', _poem('1', '<l n="1">Arma gravi numero</l>')))
 
-    assert read_edition(edition, _BOOKS_AND_POEMS, {}) == (
+    assert read_edition(edition, _BOOKS_AND_POEMS, {}, {}) == (
         Division('BOOK', '1', (Division('POEM', '1', (_verse('1', '1.1.1', 'Arma gravi numero'),), ()),), ()),)
 
 
@@ -406,14 +465,14 @@ def test_the_heading_with_the_works_title_straight_in_the_edition_is_left_out():
 def test_the_heading_with_the_works_title_is_left_out_after_what_is_left_out_between_parts_too(before):
     edition = _edition(f'{before}<head>Ciris</head><l n="1">Etsi me uario</l>')
 
-    assert read_edition(edition, _LINES_ONLY, {}) == (_verse('1', '1', 'Etsi me uario'),)
+    assert read_edition(edition, _LINES_ONLY, {}, {}) == (_verse('1', '1', 'Etsi me uario'),)
 
 
 def test_verses_straight_in_the_edition_are_cited_by_their_n():
     edition = _edition('<pb xml:id="p.103"/><l n="1"><milestone unit="alt" n="1"/>Tempus ad hoc</l><lb/>'
                        '<l n="2">omne fuit Musae</l>')
 
-    assert read_edition(edition, _LINES_ONLY, {}) == (_verse('1', '1', 'Tempus ad hoc'),
+    assert read_edition(edition, _LINES_ONLY, {}, {}) == (_verse('1', '1', 'Tempus ad hoc'),
                                                       _verse('2', '2', 'omne fuit Musae'))
 
 
@@ -422,7 +481,7 @@ def test_speeches_straight_in_the_edition_hold_their_verses():
                        '<sp><speaker>Hecvba</speaker><l n="1">Quicumque regno fidit</l></sp>'
                        '<milestone n="2" unit="card"/><sp><speaker>Chorvs</speaker><l n="67">Non rude vulgus</l></sp>')
 
-    assert read_edition(edition, _LINES_ONLY, {}) == (
+    assert read_edition(edition, _LINES_ONLY, {}, {}) == (
         Division('SPCH', None, (_title('1', 'Hecvba'), _verse('1', '1', 'Quicumque regno fidit')), ()),
         Division('SPCH', None, (_title('67', 'Chorvs'), _verse('67', '67', 'Non rude vulgus')), ()))
 
@@ -433,7 +492,7 @@ def test_milestones_line_breaks_and_page_breaks_between_the_divisions_of_the_edi
                        + _section('2', '<p>quod si parentes</p>') + '<milestone n="2" unit="chapter"/>'
                        + _section('3', '<p>nec enim plus</p>'))
 
-    assert read_edition(edition, _SECTIONS, {}) == (
+    assert read_edition(edition, _SECTIONS, {}, {}) == (
         Division('SECT', '1', (_paragraph('1', 'Si, patres conscripti'),), ()),
         Division('SECT', '2', (_paragraph('2', 'quod si parentes'),), ()),
         Division('SECT', '3', (_paragraph('3', 'nec enim plus'),), ()))
@@ -445,7 +504,7 @@ def test_titles_and_paragraphs_read_what_verses_read():
                                   '<milestone unit="para"/></p>')
                        + _poem('2', '<p><del>Fabula docet.</del></p>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '1', (
             TextBlock('TITL', None, '1', ('Roma ', LostPassage('lost'), ' est'), False, (),
                       (EditorialMark('addition', 2, 1, 4),)),
@@ -461,7 +520,7 @@ def test_a_numeral_that_the_edition_tags_is_marked_also_inside_what_the_editor_m
     edition = _edition(_book('3', _chapter('2', _section('3', '<p>anguste <sic><num>xv</num> milia</sic> militum, '
                                                               '<del>circiter <num>d</num></del> equites</p>'))))
 
-    assert read_edition(edition, _BOOKS_CHAPTERS_AND_SECTIONS, {}) == (
+    assert read_edition(edition, _BOOKS_CHAPTERS_AND_SECTIONS, {}, {}) == (
         Division('BOOK', '3', (Division('CHAP', '2', (Division('SECT', '3', (_paragraph(
             '3.2.3', 'anguste xv milia militum, circiter d equites',
             marks=(EditorialMark('sic', 0, 8, 16), EditorialMark('deletion', 0, 26, 36)),
@@ -471,7 +530,7 @@ def test_a_numeral_that_the_edition_tags_is_marked_also_inside_what_the_editor_m
 def test_an_editorial_mark_around_a_page_break_and_a_quotation_is_one_mark():
     edition = _edition(_poem('1', '<p>tum <add>ma<pb n="2"/>gis <q>ait</q></add> ille</p>'))
 
-    assert read_edition(edition, _POEMS, {}) == (
+    assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '1', (_paragraph('1', 'tum magis “ait” ille', marks=(EditorialMark('addition', 0, 4, 15),),
                                           added_quotation_marks=(AddedQuotationMark(True, None, 0, 10, 11),
                                                                  AddedQuotationMark(False, None, 0, 14, 15))),), ()),)
@@ -483,7 +542,7 @@ def test_typography_in_capitals_is_read_as_its_text_and_a_line_break_between_spe
                                              '<lb ed="actscene" n="5"/>'
                                              '<sp><speaker>Neaera</speaker><l n="30">dolor</l></sp>')))
 
-    assert read_edition(edition, _LINES_ONLY, {}) == (
+    assert read_edition(edition, _LINES_ONLY, {}, {}) == (
         Division('ACT', '1', (Division('SCEN', '1', (
             Division('SPCH', None, (_title('29', 'Lygdamus'), _verse('29', '29', 'Lygdamus hic situs est')), ()),
             Division('SPCH', None, (_title('30', 'Neaera'), _verse('30', '30', 'dolor')), ())), ()),), ()),)
@@ -497,7 +556,7 @@ def test_typography_in_capitals_is_read_as_its_text_and_a_line_break_between_spe
 def test_typography_of_another_rend_raises(typography, opening_tag):
     with pytest.raises(ValueError, match=re.escape(
             f"the edition > poem 1 > l 1 holds {opening_tag}, but only uppercase typography is read there.")):
-        read_edition(_edition(_poem('1', f'<l n="1">sunt {typography} passuum</l>')), _POEMS, {})
+        read_edition(_edition(_poem('1', f'<l n="1">sunt {typography} passuum</l>')), _POEMS, {}, {})
 
 
 @pytest.mark.parametrize("body, cited, error", [
@@ -610,7 +669,7 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
         "an edition of verses and poems"])
 def test_a_structure_that_isnt_read_raises(body, cited, error):
     with pytest.raises(ValueError, match=re.escape(error)):
-        read_edition(_edition(body), cited, {})
+        read_edition(_edition(body), cited, {}, {})
 
 
 def test_a_body_without_one_edition_raises():
@@ -618,4 +677,4 @@ def test_a_body_without_one_edition_raises():
                          '<div type="textpart" subtype="poem" n="1"><l n="1">Roma</l></div></body></text></TEI>')
 
     with pytest.raises(ValueError, match=re.escape('The body must hold one <div type="edition"> and nothing else.')):
-        read_edition(root, _POEMS, {})
+        read_edition(root, _POEMS, {}, {})

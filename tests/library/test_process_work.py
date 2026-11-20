@@ -18,7 +18,7 @@ _CARMEN_FILES = Path(__file__).parent / 'fixtures' / 'carmen'
 _CARMEN_LETTERS = LetterConvention(uv_lowercase="uv", uv_capitals="UV", ij_lowercase="i", ij_capitals="I")
 _CARMEN_WORK = process_work.WorkConfiguration(
     edition_urn='urn:cts:latinLit:fict001.fict001.fict-lat1',
-    cited_division_subtypes=('book', 'poem'), types_by_n={},
+    cited_division_subtypes=('book', 'poem'), types_by_n={}, types_by_subtype={},
     letter_convention=_CARMEN_LETTERS, spellings_by_printed_word={}, token_overrides={}, expansions={},
     printed_macronizations={}, unsettled_printed_marks={}, quotations_inside_printed_marks={},
     proper_noun_overrides={},
@@ -1656,10 +1656,18 @@ def _division(subtype: str, n: str, parts: str) -> str:
       ("SPCH", 1, None, 7, 10, None), ("TITL", 0, "SPCH", 7, 7, None), ("VERS", 0, "SPCH", 8, 10, "2")],
      [("Fictor", "1"), ("Ait", "1"), ("“", "1"), ("iam", "1"), ("”", "1"), ("et", "1"), (".", "1"), ("Fictor", "2"),
       ("Levis", "2"), ("est", "2"), (".", "2")]),
+    (_edition_of(_division("section", "pr1", "<head>Roma</head><p>Levis est.</p>")
+                 + _division("section", "1", '<l n="1">Roma est.</l>')),
+     _CARMEN_WORK._replace(cited_division_subtypes=('section',), types_by_n={'pr1': 'PROL'},
+                           types_by_subtype={'section': 'POEM'}),
+     [("PROL", 0, None, 0, 3, "pr1"), ("TITL", 0, "PROL", 0, 0, None), ("PARA", 0, "PROL", 1, 3, None),
+      ("POEM", 0, None, 4, 6, "1"), ("VERS", 0, "POEM", 4, 6, "1")],
+     [("Roma", "pr1"), ("Levis", "pr1"), ("est", "pr1"), (".", "pr1"), ("Roma", "1.1"), ("est", "1.1"), (".", "1.1")]),
 ], ids=["verses straight in a book", "chapters straight in the edition, of paragraphs and of sections",
         "sections straight in the edition", "sections straight in a book", "a poem of a preface and a poem",
         "verses straight in the edition, with printed marks",
-        "speeches straight in the edition, with a tagged quotation"])
+        "speeches straight in the edition, with a tagged quotation",
+        "sections that the configuration types as poems"])
 def test_a_work_passes_validation_with(monkeypatch, tmp_path, xml, work, subdivisions, references):
     _morpheus(monkeypatch, {})
     _macronizer_echoes(monkeypatch)

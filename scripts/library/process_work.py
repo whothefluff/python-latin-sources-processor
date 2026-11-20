@@ -79,6 +79,9 @@ class WorkConfiguration(NamedTuple):
     cited_division_subtypes: Tuple[str, ...]
     #: The subdivision types of the poems and acts whose n makes them a prologue or an epilogue, such as prologus
     types_by_n: Dict[str, str]
+    #: The subdivision types of the TEI subtypes that the edition uses for another kind of division than the dataset
+    #: does: Ausonius's Parentalia has each of its poems in a section, so its sections are {'section': 'POEM'}
+    types_by_subtype: Dict[str, str]
     letter_convention: LetterConvention
     #: The spelling that replaces a word as printed, by the word as printed, for words that letter_convention can't fix:
     #: with uv_lowercase 'uv', Mercvrivs keeps its v unless this maps it to 'Mercurius'
@@ -1002,7 +1005,8 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
     authors_and_works_data.append([author_id, work_id])
 
     numbering = _Numbering(work_id, work)
-    numbering.add_parts(read_edition(root, work.cited_division_subtypes, work.types_by_n), None, None)
+    numbering.add_parts(read_edition(root, work.cited_division_subtypes, work.types_by_n,
+                                    work.types_by_subtype), None, None)
     numbering.give_marks_their_characters()
     problems = numbering.configuration_problems
     _raise_for_problems(problems)

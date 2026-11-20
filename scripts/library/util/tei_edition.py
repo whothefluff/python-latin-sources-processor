@@ -37,6 +37,8 @@ _DIVISION_KIND_NAMES = {'edition': 'edition', 'book': 'book', 'poem': 'poem', 'c
 _NUMBERED_DIVISION_KINDS = ('book', 'poem', 'chapter', 'section', 'act', 'scene')
 #: The kinds of division that the work's configuration can give another type by their n, such as a prologue
 _DIVISION_KINDS_TYPED_BY_N = ('poem', 'act')
+#: The kind that a division is read as when the work's configuration gives its subtype a type
+_DIVISION_KINDS_BY_TYPE = {_DIVISION_TYPES_BY_KIND[kind]: kind for kind in _NUMBERED_DIVISION_KINDS}
 _BLOCK_TYPES_BY_TAG = {'head': 'TITL', 'speaker': 'TITL', 'l': 'VERS', 'p': 'PARA'}
 #: Layout and numberings between the parts of the edition or of a division, which are left out wherever they are
 _LEFT_OUT_BETWEEN_PARTS_TAGS = ('milestone', 'lb', 'pb')
@@ -225,11 +227,12 @@ class _JoinedText(NamedTuple):
     added_quotation_marks: Tuple[AddedQuotationMark, ...]
 
 
-def read_edition(root: ET.Element, cited_division_subtypes: Tuple[str, ...],
-                 types_by_n: Dict[str, str]) -> Tuple[Union[Division, TextBlock], ...]:
+def read_edition(root: ET.Element, cited_division_subtypes: Tuple[str, ...], types_by_n: Dict[str, str],
+                 types_by_subtype: Dict[str, str]) -> Tuple[Union[Division, TextBlock], ...]:
     """Returns the divisions of the edition, or its verses and speeches when it holds them straight. The references of
     the tokens are made of the TEI n of the divisions whose subtype is one of cited_division_subtypes, and of the
-    verse's. A poem or an act whose n is in types_by_n gets that type instead of POEM or ACT."""
+    verse's. A division whose subtype is in types_by_subtype is read as a division of that type, and a poem or an act
+    whose n is in types_by_n gets that type instead of POEM or ACT."""
     body = root.find(f'{_TEI}text/{_TEI}body')
     if body is None:
         raise ValueError("The TEI file has no <text><body>.")
@@ -241,7 +244,7 @@ def read_edition(root: ET.Element, cited_division_subtypes: Tuple[str, ...],
     if first is not None and _tag(first) == 'head':
         children.remove(first)  # the work's title, which its header gives
     parts, _ = _parts_and_notes(children, 'edition', 'the edition', (), cited_division_subtypes, types_by_n,
-                                _quotation_chains(body))
+                                types_by_subtype, _quotation_chains(body))
     return parts
 
 
@@ -286,22 +289,30 @@ def _children(element: ET.Element, where: str) -> List[ET.Element]:
     return list(element)
 
 
-def _division_kind_held(children: List[ET.Element], holder: str, where: str) -> str | None:
+def _division_kind_held(children: List[ET.Element], holder: str, where: str,
+                        types_by_subtype: Dict[str, str]) -> str | None:
     """Returns the kind of the divisions among the children of the edition or of a division, or None when there are
     none. Raises when one of them isn't of a kind that the holder holds, or when they're of more than one kind"""
-    kinds = {_textpart_kind(child, holder, where) for child in children if _tag(child) == 'div'}
+    divisions = [child for child in children if _tag(child) == 'div']
+    kinds = {_textpart_kind(child, holder, where, types_by_subtype) for child in divisions}
     if len(kinds) > 1:
-        raise ValueError(f"{where} holds {' and '.join(f'{kind}s' for kind in sorted(kinds))}, but only one kind of "
+        subtypes = sorted({cast(str, child.get('subtype')) for child in divisions})
+        raise ValueError(f"{where} holds {' and '.join(f'{subtype}s' for subtype in subtypes)}, but only one kind of "
                          f"division is read in the {_DIVISION_KIND_NAMES[holder]}.")
     return kinds.pop() if kinds else None
 
 
-def _textpart_kind(element: ET.Element, holder: str, where: str) -> str:
-    kind = element.get('subtype', '')
+def _textpart_kind(element: ET.Element, holder: str, where: str, types_by_subtype: Dict[str, str]) -> str:
+    """Returns the kind that the division is read as: its subtype's, or the one of the type that the work's
+    configuration gives its subtype, which has to be one that is read"""
+    subtype = element.get('subtype', '')
+    is_typed = subtype in _NUMBERED_DIVISION_KINDS and subtype in types_by_subtype
+    kind = _DIVISION_KINDS_BY_TYPE[types_by_subtype[subtype]] if is_typed else subtype
     kinds = _DIVISION_KINDS_BY_HOLDER[holder]
     if _tag(element) != 'div' or element.get('type') != 'textpart' or kind not in kinds:
-        raise ValueError(f"{where} holds <{_tag(element)} type=\"{element.get('type', '')}\" subtype=\"{kind}\">, "
-                         f"but only {_listed(kinds)} are read there.")
+        typed = f", which types_by_subtype makes {types_by_subtype[subtype]}" if is_typed else ''
+        raise ValueError(f"{where} holds <{_tag(element)} type=\"{element.get('type', '')}\" subtype=\"{subtype}\">"
+                         f"{typed}, but only {_listed(kinds)} are read there.")
     return kind
 
 
@@ -316,24 +327,28 @@ def _with_its_article(name: str) -> str:
 
 
 def _division(element: ET.Element, kind: str, where: str, cited: Tuple[str, ...],
-              cited_division_subtypes: Tuple[str, ...], types_by_n: Dict[str, str],
+              cited_division_subtypes: Tuple[str, ...], types_by_n: Dict[str, str], types_by_subtype: Dict[str, str],
               chains: _QuotationChains) -> Division:
+    """Returns the division, read as one of the kind given. The edition cites it, and an error finds it, by its own
+    subtype"""
     n = element.get('n')
     if kind in _NUMBERED_DIVISION_KINDS:
+        subtype = cast(str, element.get('subtype'))
         if not n:
-            raise ValueError(f"{'An' if kind.startswith('a') else 'A'} {kind} in {where} has no n.")
-        where = f"{where} > {kind} {n}"
-        cited = cited + (n,) if kind in cited_division_subtypes else cited
+            raise ValueError(f"{'An' if subtype.startswith('a') else 'A'} {subtype} in {where} has no n.")
+        where = f"{where} > {subtype} {n}"
+        cited = cited + (n,) if subtype in cited_division_subtypes else cited
     else:
         where = f"{where} > {kind}"
     typ = (types_by_n.get(n or '') if kind in _DIVISION_KINDS_TYPED_BY_N else None) or _DIVISION_TYPES_BY_KIND[kind]
     parts, notes = _parts_and_notes(_children(element, where), kind, where, cited, cited_division_subtypes,
-                                    types_by_n, chains)
+                                    types_by_n, types_by_subtype, chains)
     return Division(typ, n if kind in _NUMBERED_DIVISION_KINDS else None, parts, notes)
 
 
 def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited: Tuple[str, ...],
-                     cited_division_subtypes: Tuple[str, ...], types_by_n: Dict[str, str], chains: _QuotationChains
+                     cited_division_subtypes: Tuple[str, ...], types_by_n: Dict[str, str],
+                     types_by_subtype: Dict[str, str], chains: _QuotationChains
                      ) -> Tuple[Tuple[Union[Division, TextBlock], ...], Tuple[str, ...]]:
     """Returns the divisions and blocks that the children of the edition or of a division are, its title first, and
     its notes"""
@@ -341,7 +356,7 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
         if _tag(child) not in _PARTS_BY_DIVISION_KIND[holder]:
             raise ValueError(f"{where} holds <{_tag(child)}>, which isn't read in "
                              f"{_with_its_article(_DIVISION_KIND_NAMES[holder])}.")
-    division_kind = _division_kind_held(children, holder, where)
+    division_kind = _division_kind_held(children, holder, where, types_by_subtype)
     text_of_its_own = next((child for child in children if _tag(child) in _TEXT_OF_ITS_OWN_TAGS), None)
     if division_kind is not None and text_of_its_own is not None:
         raise ValueError(f"{where} holds divisions and <{_tag(text_of_its_own)}>, but only divisions or text of its "
@@ -367,9 +382,10 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
                 speaker = child
         elif tag == 'div':
             parts.append(_division(child, cast(str, division_kind), where, cited, cited_division_subtypes,
-                                   types_by_n, chains))
+                                   types_by_n, types_by_subtype, chains))
         elif tag in ('lg', 'sp'):
-            parts.append(_division(child, tag, where, cited, cited_division_subtypes, types_by_n, chains))
+            parts.append(_division(child, tag, where, cited, cited_division_subtypes, types_by_n, types_by_subtype,
+                                   chains))
         elif tag in ('l', 'p'):
             parts.append(_block(child, _BLOCK_TYPES_BY_TAG[tag], where, cited, chains))
     first_said = next(_blocks_said(parts), None)
