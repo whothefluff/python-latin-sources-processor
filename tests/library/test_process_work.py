@@ -1696,6 +1696,51 @@ def test_a_regularized_word_outside_a_choice_gets_no_note_and_an_ellipsis_is_an_
     assert _rows(tmp_path / "work_content_supplementary.csv", "workId") == [("GAP", 0, 3, 3, "omitted")]
 
 
+def test_a_choice_of_two_spellings_is_written_as_printed_with_a_note_for_the_regularized_one(monkeypatch, tmp_path):
+    xml = _edition_of(_division("book", "3", '<l n="234">nec calor est quisquam, cui non sit mixtus et <choice>'
+                                             '<reg>aer</reg><orig>aër</orig></choice>;</l>'))
+    work = _CARMEN_WORK._replace(cited_division_subtypes=('book',))
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+
+    process_work.process_verse(xml, tmp_path, work)
+    process_work.validate_csv_files(xml, tmp_path, work)
+
+    assert _references(tmp_path) == [(word, "3.234") for word in (
+        "nec", "calor", "est", "quisquam", ",", "cui", "non", "sit", "mixtus", "et", "aër", ";")]
+    assert _rows(tmp_path / "work_content_supplementary.csv", "workId") == [("NOTE", 0, 10, 10, "regularized as aer")]
+
+
+def test_the_notes_of_an_addition_and_of_a_regularized_spelling_after_a_lost_passage_are_over_their_own_tokens(
+        monkeypatch, tmp_path):
+    xml = _edition_of(_division("book", "3", '<l n="1">Roma levis <gap reason="lost"/> <add>est</add> <choice>'
+                                             '<reg>aer</reg><orig>aër</orig></choice>.</l>'))
+    work = _CARMEN_WORK._replace(cited_division_subtypes=('book',))
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+
+    process_work.process_verse(xml, tmp_path, work)
+    process_work.validate_csv_files(xml, tmp_path, work)
+
+    assert _references(tmp_path) == [(word, "3.1") for word in ("Roma", "levis", "", "est", "aër", ".")]
+    assert _rows(tmp_path / "work_content_supplementary.csv", "workId") == [
+        ("GAP", 0, 2, 2, "lost"), ("NOTE", 0, 3, 3, "added by the editor"), ("NOTE", 1, 4, 4, "regularized as aer")]
+
+
+def test_an_addition_that_holds_only_a_lost_passage_gets_no_note(monkeypatch, tmp_path):
+    xml = _edition_of(_division("chapter", "31", _division("section", "5", (
+        '<p>ut ad illorum <add>\n <gap reason="omitted"/>\n </add> uelut</p>'))))
+    work = _CARMEN_WORK._replace(cited_division_subtypes=('chapter', 'section'))
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+
+    process_work.process_verse(xml, tmp_path, work)
+    process_work.validate_csv_files(xml, tmp_path, work)
+
+    assert _references(tmp_path) == [(word, "31.5") for word in ("ut", "ad", "illorum", "", "uelut")]
+    assert _rows(tmp_path / "work_content_supplementary.csv", "workId") == [("GAP", 0, 3, 3, "omitted")]
+
+
 def test_a_printed_mark_that_code_cant_follow_in_a_verse_that_no_division_holds_counts_in_the_whole_edition(
         monkeypatch, tmp_path):
     xml = _edition_of('<l n="1">‘Roma est.</l><l n="2">Ait <q>iam</q> et.</l>')

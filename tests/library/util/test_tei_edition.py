@@ -5,7 +5,7 @@ import xml.etree.ElementTree as ET
 import pytest
 
 from scripts.library.util.tei_edition import (AddedQuotationMark, Division, EditorialMark, Expansion, LemmaMatch,
-                                              LostPassage, Note, Numeral, TextBlock, read_edition)
+                                              LostPassage, Note, Numeral, RegularizedSpelling, TextBlock, read_edition)
 
 _BOOKS_AND_POEMS = ('book', 'poem')
 _POEMS = ('poem',)
@@ -52,9 +52,9 @@ def _notes(notes) -> tuple:
 
 
 def _verse(n: str, reference: str, *pieces, deleted=False, notes=(), marks=(), expansions=(),
-           added_quotation_marks=()) -> TextBlock:
+           added_quotation_marks=(), regularized_spellings=()) -> TextBlock:
     return TextBlock('VERS', n, reference, pieces, deleted, _notes(notes), marks, (), expansions,
-                     added_quotation_marks)
+                     added_quotation_marks, regularized_spellings)
 
 
 def _paragraph(reference: str, *pieces, notes=(), marks=(), numerals=(), added_quotation_marks=()) -> TextBlock:
@@ -481,6 +481,27 @@ def test_an_abbreviation_in_a_choice_is_read_as_printed_with_the_edition_s_expan
         Division('POEM', '1', (_verse('176', '1.176', "locutu's ilico", expansions=(Expansion('locutus es', 0, 0, 8),)),
                                _verse('177', '1.177', 'L. Sulla', marks=(EditorialMark('deletion', 0, 0, 2),),
                                       expansions=(Expansion('Lucio', 0, 0, 2),))), ()),)
+
+
+def test_a_choice_of_two_spellings_is_read_as_printed_with_the_regularized_one_over_its_characters():
+    edition = _edition(_book('3', '<l n="234">nec calor est quisquam, cui non sit mixtus et <choice><reg>aer</reg>'
+                                  '<orig>aër</orig></choice>;</l><l n="235">nec <choice><orig>Larissaeus</orig>'
+                                  '<reg>Larisaeus</reg></choice> Achilles,</l>'))
+
+    assert read_edition(edition, _BOOKS, {}, {}) == (
+        Division('BOOK', '3', (
+            _verse('234', '3.234', 'nec calor est quisquam, cui non sit mixtus et aër;',
+                   regularized_spellings=(RegularizedSpelling('aer', 0, 46, 49),)),
+            _verse('235', '3.235', 'nec Larissaeus Achilles,',
+                   regularized_spellings=(RegularizedSpelling('Larisaeus', 0, 4, 14),))), ()),)
+
+
+def test_a_regularized_word_in_an_addition_is_no_spelling_beside_the_addition_s_text():
+    edition = _edition(_section('35', '<p><add><reg>quid</reg> fac</add>erem, si</p>'))
+
+    assert read_edition(edition, _SECTIONS, {}, {}) == (
+        Division('SECT', '35', (_paragraph('35', 'quid facerem, si', marks=(EditorialMark('addition', 0, 0, 8),)),),
+                 ()),)
 
 
 def test_a_page_break_is_left_out_wherever_it_is_and_one_inside_a_word_leaves_it_whole():

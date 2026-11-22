@@ -774,7 +774,7 @@ class _Numbering:
     def add_block(self, block: TextBlock, cnt: int, path: str, parent_path: str | None):
         segments: list = []
         ictus_bit_masks: List[int] = []
-        marked: List[Tuple[str, int, int]] = []  # each editorial mark's note, and its first and last segment
+        marked: List[Tuple[str, int, int]] = []  # each note over characters of a piece, and its first and last segment
         tagged_numeral_positions: Set[int] = set()
         covered_by_note_index: Dict[int, List[int]] = {}
         edition_expansions_and_positions: List[Tuple[str, List[int]]] = []
@@ -786,11 +786,15 @@ class _Numbering:
                 ictus_bit_masks.append(0)
                 continue
             piece_segments = _segments_of(piece)
-            for mark in (mark for mark in block.marks if mark.piece == index):
-                covered = _positions_of_segments_overlapping(piece_segments, mark.start, mark.end,
-                                                             first_position=len(segments))
+            notes_over_characters_of_the_piece = [
+                *((_NOTES_BY_EDITORIAL_MARK[mark.kind], mark.start, mark.end)
+                  for mark in block.marks if mark.piece == index),
+                *((f"regularized as {spelling.text}", spelling.start, spelling.end)
+                  for spelling in block.regularized_spellings if spelling.piece == index)]
+            for note, start, end in notes_over_characters_of_the_piece:
+                covered = _positions_of_segments_overlapping(piece_segments, start, end, first_position=len(segments))
                 if covered:
-                    marked.append((_NOTES_BY_EDITORIAL_MARK[mark.kind], covered[0], covered[-1]))
+                    marked.append((note, covered[0], covered[-1]))
             for numeral in (numeral for numeral in block.numerals if numeral.piece == index):
                 cut = next((segment.text for segment in piece_segments
                             if segment.start < numeral.start < segment.end
@@ -1485,7 +1489,8 @@ _ExpectedItem = Union[str, _ExpectedAddedMark, _ExpectedLostPassage]
 def _expected_items(element: ET.Element, chains: _QuotationChains) -> List[_ExpectedItem]:
     """Reads the element by the checks' own rules, not by the walker's code, so that they don't share its mistakes,
     a character at a time, with the marks around each chain of <q>s. A line break separates two words. A <choice>
-    holds only its readings, so the whitespace between them isn't text"""
+    holds only its readings, so the whitespace between them isn't text, and of two spellings the regularized one
+    isn't either"""
     if element.tag in _TAGS_LEFT_OUT_OF_THE_TEXT:
         return []
     if element.tag == f'{_TEI}gap':
@@ -1493,7 +1498,8 @@ def _expected_items(element: ET.Element, chains: _QuotationChains) -> List[_Expe
     if element.tag == f'{_TEI}lb':
         return [' ']
     if element.tag == f'{_TEI}choice':
-        return [item for reading in element for item in _expected_items(reading, chains)]
+        return [item for reading in element if reading.tag != f'{_TEI}reg'
+                for item in _expected_items(reading, chains)]
     items: List[_ExpectedItem] = list(element.text or '')
     for child in element:
         items += [*_expected_items(child, chains), *(child.tail or '')]

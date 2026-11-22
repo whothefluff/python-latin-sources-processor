@@ -57,6 +57,7 @@ _READ_EACH_IN_ITS_OWN_WAY_TAGS = ('choice', 'abbr', 'lb', 'gap', 'note')
 _LEFT_OUT_TAGS = ('milestone', 'pb')
 _INLINE_TAGS = (*_READ_AS_TEXT_TAGS, *_QUOTATION_TAGS, *_READ_EACH_IN_ITS_OWN_WAY_TAGS, *_LEFT_OUT_TAGS)
 _LEFT_OUT_OF_AN_ABBREVIATION_TAGS = ('expan',)
+_PRINTED_READING_TAGS_BY_CHOICE: Dict[Tuple[str, ...], str] = {('abbr', 'expan'): 'abbr', ('orig', 'reg'): 'orig'}
 _OPENING_MARK_PLACEHOLDER, _CLOSING_MARK_PLACEHOLDER = '“', '”'
 _LOST_PASSAGE_REASONS_BY_GAP_REASON = {'lost': 'lost', 'omitted': 'omitted', 'ellipsis': 'omitted'}
 _WORD = re.compile(r'\w+')
@@ -88,6 +89,15 @@ class Numeral(NamedTuple):
 
 class Expansion(NamedTuple):
     """An <expan>'s text, and where its abbreviation is printed: a range of characters in one of its block's pieces"""
+    text: str
+    piece: int
+    start: int
+    end: int
+
+
+class RegularizedSpelling(NamedTuple):
+    """A <reg>'s text, and where the spelling that it regularizes is printed: a range of characters in one of its
+    block's pieces"""
     text: str
     piece: int
     start: int
@@ -140,6 +150,7 @@ class TextBlock(NamedTuple):
     numerals: Tuple[Numeral, ...] = ()
     expansions: Tuple[Expansion, ...] = ()
     added_quotation_marks: Tuple[AddedQuotationMark, ...] = ()
+    regularized_spellings: Tuple[RegularizedSpelling, ...] = ()
 
     @property
     def name(self) -> str:
@@ -427,10 +438,12 @@ def _block(element: ET.Element, typ: str, where: str, cited: Tuple[str, ...], ch
                   for marking, piece, start, end in joined.marked_ranges if _tag(marking) in _EDITORIAL_MARKS_BY_TAG)
     numerals = tuple(Numeral(piece, start, end)
                      for marking, piece, start, end in joined.marked_ranges if _tag(marking) == 'num')
-    expansions = tuple(Expansion(_expansion_text(marking), piece, start, end)
-                       for marking, piece, start, end in joined.marked_ranges if _tag(marking) in ('choice', 'abbr'))
+    expansions = tuple(Expansion(text, piece, start, end)
+                       for text, piece, start, end in _kept_readings(joined, 'expan'))
+    regularized_spellings = tuple(RegularizedSpelling(text, piece, start, end)
+                                  for text, piece, start, end in _kept_readings(joined, 'reg'))
     return TextBlock(typ, n, reference, joined.pieces, deletion is not None, joined.notes, marks, numerals, expansions,
-                     joined.added_quotation_marks)
+                     joined.added_quotation_marks, regularized_spellings)
 
 
 def _whole_deletion(element: ET.Element) -> ET.Element | None:
@@ -445,7 +458,8 @@ def _inline(element: ET.Element, where: str, tags: Tuple[str, ...], chains: _Quo
     """Returns the element's text, with its lost passages and its notes where they are and the elements that mark
     its parts. Raises on any element that isn't one of tags, and on typography whose rend isn't read.
     A line break separates two words, a page break joins the text around it, an abbreviation is read as printed,
-    without its expansion, and a quotation has the places of the marks that open and close its chain."""
+    without its expansion, and so is a word without the regularized spelling beside it, and a quotation has the
+    places of the marks that open and close its chain."""
     pieces: _InlinePieces = [_MarkedText(element.text or '')]
     for child in element:
         tag = _tag(child)
@@ -461,7 +475,7 @@ def _inline(element: ET.Element, where: str, tags: Tuple[str, ...], chains: _Quo
             pieces.extend(_quoted(child, where, tags, chains))
         elif tag == 'choice':
             pieces.extend(_marked_by(piece, child)
-                          for piece in _inline(_abbreviation_of(child, where), where, (), chains))
+                          for piece in _inline(_printed_reading_of(child, where), where, (), chains))
         elif tag == 'abbr':
             # TODO(whothefluff): Amphitruo, Curculio and Menaechmi put the <expan> inside its <abbr>, where TEI has the
             #  two side by side in a <choice>. Read as a <choice> until their editions are fixed
@@ -503,18 +517,24 @@ def _marked_by(piece: _InlinePiece, element: ET.Element) -> _InlinePiece:
     return piece._replace(marking=piece.marking + (element,)) if isinstance(piece, _MarkedText) else piece
 
 
-def _abbreviation_of(choice: ET.Element, where: str) -> ET.Element:
-    """Returns the <abbr> of a <choice> of an abbreviation and its <expan>, and raises on any other <choice>"""
-    readings = sorted(_tag(reading) for reading in _children(choice, where))
-    if readings != ['abbr', 'expan']:
+def _printed_reading_of(choice: ET.Element, where: str) -> ET.Element:
+    """Returns the reading of a <choice> that the edition prints: the <abbr> of an abbreviation and its <expan>, or
+    the <orig> of a spelling and its <reg>. Raises on any other <choice>"""
+    readings = tuple(sorted(_tag(reading) for reading in _children(choice, where)))
+    if readings not in _PRINTED_READING_TAGS_BY_CHOICE:
         raise ValueError(f"{where} holds a <choice> of {' and '.join(f'<{tag}>' for tag in readings)}, which isn't "
                          f"read there.")
-    return cast(ET.Element, choice.find(f'{_TEI}abbr'))
+    return cast(ET.Element, choice.find(f'{_TEI}{_PRINTED_READING_TAGS_BY_CHOICE[readings]}'))
 
 
-def _expansion_text(element: ET.Element) -> str:
-    """Returns the text of the <expan> of a <choice>, or of the <abbr> that holds one, with its spaces collapsed"""
-    return ' '.join(''.join(cast(ET.Element, element.find(f'{_TEI}expan')).itertext()).split())
+def _kept_readings(joined: _JoinedText, tag: str) -> Iterator[Tuple[str, int, int, int]]:
+    """Yields the text of each <expan> or <reg>, whichever the tag is, that a <choice> has beside the reading that
+    the edition prints, or that an <abbr> holds, with its spaces collapsed, and the piece and the range of
+    characters of that printed reading"""
+    for marking, piece, start, end in joined.marked_ranges:
+        reading = marking.find(f'{_TEI}{tag}') if _tag(marking) in ('choice', 'abbr') else None
+        if reading is not None:
+            yield ' '.join(''.join(reading.itertext()).split()), piece, start, end
 
 
 def _joined(inline_pieces: _InlinePieces) -> _JoinedText:
