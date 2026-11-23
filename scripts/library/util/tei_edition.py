@@ -60,6 +60,8 @@ _LEFT_OUT_OF_AN_ABBREVIATION_TAGS = ('expan',)
 _PRINTED_READING_TAGS_BY_CHOICE: Dict[Tuple[str, ...], str] = {('abbr', 'expan'): 'abbr', ('orig', 'reg'): 'orig'}
 _OPENING_MARK_PLACEHOLDER, _CLOSING_MARK_PLACEHOLDER = '“', '”'
 _LOST_PASSAGE_REASONS_BY_GAP_REASON = {'lost': 'lost', 'omitted': 'omitted', 'ellipsis': 'omitted'}
+_BLOCK_TYPES_NO_EDITION_PRINTS_A_DIGIT_IN = ('VERS', 'PARA')
+_DIGIT_WITH_THE_WORDS_AROUND_IT = re.compile(r'(?:\S+\s+)?\S*\d\S*(?:\s+\S+)?')
 _WORD = re.compile(r'\w+')
 _LEMMA_ELLIPSIS = re.compile(r'\.\s*\.')
 
@@ -434,6 +436,10 @@ def _block(element: ET.Element, typ: str, where: str, cited: Tuple[str, ...], ch
     joined = _joined(_inline(deletion if deletion is not None else element, where, _INLINE_TAGS, chains))
     if not any(isinstance(piece, LostPassage) or piece.strip() for piece in joined.pieces):
         raise ValueError(f"{where} has no text.")
+    digit = _DIGIT_WITH_THE_WORDS_AROUND_IT.search(' '.join(piece for piece in joined.pieces if isinstance(piece, str)))
+    if typ in _BLOCK_TYPES_NO_EDITION_PRINTS_A_DIGIT_IN and digit is not None:
+        raise ValueError(f"{where} has a digit in its text, in {digit.group()!r}, which can only be the edition's "
+                         f"mistake.")
     marks = tuple(EditorialMark(_EDITORIAL_MARKS_BY_TAG[_tag(marking)], piece, start, end)
                   for marking, piece, start, end in joined.marked_ranges if _tag(marking) in _EDITORIAL_MARKS_BY_TAG)
     numerals = tuple(Numeral(piece, start, end)

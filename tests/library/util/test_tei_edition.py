@@ -736,6 +736,30 @@ def test_a_structure_that_isnt_read_raises(body, cited, error):
         read_edition(_edition(body), cited, {}, {})
 
 
+@pytest.mark.parametrize("body, cited, error", [
+    ('<l n="455">per quas revexi nobilem regum manum 455</l>', (),
+     "the edition > l 455 has a digit in its text, in 'manum 455', which can only be the edition's mistake."),
+    (_chapter('2', '<p>Fuit vir forma conspicuus, ingenio 1 clarus</p>'), ('chapter',),
+     "the edition > chapter 2 > p has a digit in its text, in 'ingenio 1 clarus', which can only be the edition's "
+     "mistake."),
+    (_chapter('9', '<p>exclamatque a1nens dolore</p>'), ('chapter',),
+     "the edition > chapter 9 > p has a digit in its text, in 'exclamatque a1nens dolore', which can only be the "
+     "edition's mistake."),
+], ids=["a verse", "a paragraph", "inside a word"])
+def test_a_digit_in_the_text_of_a_verse_or_a_paragraph_raises(body, cited, error):
+    with pytest.raises(ValueError, match="^" + re.escape(error) + "$"):
+        read_edition(_edition(body), cited, {}, {})
+
+
+def test_a_digit_in_a_heading_or_in_a_note_is_read():
+    edition = _edition(_poem('10', '<head>Sancti Romani Martyris contra Gentiles Dicta.1</head>'
+                                   '<l n="1">Romane, Christi fortis<note>v. 12</note> adsertor Dei,</l>'))
+
+    assert read_edition(edition, _POEMS, {}, {}) == (
+        Division('POEM', '10', (_title('10', 'Sancti Romani Martyris contra Gentiles Dicta.1'),
+                                _verse('1', '10.1', 'Romane, Christi fortis adsertor Dei,', notes=('v. 12',))), ()),)
+
+
 def test_a_body_without_one_edition_raises():
     root = ET.fromstring('<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body>'
                          '<div type="textpart" subtype="poem" n="1"><l n="1">Roma</l></div></body></text></TEI>')
