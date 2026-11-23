@@ -11,7 +11,7 @@ import tempfile
 import uuid
 # noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from functools import cache
@@ -36,7 +36,9 @@ from scripts.library.util.spelling import (
     LetterConvention, differs_in_told_apart_letters, has_the_letters_of, projected_macronization, respell,
     respell_macronized, spellings_of, token_spellings_of,
 )
-from scripts.library.util.tei_edition import TEI_NAMESPACE, Division, LostPassage, TextBlock, read_edition
+from scripts.library.util.tei_edition import (
+    TEI_NAMESPACE, Division, LostPassage, NoteToCheckAgainstThePage, TextBlock, read_edition,
+)
 from scripts.library.util.text_normalization import ictus_bit_mask, normalize_digraphs, without_ictus_marks
 from scripts.library.util.token_classification import TokenType, get_token_type
 from scripts.library.util.unambiguous_macronizations import (
@@ -67,6 +69,10 @@ SENTENCE_TERMINATORS = ".!?"
 #: The note over the tokens of each kind of editorial mark, also when it marks a whole block
 _NOTES_BY_EDITORIAL_MARK = {'addition': 'added by the editor', 'deletion': 'marked for deletion',
                             'correction': 'corrected by the editor', 'sic': 'sic'}
+_WHAT_MAKES_A_NOTE_ONE_TO_CHECK_BY_ITS_SHAPE = {
+    'outside any block': 'stands outside any verse, title or paragraph',
+    'marginal': 'is marginal by its n, type or place',
+    'holding a verse or a paragraph': 'holds a verse or a paragraph'}
 
 
 class WorkConfiguration(NamedTuple):
@@ -96,6 +102,8 @@ class WorkConfiguration(NamedTuple):
     unsettled_printed_marks: Dict[int, UnsettledMark]
     #: Whether tagged quotations are inside a printed mark that code can't follow, by their opening mark's index
     quotations_inside_printed_marks: Dict[int, bool]
+    #: Each note's reference and text
+    notes_checked_against_the_page: List[Tuple[str, str]]
     #: Proper-noun states by token index, where the script's own would be wrong
     proper_noun_overrides: Dict[int, ProperNounState | None]
     author_abbreviations: Tuple[str, ...]
@@ -960,6 +968,31 @@ def _macronization_of_word_printed_short(idx: int, word: str, expansion: str, wo
     return None
 
 
+def _notes_to_check_against_the_page(parts: Sequence[Division | TextBlock]) -> Iterator[NoteToCheckAgainstThePage]:
+    for part in parts:
+        yield from part.notes_to_check_against_the_page
+        if isinstance(part, Division):
+            yield from _notes_to_check_against_the_page(part.parts)
+
+
+def _problems_of_notes_checked_against_the_page(parts: Sequence[Division | TextBlock],
+                                                work: WorkConfiguration) -> List[str]:
+    problems = []
+    listed = Counter(work.notes_checked_against_the_page)
+    for note in _notes_to_check_against_the_page(parts):
+        reference_and_text = (note.reference, note.text)
+        if listed[reference_and_text]:
+            listed[reference_and_text] -= 1
+        else:
+            problems.append(
+                f"{work.edition_urn} {note.reference}: the note {note.text!r} "
+                f"{_WHAT_MAKES_A_NOTE_ONE_TO_CHECK_BY_ITS_SHAPE[note.shape]}, so notes_checked_against_the_page must "
+                f"list {reference_and_text!r} once it's read against the printed page")
+    problems.extend(f"{work.edition_urn} {reference}: notes_checked_against_the_page lists the note {text!r}, but "
+                    f"the edition has no such note to check there" for reference, text in listed.elements())
+    return problems
+
+
 def _raise_for_problems(problems: List[str]):
     """Raises when the work's configuration lacks something or gets it wrong for its edition, naming each problem"""
     if problems:
@@ -1002,11 +1035,12 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
     # Linking author to work
     authors_and_works_data.append([author_id, work_id])
 
+    parts = read_edition(root, work.cited_division_subtypes, work.types_by_n, work.types_by_subtype)
     numbering = _Numbering(work_id, work)
-    numbering.add_parts(read_edition(root, work.cited_division_subtypes, work.types_by_n,
-                                    work.types_by_subtype), None, None)
+    numbering.add_parts(parts, None, None)
     numbering.give_marks_their_characters()
     problems = numbering.configuration_problems
+    problems.extend(_problems_of_notes_checked_against_the_page(parts, work))
     _raise_for_problems(problems)
     macronizations_of_words_printed_short = {
         token[1]: _macronization_of_word_printed_short(token[1], token[2], token[9], work, problems)

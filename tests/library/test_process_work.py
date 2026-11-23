@@ -21,7 +21,7 @@ _CARMEN_WORK = process_work.WorkConfiguration(
     cited_division_subtypes=('book', 'poem'), types_by_n={}, types_by_subtype={},
     letter_convention=_CARMEN_LETTERS, spellings_by_printed_word={}, token_overrides={}, expansions={},
     printed_macronizations={}, unsettled_printed_marks={}, quotations_inside_printed_marks={},
-    proper_noun_overrides={},
+    notes_checked_against_the_page=[], proper_noun_overrides={},
     author_abbreviations=('Fict.',),
     work_about_file=str(_CARMEN_FILES / 'work_about.txt'), author_about_file=str(_CARMEN_FILES / 'author_about.txt'),
     author_image_file=str(_CARMEN_FILES / 'author_image.bin'))
@@ -454,11 +454,14 @@ def _macronizer_echoes(monkeypatch):
     return asked
 
 
+_STRUCTURES_WORK = _CARMEN_WORK._replace(notes_checked_against_the_page=[('1', 'On the book.')])
+
+
 @pytest.fixture
 def structures(monkeypatch, tmp_path):
     _morpheus(monkeypatch, {})
     _macronizer_echoes(monkeypatch)
-    process_work.process_verse(_STRUCTURES, tmp_path, _CARMEN_WORK)
+    process_work.process_verse(_STRUCTURES, tmp_path, _STRUCTURES_WORK)
     return tmp_path
 
 
@@ -516,7 +519,7 @@ def test_a_printed_mark_that_code_cant_follow_counts_in_its_poem_and_not_only_in
     with pytest.raises(ValueError, match=re.escape(
             f"{_CARMEN_WORK.edition_urn} 1.1.3: the quotation that opens at idx 10, in '“levis” est.', comes after a "
             f"printed mark that code can't follow")):
-        process_work.process_verse(_STRUCTURES_WITH_A_QUOTATION_AFTER_A_SINGLE_MARK, tmp_path, _CARMEN_WORK)
+        process_work.process_verse(_STRUCTURES_WITH_A_QUOTATION_AFTER_A_SINGLE_MARK, tmp_path, _STRUCTURES_WORK)
     assert not any(tmp_path.iterdir())
 
 
@@ -1194,7 +1197,8 @@ _ORATIO = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
     </div>
   </div></div></body></text>
 </TEI>"""
-_ORATIO_WORK = _COMMENTARIUS_WORK._replace(expansions={5: 'Lūcius'})
+_ORATIO_WORK = _COMMENTARIUS_WORK._replace(expansions={5: 'Lūcius'},
+                                           notes_checked_against_the_page=[('1.1.1', 'est A')])
 
 
 class _CheckedRows(NamedTuple):
@@ -1574,7 +1578,9 @@ def _poem(n: str, blocks: str) -> str:
                            quotations_inside_printed_marks={5: True}),
      [("VERS", "“Ave Roma’ dixit ‘iam’ et.")]),
     (_carmina(_poem("1", '<l n="1">Roma est.</l><note resp="editor">vulg. <l n="2"><del>Levis est.</del></l></note>'
-                         '<l n="2">Iam est.</l>')), _CARMEN_WORK, [("VERS", "Roma est."), ("VERS", "Iam est.")]),
+                         '<l n="2">Iam est.</l>')),
+     _CARMEN_WORK._replace(notes_checked_against_the_page=[('1.1', 'vulg. Levis est.')]),
+     [("VERS", "Roma est."), ("VERS", "Iam est.")]),
 ], ids=["a paragraph that is only a lost passage", "a verse that is only a lost passage",
         "a lost passage between two words", "a lost passage against the word after it",
         "two lost passages with a sign between them", "a title with whitespace after it", "a title over two lines",
@@ -1733,6 +1739,55 @@ def test_an_addition_that_holds_only_a_lost_passage_gets_no_note(monkeypatch, tm
 
     assert _references(tmp_path) == [(word, "31.5") for word in ("ut", "ad", "illorum", "", "uelut")]
     assert _rows(tmp_path / "work_content_supplementary.csv", "workId") == [("GAP", 0, 3, 3, "omitted")]
+
+
+@pytest.mark.parametrize("poem, checked, problems", [
+    ('<note resp="perseus">Desunt cetera 18-20.</note><l n="1">Aureli, pater.</l>', [], [
+        "1.21: the note 'Desunt cetera 18-20.' stands outside any verse, title or paragraph, so "
+        "notes_checked_against_the_page must list ('1.21', 'Desunt cetera 18-20.') once it's read against the printed "
+        "page"]),
+    ('<l n="135">et contusa genas <note n="Marg" place="unspecified" anchored="true">135</note></l>', [], [
+        "1.21.135: the note '135' is marginal by its n, type or place, so notes_checked_against_the_page must list "
+        "('1.21.135', '135') once it's read against the printed page"]),
+    ('<l n="467">mene<note>supplendos censet: <l>temptat et\n ipse</l></note> vale</l>', [], [
+        "1.21.467: the note 'supplendos censet: temptat et ipse' holds a verse or a paragraph, so "
+        "notes_checked_against_the_page must list ('1.21.467', 'supplendos censet: temptat et ipse') once it's read "
+        "against the printed page"]),
+    ('<l n="1">Aureli,<note>Desunt cetera.</note> pater.</l>', [('1.21.1', 'Desunt cetera.')], [
+        "1.21.1: notes_checked_against_the_page lists the note 'Desunt cetera.', but the edition has no such note to "
+        "check there"]),
+    ('<note>Desunt cetera.</note><l n="1">Aureli, pater.</l><note>Desunt cetera.</note>', [('1.21', 'Desunt cetera.')],
+     ["1.21: the note 'Desunt cetera.' stands outside any verse, title or paragraph, so "
+      "notes_checked_against_the_page must list ('1.21', 'Desunt cetera.') once it's read against the printed page"]),
+], ids=["a note outside any block", "a marginal note", "a note that holds a verse",
+        "a note that is listed and isn't one to check", "the same note twice, listed once"])
+def test_a_note_to_check_against_the_page_that_the_configuration_doesnt_list_or_one_listed_for_nothing_stops_the_work(
+        monkeypatch, tmp_path, poem, checked, problems):
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+
+    with pytest.raises(ValueError, match="^" + re.escape(
+            "The work's configuration doesn't fit its edition:\n"
+            + "\n".join(f"    {_CARMEN_WORK.edition_urn} {problem}" for problem in problems)) + "$"):
+        process_work.process_verse(_carmina(_poem("21", poem)), tmp_path,
+                                   _CARMEN_WORK._replace(notes_checked_against_the_page=checked))
+    assert not any(tmp_path.iterdir())
+
+
+def test_notes_checked_against_the_page_are_listed_as_many_times_as_the_edition_has_them_in_any_order(monkeypatch,
+                                                                                                    tmp_path):
+    xml = _carmina(_poem("21", '<note>Desunt cetera.</note><l n="1">Aureli,<note type="margin">I</note> pater.</l>'
+                               '<note>Desunt cetera.</note>'))
+    work = _CARMEN_WORK._replace(notes_checked_against_the_page=[
+        ('1.21', 'Desunt cetera.'), ('1.21.1', 'I'), ('1.21', 'Desunt cetera.')])
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+
+    process_work.process_verse(xml, tmp_path, work)
+    process_work.validate_csv_files(xml, tmp_path, work)
+
+    assert _rows(tmp_path / "work_content_supplementary.csv", "workId") == [
+        ("NOTE", 0, 0, 3, "I"), ("NOTE", 1, 0, 3, "Desunt cetera."), ("NOTE", 2, 0, 3, "Desunt cetera.")]
 
 
 def test_a_printed_mark_that_code_cant_follow_in_a_verse_that_no_division_holds_counts_in_the_whole_edition(

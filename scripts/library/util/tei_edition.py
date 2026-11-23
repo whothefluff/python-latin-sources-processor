@@ -132,6 +132,12 @@ class Note(NamedTuple):
     lemma_match: LemmaMatch | None = None
 
 
+class NoteToCheckAgainstThePage(NamedTuple):
+    reference: str
+    text: str
+    shape: str
+
+
 class TextBlock(NamedTuple):
     """A verse, title or paragraph: text that the reader starts on a line of its own"""
     typ: str
@@ -153,6 +159,7 @@ class TextBlock(NamedTuple):
     expansions: Tuple[Expansion, ...] = ()
     added_quotation_marks: Tuple[AddedQuotationMark, ...] = ()
     regularized_spellings: Tuple[RegularizedSpelling, ...] = ()
+    notes_to_check_against_the_page: Tuple[NoteToCheckAgainstThePage, ...] = ()
 
     @property
     def name(self) -> str:
@@ -188,6 +195,7 @@ class Division(NamedTuple):
     parts: Tuple[Union['Division', TextBlock], ...]
     #: Its notes, and its headings in a language other than Latin
     notes: Tuple[str, ...]
+    notes_to_check_against_the_page: Tuple[NoteToCheckAgainstThePage, ...] = ()
 
     @property
     def title(self) -> TextBlock | None:
@@ -220,6 +228,7 @@ class _InlineNote(NamedTuple):
     """A <note> where it is in a block's text, until it's found where its lemma matches"""
     text: str
     lemma: str | None
+    shape_to_check_against_the_page: str | None
 
 
 _InlinePiece = Union[_MarkedText, LostPassage, _InlineNote]
@@ -239,6 +248,7 @@ class _JoinedText(NamedTuple):
     marked_ranges: Tuple[_MarkedRange, ...]
     notes: Tuple[Note, ...]
     added_quotation_marks: Tuple[AddedQuotationMark, ...]
+    texts_and_shapes_of_notes_to_check_against_the_page: Tuple[Tuple[str, str], ...]
 
 
 def read_edition(root: ET.Element, cited_division_subtypes: Tuple[str, ...], types_by_n: Dict[str, str],
@@ -257,7 +267,7 @@ def read_edition(root: ET.Element, cited_division_subtypes: Tuple[str, ...], typ
     first = next((child for child in children if _tag(child) not in _LEFT_OUT_BETWEEN_PARTS_TAGS), None)
     if first is not None and _tag(first) == 'head':
         children.remove(first)  # the work's title, which its header gives
-    parts, _ = _parts_and_notes(children, 'edition', 'the edition', (), cited_division_subtypes, types_by_n,
+    parts, _, _ = _parts_and_notes(children, 'edition', 'the edition', (), cited_division_subtypes, types_by_n,
                                 types_by_subtype, _quotation_chains(body))
     return parts
 
@@ -355,17 +365,19 @@ def _division(element: ET.Element, kind: str, where: str, cited: Tuple[str, ...]
     else:
         where = f"{where} > {kind}"
     typ = (types_by_n.get(n or '') if kind in _DIVISION_KINDS_TYPED_BY_N else None) or _DIVISION_TYPES_BY_KIND[kind]
-    parts, notes = _parts_and_notes(_children(element, where), kind, where, cited, cited_division_subtypes,
-                                    types_by_n, types_by_subtype, chains)
-    return Division(typ, n if kind in _NUMBERED_DIVISION_KINDS else None, parts, notes)
+    parts, notes, notes_to_check_against_the_page = _parts_and_notes(
+        _children(element, where), kind, where, cited, cited_division_subtypes, types_by_n, types_by_subtype, chains)
+    return Division(typ, n if kind in _NUMBERED_DIVISION_KINDS else None, parts, notes,
+                    notes_to_check_against_the_page)
 
 
 def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited: Tuple[str, ...],
                      cited_division_subtypes: Tuple[str, ...], types_by_n: Dict[str, str],
                      types_by_subtype: Dict[str, str], chains: _QuotationChains
-                     ) -> Tuple[Tuple[Union[Division, TextBlock], ...], Tuple[str, ...]]:
-    """Returns the divisions and blocks that the children of the edition or of a division are, its title first, and
-    its notes"""
+                     ) -> Tuple[Tuple[Union[Division, TextBlock], ...], Tuple[str, ...],
+                                Tuple[NoteToCheckAgainstThePage, ...]]:
+    """Returns the divisions and blocks that the children of the edition or of a division are, its title first, its
+    notes, and its notes to check against the page"""
     for child in children:
         if _tag(child) not in _PARTS_BY_DIVISION_KIND[holder]:
             raise ValueError(f"{where} holds <{_tag(child)}>, which isn't read in "
@@ -377,6 +389,7 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
                          f"own are read in {_with_its_article(_DIVISION_KIND_NAMES[holder])}, not both.")
     parts: List[Union[Division, TextBlock]] = []
     notes: List[str] = []
+    notes_to_check_against_the_page: List[NoteToCheckAgainstThePage] = []
     # A speaker, or a heading above which no division is cited
     title_placed_by_its_text: ET.Element | None = None
     for child in children:
@@ -385,7 +398,10 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
             if _lemma(child, where) is not None:
                 raise ValueError(f"{where} holds a note with a lemma outside a verse, title or paragraph, which isn't "
                                  "read.")
-            notes.append(_note_text(child, where))
+            text = _note_text(child, where)
+            notes.append(text)
+            notes_to_check_against_the_page.append(
+                NoteToCheckAgainstThePage('.'.join(cited), ' '.join(text.split()), 'outside any block'))
         elif tag == 'head' and child.get(_XML_LANG, 'lat') != 'lat':
             notes.append(''.join(child.itertext()).strip())
         elif tag in ('head', 'speaker'):
@@ -409,7 +425,7 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
     if title_placed_by_its_text is not None:
         parts.insert(0, _block(title_placed_by_its_text, 'TITL', where, cited, chains,
                                cast(TextBlock, first_said).reference))
-    return tuple(parts), tuple(notes)
+    return tuple(parts), tuple(notes), tuple(notes_to_check_against_the_page)
 
 
 def _blocks_said(parts: Sequence[Union[Division, TextBlock]]) -> Iterator[TextBlock]:
@@ -448,8 +464,11 @@ def _block(element: ET.Element, typ: str, where: str, cited: Tuple[str, ...], ch
                        for text, piece, start, end in _kept_readings(joined, 'expan'))
     regularized_spellings = tuple(RegularizedSpelling(text, piece, start, end)
                                   for text, piece, start, end in _kept_readings(joined, 'reg'))
+    notes_to_check_against_the_page = tuple(
+        NoteToCheckAgainstThePage(reference, ' '.join(text.split()), shape)
+        for text, shape in joined.texts_and_shapes_of_notes_to_check_against_the_page)
     return TextBlock(typ, n, reference, joined.pieces, deletion is not None, joined.notes, marks, numerals, expansions,
-                     joined.added_quotation_marks, regularized_spellings)
+                     joined.added_quotation_marks, regularized_spellings, notes_to_check_against_the_page)
 
 
 def _whole_deletion(element: ET.Element) -> ET.Element | None:
@@ -498,7 +517,8 @@ def _inline(element: ET.Element, where: str, tags: Tuple[str, ...], chains: _Quo
                 raise ValueError(f"{where} has a gap whose reason isn't {', '.join(reasons)} or {last}.")
             pieces.append(LostPassage(reason))
         elif tag == 'note':
-            pieces.append(_InlineNote(_note_text(child, where), _lemma(child, where)))
+            pieces.append(_InlineNote(_note_text(child, where), _lemma(child, where),
+                                      _shape_to_check_against_the_page(child)))
         pieces.append(_MarkedText(child.tail or ''))
     return pieces
 
@@ -547,11 +567,15 @@ def _joined(inline_pieces: _InlinePieces) -> _JoinedText:
     joined: List[Union[str, LostPassage]] = []
     ranges_by_element_id_and_piece: Dict[Tuple[int, int], Tuple[ET.Element, int, int]] = {}
     notes: List[Note] = []
+    texts_and_shapes_of_notes_to_check_against_the_page: List[Tuple[str, str]] = []
     added_quotation_marks: List[AddedQuotationMark] = []
     for inline_piece in inline_pieces:
         last = joined[-1] if joined else None
         if isinstance(inline_piece, _InlineNote):
             notes.append(_note(inline_piece, last if isinstance(last, str) else '', len(joined) - 1))
+            shape = inline_piece.shape_to_check_against_the_page
+            if shape is not None:
+                texts_and_shapes_of_notes_to_check_against_the_page.append((inline_piece.text, shape))
         elif isinstance(inline_piece, LostPassage):
             joined.append(inline_piece)
         elif inline_piece.text and isinstance(last, str):
@@ -570,7 +594,8 @@ def _joined(inline_pieces: _InlinePieces) -> _JoinedText:
                     end - 1, end))
     marked_ranges = tuple(_MarkedRange(element, index, start, end)
                           for (_, index), (element, start, end) in ranges_by_element_id_and_piece.items())
-    return _JoinedText(tuple(joined), marked_ranges, tuple(notes), tuple(added_quotation_marks))
+    return _JoinedText(tuple(joined), marked_ranges, tuple(notes), tuple(added_quotation_marks),
+                       tuple(texts_and_shapes_of_notes_to_check_against_the_page))
 
 
 def _lemma(note: ET.Element, where: str) -> str | None:
@@ -609,6 +634,14 @@ def _range_of_last_words_matching(lemma: str, text: str) -> Tuple[int, int] | No
         run_starts.insert(0, run_start)
         next_run_start = run_start
     return text_words[run_starts[0]].start(), text_words[run_starts[-1] + len(lemma_runs[-1]) - 1].end()
+
+
+def _shape_to_check_against_the_page(note: ET.Element) -> str | None:
+    if any('marg' in note.get(attribute, '').lower() for attribute in ('n', 'type', 'place')):
+        return 'marginal'
+    if note.find(f'.//{_TEI}l') is not None or note.find(f'.//{_TEI}p') is not None:
+        return 'holding a verse or a paragraph'
+    return None
 
 
 def _note_text(note: ET.Element, where: str) -> str:
