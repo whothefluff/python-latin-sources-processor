@@ -751,6 +751,24 @@ def test_a_digit_in_the_text_of_a_verse_or_a_paragraph_raises(body, cited, error
         read_edition(_edition(body), cited, {}, {})
 
 
+@pytest.mark.parametrize("body, cited, error", [
+    (_book('1', '<l n="18">signa nec Arctoos ausim spirare <note target="n.v.1.342.1" place="unspecified" '
+                'anchored="true"/> triumphos</l>'), _BOOKS,
+     "the edition > book 1 > l 18 holds an empty note, which the edition should fill or leave out."),
+    (_poem('1', '<l n="6">ne populum extrema totiens exoret <note n="1"/> harena,</l>'), _POEMS,
+     "the edition > poem 1 > l 6 holds an empty note, which the edition should fill or leave out."),
+    (_poem('1', '<l n="6">ne populum extrema totiens exoret <note n="1"> </note> harena,</l>'), _POEMS,
+     "the edition > poem 1 > l 6 holds an empty note, which the edition should fill or leave out."),
+    (_book('7', '<l n="308">messe Coroniam, Baccho Glisanta colentes.</l><note target="n.v.2.154.3" '
+                'place="unspecified" anchored="true"/>'), _BOOKS,
+     "the edition > book 7 holds an empty note, which the edition should fill or leave out."),
+], ids=["the call of a note whose text is written somewhere else", "the call of a note that the edition lacks",
+        "a note of whitespace alone", "between two verses"])
+def test_an_empty_note_raises(body, cited, error):
+    with pytest.raises(ValueError, match="^" + re.escape(error) + "$"):
+        read_edition(_edition(body), cited, {}, {})
+
+
 def test_a_digit_in_a_heading_or_in_a_note_is_read():
     edition = _edition(_poem('10', '<head>Sancti Romani Martyris contra Gentiles Dicta.1</head>'
                                    '<l n="1">Romane, Christi fortis<note>v. 12</note> adsertor Dei,</l>'))

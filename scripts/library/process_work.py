@@ -765,9 +765,6 @@ class _Numbering:
         to_index = self.next_index - 1  # its last token
         row[7] = to_index
         for note in division.notes:
-            if not note:
-                logging.warning("%s, the division that starts at %s: an empty note, which the edition should fill or "
-                                "leave out", self.work.edition_urn, self.contents[from_index][3])
             self.add_supplementary("NOTE", from_index, to_index, note)
         print(f'Subdivision: {row}')
 
@@ -871,9 +868,6 @@ class _Numbering:
         )
         self.check_expansions(first, edition_expansions_and_positions, contraction_positions)
         for note_index, note in enumerate(block.notes):
-            if not note.text:
-                logging.warning("%s %s: an empty note, which the edition should fill or leave out",
-                                self.work.edition_urn, block.reference)
             if note.lemma is not None and note.lemma_match is None:
                 logging.warning("%s %s: the note's lemma %r matches no words before it, so the note covers its block",
                                 self.work.edition_urn, block.reference, note.lemma)

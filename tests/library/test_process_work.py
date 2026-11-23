@@ -651,14 +651,12 @@ _APPARATUS = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
     <l n="2">Est <gap reason="lost"/> Levis et levis, est<note><app><lem>Levis ... levis</lem></app> om. A</note>
       <gap reason="lost"/> iam.</l>
     <l n="3">Est levis<note><app><lem>iam</lem></app> om. B</note>.</l>
-    <l n="4">iam<note n="1"/> est.</l>
-    <note/>
   </div></div></div></body></text>
 </TEI>"""
 
 
-def test_a_note_covers_the_words_of_its_lemma_and_one_whose_lemma_or_text_is_missing_warns(monkeypatch, tmp_path,
-                                                                                           caplog):
+def test_a_note_covers_the_words_of_its_lemma_and_one_whose_lemma_matches_no_words_warns(monkeypatch, tmp_path,
+                                                                                         caplog):
     _morpheus(monkeypatch, _CARMEN_ANALYSES)
     _macronizer_echoes(monkeypatch)
 
@@ -668,14 +666,10 @@ def test_a_note_covers_the_words_of_its_lemma_and_one_whose_lemma_or_text_is_mis
     supplementary = pd.read_csv(tmp_path / "work_content_supplementary.csv", keep_default_na=False)
     assert supplementary.drop(columns="workId").values.tolist() == [
         ["NOTE", 0, 1, 2, "et levis om. A"], ["GAP", 0, 6, 6, "lost"], ["GAP", 1, 12, 12, "lost"],
-        ["NOTE", 1, 7, 9, "Levis ... levis om. A"], ["NOTE", 2, 15, 17, "iam om. B"], ["NOTE", 3, 18, 20, ""],
-        ["NOTE", 4, 0, 20, ""]]
+        ["NOTE", 1, 7, 9, "Levis ... levis om. A"], ["NOTE", 2, 15, 17, "iam om. B"]]
     assert [record.getMessage() for record in caplog.records if record.levelno == logging.WARNING] == [
         "urn:cts:latinLit:fict001.fict001.fict-lat1 1.1.3: the note's lemma 'iam' matches no words before it, so the "
-        "note covers its block",
-        "urn:cts:latinLit:fict001.fict001.fict-lat1 1.1.4: an empty note, which the edition should fill or leave out",
-        "urn:cts:latinLit:fict001.fict001.fict-lat1, the division that starts at 1.1.1: an empty note, which the "
-        "edition should fill or leave out"]
+        "note covers its block"]
 
 
 _CONTRACTA = """<TEI xmlns="http://www.tei-c.org/ns/1.0">

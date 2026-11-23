@@ -385,7 +385,7 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
             if _lemma(child, where) is not None:
                 raise ValueError(f"{where} holds a note with a lemma outside a verse, title or paragraph, which isn't "
                                  "read.")
-            notes.append(_note_text(child))
+            notes.append(_note_text(child, where))
         elif tag == 'head' and child.get(_XML_LANG, 'lat') != 'lat':
             notes.append(''.join(child.itertext()).strip())
         elif tag in ('head', 'speaker'):
@@ -498,7 +498,7 @@ def _inline(element: ET.Element, where: str, tags: Tuple[str, ...], chains: _Quo
                 raise ValueError(f"{where} has a gap whose reason isn't {', '.join(reasons)} or {last}.")
             pieces.append(LostPassage(reason))
         elif tag == 'note':
-            pieces.append(_InlineNote(_note_text(child), _lemma(child, where)))
+            pieces.append(_InlineNote(_note_text(child, where), _lemma(child, where)))
         pieces.append(_MarkedText(child.tail or ''))
     return pieces
 
@@ -611,5 +611,8 @@ def _range_of_last_words_matching(lemma: str, text: str) -> Tuple[int, int] | No
     return text_words[run_starts[0]].start(), text_words[run_starts[-1] + len(lemma_runs[-1]) - 1].end()
 
 
-def _note_text(note: ET.Element) -> str:
-    return ''.join(note.itertext()).strip()
+def _note_text(note: ET.Element, where: str) -> str:
+    text = ''.join(note.itertext()).strip()
+    if not text:
+        raise ValueError(f"{where} holds an empty note, which the edition should fill or leave out.")
+    return text
