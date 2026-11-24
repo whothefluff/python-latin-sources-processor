@@ -47,7 +47,9 @@ In `work_contents.csv`:
 * **Words Printed Short:** A word (`tokenType = 1`) has an expansion when it's printed short: its whole word. Plautus
   and some other poets join es ("you are") to the word before it, and leave letters out: locutus es as `locutu's`.
   Such a contraction is three tokens: the words locutu (expansion `locūtus`) and s (expansion `es`), with `'` between
-  them. A word printed short has a certain macronization, mask 0, as every token with an expansion has.
+  them. A word whose first letters the edition tags as a numeral is printed short too: `<num>c</num>virali` is one
+  token, the word cvirali (expansion `centumvirālī`). A word printed short has a certain macronization, mask 0, as
+  every token with an expansion has.
 * **Mutual Exclusivity:** A single token will *never* have both an `expansion` and an `enclitic`.
 * **Which Enclitics:** Only the endings listed in [`ENCLITICS.md`](ENCLITICS.md) are split off.
 

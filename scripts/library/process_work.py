@@ -719,6 +719,7 @@ class _Numbering:
     marks: List[Mark] = field(default_factory=list)
     places_in_names_by_mark: Dict[int, List[Tuple[list, int]]] = field(default_factory=dict)
     rows_named_by_title: Dict[int, list] = field(default_factory=dict)
+    lengths_of_numerals_by_idx_of_the_word_that_each_starts: Dict[int, int] = field(default_factory=dict)
     enclosing_textpart_ids: List[str] = field(default_factory=list)
     inherent_states: Dict[str, ProperNounState | None] = field(default_factory=dict)
     next_index: int = 0
@@ -784,6 +785,7 @@ class _Numbering:
         ictus_bit_masks: List[int] = []
         marked: List[Tuple[str, int, int]] = []  # each note over characters of a piece, and its first and last segment
         tagged_numeral_positions: Set[int] = set()
+        lengths_of_numerals_by_position_of_the_word_that_each_starts: Dict[int, int] = {}
         covered_by_note_index: Dict[int, List[int]] = {}
         edition_expansions_and_positions: List[Tuple[str, List[int]]] = []
         contraction_positions: List[int] = []
@@ -804,14 +806,21 @@ class _Numbering:
                 if covered:
                     marked.append((note, covered[0], covered[-1]))
             for numeral in (numeral for numeral in block.numerals if numeral.piece == index):
+                word_that_it_starts = next(
+                    (position for position, segment in enumerate(piece_segments)
+                     if segment.start == numeral.start and piece[numeral.end:segment.end].isalpha()), None)
                 cut = next((segment.text for segment in piece_segments
                             if segment.start < numeral.start < segment.end
                             or segment.start < numeral.end < segment.end), None)
-                if cut is not None:
+                if word_that_it_starts is not None:
+                    lengths_of_numerals_by_position_of_the_word_that_each_starts[
+                        len(segments) + word_that_it_starts] = numeral.end - numeral.start
+                elif cut is not None:
                     raise ValueError(f"{self.work.edition_urn}: a <num> at {block.reference} holds only part of "
                                      f"'{cut}', which isn't read yet.")
-                tagged_numeral_positions.update(_positions_of_segments_overlapping(
-                    piece_segments, numeral.start, numeral.end, first_position=len(segments)))
+                else:
+                    tagged_numeral_positions.update(_positions_of_segments_overlapping(
+                        piece_segments, numeral.start, numeral.end, first_position=len(segments)))
             for note_index, match in enumerate(note.lemma_match for note in block.notes):
                 if match is not None and match.piece == index:
                     covered_by_note_index[note_index] = _positions_of_segments_overlapping(
@@ -878,7 +887,11 @@ class _Numbering:
             self.work,
             {first + position for position in tagged_numeral_positions},
         )
-        self.check_expansions(first, edition_expansions_and_positions, contraction_positions)
+        self.lengths_of_numerals_by_idx_of_the_word_that_each_starts.update(
+            (first + position, length)
+            for position, length in lengths_of_numerals_by_position_of_the_word_that_each_starts.items())
+        self.check_expansions(first, edition_expansions_and_positions, contraction_positions,
+                              lengths_of_numerals_by_position_of_the_word_that_each_starts)
         for note_index, note in enumerate(block.notes):
             if note.lemma is not None and note.lemma_match is None:
                 logging.warning("%s %s: the note's lemma %r matches no words before it, so the note covers its block",
@@ -888,9 +901,11 @@ class _Numbering:
             self.add_supplementary("NOTE", from_index, to_index, note.text)
 
     def check_expansions(self, first: int, edition_expansions_and_positions: List[Tuple[str, List[int]]],
-                         contraction_positions: List[int]):
+                         contraction_positions: List[int],
+                         lengths_of_numerals_by_position_of_the_word_that_each_starts: Dict[int, int]):
         """Adds a configuration problem for each contraction without both expansions, each expansion with other letters
-        than the edition's (or the printed ones, where it has none), and each other word with an expansion"""
+        than the edition's (or the printed ones, where it has none), each word that starts with a tagged numeral
+        without an expansion that ends with its other letters, and each other word with an expansion"""
         convention = self.work.letter_convention
         tokens = self.contents[first:]
         edition_expansion_at = {position: text for text, covered in edition_expansions_and_positions
@@ -923,13 +938,28 @@ class _Numbering:
                 self.configuration_problems.append(
                     f"{self.work.edition_urn} {words[0][3]}: the edition expands {printed!r} (idx {words[0][1]}) as "
                     f"{edition_expansion!r}, but the configuration's expansions are {configured!r}, with other letters")
-        words_printed_short = {*contraction_positions, *(position + 2 for position in contraction_positions)}
+        for position, length_of_numeral in lengths_of_numerals_by_position_of_the_word_that_each_starts.items():
+            word = tokens[position]
+            letters_after_the_numeral, expansion = word[2][length_of_numeral:], word[9]
+            place = f"{self.work.edition_urn} {word[3]}: {word[2]} (idx {word[1]})"
+            if expansion is None:
+                self.configuration_problems.append(
+                    f"{place} starts with a numeral that the edition tags, so it needs its whole word in the "
+                    f"configuration's expansions, as centumvirālī for cvirali")
+            elif not has_the_letters_of(
+                    letters_after_the_numeral, expansion[len(expansion) - len(letters_after_the_numeral):], convention):
+                self.configuration_problems.append(
+                    f"{place} has the expansion {expansion!r}, but it must end with the letters after its numeral, "
+                    f"{letters_after_the_numeral!r}")
+        words_printed_short = {*contraction_positions, *(position + 2 for position in contraction_positions),
+                               *lengths_of_numerals_by_position_of_the_word_that_each_starts}
         for position, token in enumerate(tokens):
             if token[5] == TokenType.WORD and token[9] is not None and position not in words_printed_short:
                 self.configuration_problems.append(
                     f"{self.work.edition_urn} {token[3]}: {token[2]} (idx {token[1]}) has the expansion {token[9]!r}, "
-                    f"but only the two words of a contraction take one, as the locutu and the s of locutu's "
-                    f"(locutus es)")
+                    f"but only a word printed short takes one: the two words of a contraction, as the locutu and the "
+                    f"s of locutu's (locutus es), and a word that starts with a tagged numeral, as cvirali "
+                    f"(centumvirali)")
 
     def give_marks_their_characters(self):
         """In their tokens and in the names that hold them, adding the configuration's problems with them"""
@@ -951,12 +981,16 @@ class _Numbering:
         self.supplementary_counts[typ] += 1
 
 
-def _macronization_of_word_printed_short(idx: int, word: str, expansion: str, work: WorkConfiguration,
-                                         problems: List[str]) -> str | None:
-    """Returns the word with its expansion's macrons, or else as printed_macronizations has it. Adds a problem and
-    returns None when printed_macronizations lacks it, has it needlessly, or has other letters"""
+def _macronization_of_word_printed_short(idx: int, word: str, expansion: str, length_of_the_numeral_that_starts_it: int,
+                                         work: WorkConfiguration, problems: List[str]) -> str | None:
+    """Returns the word with its expansion's macrons after the numeral that starts it, or else as
+    printed_macronizations has it. Adds a problem and returns None when printed_macronizations lacks it, has it
+    needlessly, or has other letters"""
     respelled = spelled_with_morpheus_letters(word, work.letter_convention)
-    from_expansion = projected_macronization(respelled, expansion, work.letter_convention)
+    numeral = respelled[:length_of_the_numeral_that_starts_it]
+    rest_from_expansion = projected_macronization(
+        respelled[length_of_the_numeral_that_starts_it:], expansion, work.letter_convention)
+    from_expansion = None if rest_from_expansion is None else numeral + rest_from_expansion
     configured = work.printed_macronizations.get(idx)
     place = f"{work.edition_urn}: '{respelled}' (idx {idx}), printed short for {expansion!r},"
     if from_expansion is not None and configured is not None:
@@ -1047,7 +1081,9 @@ def process_verse(xml_string, output_dir, work: WorkConfiguration):
     problems.extend(_problems_of_notes_checked_against_the_page(parts, work))
     _raise_for_problems(problems)
     macronizations_of_words_printed_short = {
-        token[1]: _macronization_of_word_printed_short(token[1], token[2], token[9], work, problems)
+        token[1]: _macronization_of_word_printed_short(
+            token[1], token[2], token[9],
+            numbering.lengths_of_numerals_by_idx_of_the_word_that_each_starts.get(token[1], 0), work, problems)
         for token in numbering.contents if token[5] == TokenType.WORD and token[9] is not None}
     problems.extend(
         f"{work.edition_urn}: the configuration's printed_macronizations has idx {idx}, which isn't a word with an "

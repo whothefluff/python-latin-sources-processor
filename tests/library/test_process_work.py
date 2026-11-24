@@ -610,11 +610,12 @@ def test_a_word_that_the_edition_tags_as_a_numeral_is_one_wherever_its_block_is_
 
 
 @pytest.mark.parametrize("paragraph, token", [
-    ("Tum <num>x</num>viri veniunt.", "xviri"),
     ("Dat HS<num>x</num> servo.", "HSx"),
+    ("Tum de<num>c</num>viri veniunt.", "decviri"),
     ("Milia <num>C</num>. Deinde abit.", "C."),
-], ids=["it ends inside a word", "it starts inside a word", "an abbreviation takes the period after it"])
-def test_a_numeral_tag_that_holds_only_part_of_a_token_raises(monkeypatch, tmp_path, paragraph, token):
+], ids=["the end of a word", "the middle of a word", "an abbreviation without the period that it takes"])
+def test_a_numeral_tag_that_holds_only_part_of_a_token_and_not_the_start_of_a_word_raises(
+        monkeypatch, tmp_path, paragraph, token):
     _morpheus(monkeypatch, _CARMEN_ANALYSES)
     _macronizer_echoes(monkeypatch)
     numeri = re.sub(r'<p>.*</p>', f'<p>{paragraph}</p>', _NUMERI)
@@ -623,6 +624,49 @@ def test_a_numeral_tag_that_holds_only_part_of_a_token_raises(monkeypatch, tmp_p
             f"{_COMMENTARIUS_WORK.edition_urn}: a <num> at 1.1.1 holds only part of '{token}', which isn't read "
             f"yet.")):
         process_work.process_verse(numeri, tmp_path, _COMMENTARIUS_WORK)
+
+
+_NUMERI_IN_WORDS = re.sub(
+    r'<p>.*</p>', '<p>iudicio <num>c</num>virali a <num rend="smallcaps">ii</num>viris.</p>', _NUMERI)
+_NUMERI_IN_WORDS_WORK = _COMMENTARIUS_WORK._replace(expansions={2: 'centumvirālī', 4: 'duumvirīs'})
+
+
+def test_a_word_that_starts_with_a_tagged_numeral_is_a_word_with_its_whole_word_and_the_macrons_of_its_end(
+        monkeypatch, tmp_path):
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    _macronizer_echoes(monkeypatch)
+
+    process_work.process_verse(_NUMERI_IN_WORDS, tmp_path, _NUMERI_IN_WORDS_WORK)
+    process_work.validate_csv_files(_NUMERI_IN_WORDS, tmp_path, _NUMERI_IN_WORDS_WORK)
+
+    contents = pd.read_csv(tmp_path / "work_contents.csv", dtype={"word": str}, keep_default_na=False)
+    assert contents[["word", "tokenType", "expansion"]].values.tolist()[1:] == [
+        ["iudicio", 1, ""], ["cvirali", 1, "centumvirālī"], ["a", 1, ""], ["iiviris", 1, "duumvirīs"], [".", 4, ""]]
+    assert _rows(tmp_path / "work_macronizations.csv", "workId") == [
+        (0, "Liber", 0), (1, "iudicio", 0), (2, "cvirālī", 0), (3, "a", 0), (4, "iivirīs", 0)]
+
+
+@pytest.mark.parametrize("changes, problem", [
+    ({"expansions": {4: 'duumvirīs'}},
+     " 1.1.1: cvirali (idx 2) starts with a numeral that the edition tags, so it needs its whole word in the "
+     "configuration's expansions, as centumvirālī for cvirali"),
+    ({"expansions": {2: 'centumvirī', 4: 'duumvirīs'}},
+     " 1.1.1: cvirali (idx 2) has the expansion 'centumvirī', but it must end with the letters after its numeral, "
+     "'virali'"),
+    ({"printed_macronizations": {2: 'cvirālī'}},
+     ": 'cvirali' (idx 2), printed short for 'centumvirālī', gets its macrons from its expansion, so "
+     "printed_macronizations needs no 'cvirālī'"),
+], ids=["without its expansion", "with an expansion that ends with other letters", "with a printed macronization"])
+def test_a_word_that_starts_with_a_tagged_numeral_needs_an_expansion_that_ends_with_its_other_letters_and_nothing_else(
+        monkeypatch, tmp_path, changes, problem):
+    _morpheus(monkeypatch, _CARMEN_ANALYSES)
+    asked = _macronizer_echoes(monkeypatch)
+
+    with pytest.raises(ValueError) as raised:
+        process_work.process_verse(_NUMERI_IN_WORDS, tmp_path, _NUMERI_IN_WORDS_WORK._replace(**changes))
+
+    assert str(raised.value).splitlines()[1:] == [f"    urn:cts:latinLit:fict001.fict001.fict-lat1{problem}"]
+    assert asked == []
 
 
 _EMENDATA = """<TEI xmlns="http://www.tei-c.org/ns/1.0">
@@ -762,7 +806,7 @@ def test_a_word_printed_short_has_no_enclitic_whatever_its_letters_end_with(monk
     ({"printed_macronizations": {3: 'et', 9: 'vāniloquo'}},
      r"the configuration's printed_macronizations has idx 3, which isn't a word with an expansion"),
     ({"expansions": {0: 'lēvis', 2: 'es', 3: 'etiam', 4: 'jam', 6: 'es', 9: 'vāniloquus', 11: 'es'}},
-     r"1\.1\.1: et \(idx 3\) has the expansion 'etiam', but only the two words of a contraction take one"),
+     r"1\.1\.1: et \(idx 3\) has the expansion 'etiam', but only a word printed short takes one"),
 ])
 def test_a_configuration_without_the_whole_words_of_a_contraction_or_their_macrons_raises_before_macronizing(
         monkeypatch, tmp_path, changes, error):
@@ -785,8 +829,9 @@ def test_a_contraction_without_its_expansions_is_one_problem_that_gives_the_edit
 
 @pytest.mark.parametrize("expansions, problem", [
     ({**_CONTRACTA_WORK.expansions, 3: 'atque'},
-     "1.1.1: et (idx 3) has the expansion 'atque', but only the two words of a contraction take one, as the locutu "
-     "and the s of locutu's (locutus es)"),
+     "1.1.1: et (idx 3) has the expansion 'atque', but only a word printed short takes one: the two words of a "
+     "contraction, as the locutu and the s of locutu's (locutus es), and a word that starts with a tagged numeral, as "
+     "cvirali (centumvirali)"),
     ({**_CONTRACTA_WORK.expansions, 4: 'nam'},
      "1.1.1: iam's (idx 4) has the expansions 'nam' and 'es', but the first must start with the letters of 'iam', and "
      "the second must be es"),
