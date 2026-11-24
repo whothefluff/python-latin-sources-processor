@@ -85,7 +85,8 @@ canonical-latinLit @ `95be52a`, 358 of the 126,501 notes in the Latin editions h
 **Indexing & Casing Rules:**
 
 * `wordIdx` increments if and ONLY if `tokenType <= 3`. Punctuation and editorial marks export a null/empty `wordIdx`.
-* `tokenType == 2` (Abbreviations) are forced to `properNounState = 1`.
+* `tokenType == 2` (Abbreviations) are forced to their abbreviation's `properNounState`: 1 for a name's (`L.`), 0
+  for a common noun's (`tr.`).
 * `tokenType == 3` (Numerals) are forced to `properNounState = 0`.
 * A word with an expansion keeps a word's `properNounState`.
 

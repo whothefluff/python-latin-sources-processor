@@ -1012,6 +1012,42 @@ def test_known_abbreviations_of_any_length_keep_their_period_and_end_no_sentence
         ("C.", TokenType.ABBREVIATION, 0), ("Gracchus", TokenType.WORD, 0), (".", TokenType.PUNCTUATION, 0)]
 
 
+def test_tr_and_pl_are_abbreviations_of_common_nouns_that_keep_their_period_and_end_no_sentence(monkeypatch, tmp_path):
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+    xml = _carmina('<div type="textpart" subtype="poem" n="1">'
+                   '<l n="1">per illum <choice> <abbr>tr.</abbr> <expan>tribunum</expan> </choice> <choice> '
+                   '<abbr>pl.</abbr> <expan>plebis</expan> </choice> senatui,</l>'
+                   '<l n="2">cum is tribunus pl. facit.</l></div>')
+
+    process_work.process_verse(xml, tmp_path, _CARMEN_WORK._replace(
+        expansions={2: 'tribūnum', 3: 'plēbis', 9: 'plēbis'}))
+
+    contents = pd.read_csv(tmp_path / "work_contents.csv", keep_default_na=False)
+    assert list(zip(contents["word"], contents["tokenType"], contents["properNounState"], contents["sentenceIdx"],
+                    contents["expansion"])) == [
+        ("per", TokenType.WORD, "0", 0, ""), ("illum", TokenType.WORD, "0", 0, ""),
+        ("tr.", TokenType.ABBREVIATION, "0", 0, "tribūnum"), ("pl.", TokenType.ABBREVIATION, "0", 0, "plēbis"),
+        ("senatui", TokenType.WORD, "0", 0, ""), (",", TokenType.PUNCTUATION, "", 0, ""),
+        ("cum", TokenType.WORD, "0", 0, ""), ("is", TokenType.WORD, "0", 0, ""),
+        ("tribunus", TokenType.WORD, "0", 0, ""), ("pl.", TokenType.ABBREVIATION, "0", 0, "plēbis"),
+        ("facit", TokenType.WORD, "0", 0, ""), (".", TokenType.PUNCTUATION, "", 0, "")]
+
+
+def test_tr_and_pl_with_a_capital_are_a_word_and_a_period(monkeypatch, tmp_path):
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+    xml = _carmina('<div type="textpart" subtype="poem" n="1"><l n="1">Pl. facit, TR. est.</l></div>')
+
+    process_work.process_verse(xml, tmp_path, _CARMEN_WORK)
+
+    contents = pd.read_csv(tmp_path / "work_contents.csv")
+    assert list(zip(contents["word"], contents["tokenType"], contents["sentenceIdx"])) == [
+        ("Pl", TokenType.WORD, 0), (".", TokenType.PUNCTUATION, 0), ("facit", TokenType.WORD, 1),
+        (",", TokenType.PUNCTUATION, 1), ("TR", TokenType.WORD, 1), (".", TokenType.PUNCTUATION, 1),
+        ("est", TokenType.WORD, 2), (".", TokenType.PUNCTUATION, 2)]
+
+
 def test_a_list_of_words_gets_the_macronizations_of_its_words_and_not_of_the_et_between_them(monkeypatch):
     _macronizer_answers(monkeypatch, [("et", "et", 0), (" ", " ", 0), ("Levis", "Lēvis", 0), (" ", " ", 0),
                                       ("et", "et", 0), (" ", " ", 0), ("Venere", "Venere", 2)])
@@ -2078,9 +2114,13 @@ def test_validation_refuses_a_prologue_that_lost_its_book(monkeypatch, tmp_path)
     ("Fictor", TokenType.WORD, ProperNounState.EITHER, []),
     ("Fictor", TokenType.WORD, None, ["Found 1 words without a properNounState: 'Fictor' at index 0"]),
     ("C.", TokenType.ABBREVIATION, ProperNounState.YES, []),
-    ("C.", TokenType.ABBREVIATION, None, ["Found 1 abbreviations whose properNounState isn't 1: 'C.' at index 0"]),
+    ("C.", TokenType.ABBREVIATION, None,
+     ["Found 1 abbreviations without their abbreviation's properNounState: 'C.' at index 0 needs 1"]),
     ("C.", TokenType.ABBREVIATION, ProperNounState.NO,
-     ["Found 1 abbreviations whose properNounState isn't 1: 'C.' at index 0"]),
+     ["Found 1 abbreviations without their abbreviation's properNounState: 'C.' at index 0 needs 1"]),
+    ("tr.", TokenType.ABBREVIATION, ProperNounState.NO, []),
+    ("tr.", TokenType.ABBREVIATION, ProperNounState.YES,
+     ["Found 1 abbreviations without their abbreviation's properNounState: 'tr.' at index 0 needs 0"]),
     ("XII", TokenType.NUMERAL, ProperNounState.NO, []),
     ("XII", TokenType.NUMERAL, ProperNounState.YES,
      ["Found 1 numerals whose properNounState isn't 0: 'XII' at index 0"]),
@@ -2091,8 +2131,9 @@ def test_validation_refuses_a_prologue_that_lost_its_book(monkeypatch, tmp_path)
      ["Found 1 non-word tokens with a properNounState that should be NULL."]),
     ("Sex.", TokenType.OTHER, ProperNounState.YES,
      ["Found 1 non-word tokens with a properNounState that should be NULL."]),
-], ids=["a word without an analysis", "a word without a state", "an abbreviation", "an abbreviation without a state",
-        "an abbreviation as a common word", "a numeral", "a numeral as a name", "punctuation",
+], ids=["a word without an analysis", "a word without a state", "a name's abbreviation",
+        "an abbreviation without a state", "a name's abbreviation as a common noun", "a common noun's abbreviation",
+        "a common noun's abbreviation as a name", "a numeral", "a numeral as a name", "punctuation",
         "punctuation with a state", "an editorial mark with a state", "another token with a state"])
 def test_abbreviations_numerals_and_other_tokens_have_their_proper_noun_states(word, token_type, proper_noun_state,
                                                                                 errors):

@@ -1,3 +1,5 @@
+from scripts.library.util.proper_noun import ProperNounState
+
 # noinspection SpellCheckingInspection
 NOMINA = {
     "A": {"Aulus", "Aula", "Aule"},
@@ -50,3 +52,13 @@ NOMINA = {
     "Vop": {"Vopiscus", "Vopisca"},
     "Vth": {"Velthur"},
 }
+
+COMMON_ABBREVIATIONS = {"tr", "pl"}
+
+PROPER_NOUN_STATE_BY_ABBREVIATION = {
+    **dict.fromkeys(NOMINA, ProperNounState.YES),
+    **dict.fromkeys(COMMON_ABBREVIATIONS, ProperNounState.NO),
+}
+assert not NOMINA.keys() & COMMON_ABBREVIATIONS
+
+KNOWN_ABBREVIATIONS = set(PROPER_NOUN_STATE_BY_ABBREVIATION)

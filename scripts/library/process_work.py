@@ -24,8 +24,8 @@ import requests
 from scripts.common.macrons import strip_macrons
 from scripts.common.publishing import publish
 from scripts.common.services import MACRONIZER_URL, MORPHEUS_URL
+from scripts.library.util.abbreviations import KNOWN_ABBREVIATIONS, PROPER_NOUN_STATE_BY_ABBREVIATION
 from scripts.library.util.csv_reading import read_csv_with_only_empty_fields_as_missing
-from scripts.library.util.nomina import NOMINA
 from scripts.library.util.proper_noun import (
     is_proper_noun_lemma, compute_inherent_state, compute_context_aware_state, ProperNounState,
 )
@@ -47,10 +47,6 @@ from scripts.library.util.unambiguous_macronizations import (
 
 # Enclitics split off into the `enclitic` column; deliberately a subset of Morpheus' LatinSuff
 SPLIT_ENCLITICS: list[str] = ["que", "ne", "ve", "ue", "dum"]
-
-KNOWN_ABBREVIATIONS: set[str] = {
-    *NOMINA.keys()
-}
 
 # A text splits into words and single punctuation marks
 _SEGMENT_PATTERN = r'\w+|[^\w\s]'
@@ -460,7 +456,7 @@ def _process_text_segments(
         t_type = work.token_overrides.get(fragment_index, t_type)
 
         if t_type == TokenType.ABBREVIATION:
-            context_dependent_state = ProperNounState.YES
+            context_dependent_state = PROPER_NOUN_STATE_BY_ABBREVIATION[segment.removesuffix(".")]
         elif t_type == TokenType.NUMERAL:
             context_dependent_state = ProperNounState.NO
 
@@ -1830,20 +1826,27 @@ def _described_row(row: dict, subdivisions_by_node: Dict[str, dict], contents: L
 
 def check_proper_noun_states(errors, work_contents_df):
     """Every word must have a properNounState, which its case and position give it even without an analysis, every
-    abbreviation 1, every numeral 0, and punctuation, editorial marks and other tokens none."""
+    abbreviation its own, every numeral 0, and punctuation, editorial marks and other tokens none."""
     words = work_contents_df[work_contents_df['tokenType'] == int(TokenType.WORD)]
     unknown = words[words['properNounState'].isnull()]
     if not unknown.empty:
         errors.append(f"Found {len(unknown)} words without a properNounState: "
                       + ', '.join(f"'{word}' at index {idx}" for word, idx in zip(unknown['word'], unknown['idx'])))
 
-    for token_type, state, tokens_name in ((TokenType.ABBREVIATION, ProperNounState.YES, 'abbreviations'),
-                                           (TokenType.NUMERAL, ProperNounState.NO, 'numerals')):
-        tokens = work_contents_df[work_contents_df['tokenType'] == int(token_type)]
-        wrong = tokens[tokens['properNounState'].ne(int(state)).fillna(True).astype(bool)]
-        if not wrong.empty:
-            errors.append(f"Found {len(wrong)} {tokens_name} whose properNounState isn't {int(state)}: "
-                          + ', '.join(f"'{word}' at index {idx}" for word, idx in zip(wrong['word'], wrong['idx'])))
+    abbreviations = work_contents_df[work_contents_df['tokenType'] == int(TokenType.ABBREVIATION)]
+    states_of_their_abbreviations = abbreviations['word'].map(
+        lambda word: int(PROPER_NOUN_STATE_BY_ABBREVIATION[word.removesuffix(".")]))
+    wrong = abbreviations[abbreviations['properNounState'].ne(states_of_their_abbreviations).fillna(True).astype(bool)]
+    if not wrong.empty:
+        errors.append(f"Found {len(wrong)} abbreviations without their abbreviation's properNounState: "
+                      + ', '.join(f"'{word}' at index {idx} needs {state}" for word, idx, state in zip(
+                          wrong['word'], wrong['idx'], states_of_their_abbreviations[wrong.index])))
+
+    numerals = work_contents_df[work_contents_df['tokenType'] == int(TokenType.NUMERAL)]
+    wrong = numerals[numerals['properNounState'].ne(int(ProperNounState.NO)).fillna(True).astype(bool)]
+    if not wrong.empty:
+        errors.append(f"Found {len(wrong)} numerals whose properNounState isn't {int(ProperNounState.NO)}: "
+                      + ', '.join(f"'{word}' at index {idx}" for word, idx in zip(wrong['word'], wrong['idx'])))
 
     non_words = work_contents_df[work_contents_df['tokenType'] > 3]
     bad = non_words[non_words['properNounState'].notnull()]
