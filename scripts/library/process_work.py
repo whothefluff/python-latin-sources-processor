@@ -51,9 +51,9 @@ SPLIT_ENCLITICS: list[str] = ["que", "ne", "ve", "ue", "dum"]
 # A text splits into words and single punctuation marks
 _SEGMENT_PATTERN = r'\w+|[^\w\s]'
 
-#: Each known abbreviation as the segments that the text splits it into, such as M and ' for M'
-_ABBREVIATION_SEGMENTS: FrozenSet[Tuple[str, ...]] = frozenset(
-    tuple(re.findall(_SEGMENT_PATTERN, abbreviation)) for abbreviation in KNOWN_ABBREVIATIONS)
+_ABBREVIATIONS_BY_THEIR_PRINTED_SEGMENTS: Dict[Tuple[str, ...], str] = {
+    tuple(re.findall(_SEGMENT_PATTERN, printed)): abbreviation
+    for abbreviation in KNOWN_ABBREVIATIONS for printed in (abbreviation, abbreviation.replace("'", "’"))}
 
 CAPITALIZATION_RESET_PUNCTUATION = ".!?:—"
 
@@ -658,17 +658,24 @@ def _segments_of(text: str) -> List[_Segment]:
     segments = []
     i = 0
     while i < len(raw_segments):
-        abbreviation = next((pieces for pieces in _ABBREVIATION_SEGMENTS
-                             if raw_segments[i:i + len(pieces) + 1] == [*pieces, "."]), None)
-        if abbreviation is not None:
-            end = matches[i + len(abbreviation)].end()
-            segments.append(_Segment("".join(abbreviation) + ".", matches[i].start(), end))
-            i += len(abbreviation) + 1
+        printed = next((pieces for pieces in _ABBREVIATIONS_BY_THEIR_PRINTED_SEGMENTS
+                        if raw_segments[i:i + len(pieces) + 1] == [*pieces, "."]), None)
+        if printed is not None:
+            end = matches[i + len(printed)].end()
+            segments.append(_Segment(_ABBREVIATIONS_BY_THEIR_PRINTED_SEGMENTS[printed] + ".", matches[i].start(), end))
+            i += len(printed) + 1
         else:
             segments.append(_Segment(raw_segments[i], matches[i].start(), matches[i].end()))
             i += 1
     return segments
 
+
+
+def _with_a_straight_apostrophe_in_each_abbreviation(name: str) -> str:
+    in_abbreviations = {place for segment in _segments_of(name) if len(segment.text) > 1
+                        for place in range(segment.start, segment.end)}
+    return "".join("'" if character == "’" and place in in_abbreviations else character
+                   for place, character in enumerate(name))
 
 
 def _positions_of_segments_overlapping(segments: List[_Segment], start: int, end: int,
@@ -846,7 +853,8 @@ class _Numbering:
                 self.add_supplementary("GAP", first + position, first + position, next(lost_passages).reason)
         for note, from_position, to_position in marked:
             self.add_supplementary("NOTE", first + from_position, first + to_position, note)
-        row = [self.work_id, self.node_of(path), block.typ, cnt, block.name, self.node_of(parent_path),
+        row = [self.work_id, self.node_of(path), block.typ, cnt,
+               _with_a_straight_apostrophe_in_each_abbreviation(block.name), self.node_of(parent_path),
                first, last, block.edition_label]
         self.subdivisions.append(row)
         self.token_ranges_of_blocks.append(_TokenRange(first, last))
@@ -1652,12 +1660,21 @@ def _with_single_spaces_inside_and_none_around(text: str) -> str:
     return ' '.join(text.split())
 
 
+def _positions_of_apostrophes_in_abbreviations(items: List[_ExpectedItem]) -> Set[int]:
+    text = ''.join(item if isinstance(item, str) else ' ' for item in items)
+    return {match.start() + offset for abbreviation in KNOWN_ABBREVIATIONS if "'" in abbreviation
+            for match in re.finditer(rf"(?<!\w){re.escape(abbreviation)}\.".replace("'", "['’]"), text)
+            for offset, character in enumerate(abbreviation) if character == "'"}
+
+
+def _straight_apostrophes_of_abbreviations(blocks: List[_ExpectedBlock]) -> Dict[_MarkPlace, str]:
+    return {_MarkPlace(block, position): "'" for block, expected_block in enumerate(blocks)
+            for position in _positions_of_apostrophes_in_abbreviations(expected_block.items)}
+
+
 def _mark_positions(items: List[_ExpectedItem]) -> List[int]:
     """Leaves out the apostrophe of an abbreviation such as M', which is in its token"""
-    text = ''.join(item if isinstance(item, str) else ' ' for item in items)
-    in_abbreviations = {match.start() + offset for abbreviation in KNOWN_ABBREVIATIONS if "'" in abbreviation
-                        for match in re.finditer(rf'(?<!\w){re.escape(abbreviation)}\.', text)
-                        for offset, character in enumerate(abbreviation) if character == "'"}
+    in_abbreviations = _positions_of_apostrophes_in_abbreviations(items)
     return [position for position, item in enumerate(items)
             if isinstance(item, _ExpectedAddedMark) or isinstance(item, str) and item in _MARK_CHARACTERS
             and position not in in_abbreviations]
@@ -1787,8 +1804,9 @@ def validate_blocks(errors, xml_string, subdivisions, contents, work: WorkConfig
         errors.append(f"The edition's text has {len(mark_places)} quotation marks and apostrophes, and the "
                       f"contents {len(mark_token_idxs)}.")
         return  # A block's text needs each of its marks matched with its token
-    block_texts = _expected_block_texts(
-        blocks, _expected_mark_characters(blocks, mark_places, mark_token_idxs, work, errors))
+    block_texts = _expected_block_texts(blocks, {
+        **_expected_mark_characters(blocks, mark_places, mark_token_idxs, work, errors),
+        **_straight_apostrophes_of_abbreviations(blocks)})
     rows = [subdivision for subdivision in subdivisions if subdivision['typ'] in _BLOCK_TYPES_BY_TAG.values()]
     subdivisions_by_node = {subdivision['node']: subdivision for subdivision in subdivisions}
     in_the_edition = [(_BLOCK_TYPES_BY_TAG[block_text.element.tag], block_text.text) for block_text in block_texts]

@@ -1012,6 +1012,41 @@ def test_known_abbreviations_of_any_length_keep_their_period_and_end_no_sentence
         ("C.", TokenType.ABBREVIATION, 0), ("Gracchus", TokenType.WORD, 0), (".", TokenType.PUNCTUATION, 0)]
 
 
+def test_manius_s_abbreviation_with_a_curly_apostrophe_has_a_straight_one_in_its_token_and_in_its_row_s_name(
+        monkeypatch, tmp_path):
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+    xml = _carmina('<div type="textpart" subtype="poem" n="1">'
+                   '<l n="1">probavit omnibus, M’. Curium, qui heres institutus</l></div>')
+    work = _CARMEN_WORK._replace(expansions={3: 'Mānium'})
+
+    process_work.process_verse(xml, tmp_path, work)
+    process_work.validate_csv_files(xml, tmp_path, work)
+
+    contents = pd.read_csv(tmp_path / "work_contents.csv")
+    assert list(zip(contents["word"], contents["tokenType"])) == [
+        ("probavit", TokenType.WORD), ("omnibus", TokenType.WORD), (",", TokenType.PUNCTUATION),
+        ("M'.", TokenType.ABBREVIATION), ("Curium", TokenType.WORD), (",", TokenType.PUNCTUATION),
+        ("qui", TokenType.WORD), ("heres", TokenType.WORD), ("institutus", TokenType.WORD)]
+    subdivisions = pd.read_csv(tmp_path / "work_content_subdivisions.csv")
+    assert subdivisions[subdivisions["typ"] == "VERS"]["name"].tolist() == [
+        "probavit omnibus, M'. Curium, qui heres institutus"]
+
+
+def test_an_m_and_a_curly_apostrophe_without_a_period_arent_manius_s_abbreviation(monkeypatch, tmp_path):
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+    xml = _carmina('<div type="textpart" subtype="poem" n="1"><l n="1">M’ Curium probavit.</l></div>')
+
+    process_work.process_verse(xml, tmp_path, _CARMEN_WORK._replace(
+        unsettled_printed_marks={1: process_work.UnsettledMark.APOSTROPHE}))
+
+    contents = pd.read_csv(tmp_path / "work_contents.csv")
+    assert list(zip(contents["word"], contents["tokenType"])) == [
+        ("M", TokenType.NUMERAL), ("'", TokenType.PUNCTUATION), ("Curium", TokenType.WORD),
+        ("probavit", TokenType.WORD), (".", TokenType.PUNCTUATION)]
+
+
 def test_tr_and_pl_are_abbreviations_of_common_nouns_that_keep_their_period_and_end_no_sentence(monkeypatch, tmp_path):
     _morpheus(monkeypatch, {})
     _macronizer_echoes(monkeypatch)
