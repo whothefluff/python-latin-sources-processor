@@ -449,6 +449,41 @@ def test_a_label_that_isn_t_another_numbering_inside_a_block_raises(body, error)
         read_edition(_edition(body), _SECTIONS, {}, {})
 
 
+def test_a_book_holds_paragraphs_or_line_groups_beside_its_verses():
+    edition = _edition(_book('2s', '<head>periocha libri II</head><p>Brutus iure iurando populum adstrinxit</p>')
+                       + _book('11', '<l n="452">percussa fide uel pelagi uel tristis Auerni.</l>'
+                                     '<lg><l n="453"> <del>namque chaos, caecam quondam sine sidere molem</del> </l>'
+                                     '</lg><l n="459">sed quos pulsabat Riphaeum ad Strymona, nerui,</l>'))
+
+    assert read_edition(edition, _BOOKS, {}, {}) == (
+        Division('BOOK', '2s', (_title('2s', 'periocha libri II'),
+                                _paragraph('2s', 'Brutus iure iurando populum adstrinxit')), ()),
+        Division('BOOK', '11', (
+            _verse('452', '11.452', 'percussa fide uel pelagi uel tristis Auerni.'),
+            Division('LGRP', None, (_verse('453', '11.453', 'namque chaos, caecam quondam sine sidere molem',
+                                           deleted=True),), ()),
+            _verse('459', '11.459', 'sed quos pulsabat Riphaeum ad Strymona, nerui,')), ()))
+
+
+def test_a_scene_holds_verses_of_its_own():
+    edition = _edition(_act('prologue', _scene('pr', '<milestone unit="card" resp="perseus" n="1"/>'
+                                                     '<head>PROLOGVS</head>'
+                                                     '<l n="1">Perparvam partem postulat Plautus loci</l>'
+                                                     '<lb ed="actscene" n="5"/>'
+                                                     '<l n="5">scio rém quidem urbis me ablaturum sine mora;</l>')))
+
+    assert read_edition(edition, _LINES_ONLY, {'prologue': 'PROL'}, {}) == (
+        Division('PROL', 'prologue', (Division('SCEN', 'pr', (
+            _title('1', 'PROLOGVS'), _verse('1', '1', 'Perparvam partem postulat Plautus loci'),
+            _verse('5', '5', 'scio rém quidem urbis me ablaturum sine mora;')), ()),), ()),)
+
+
+def test_a_line_group_in_a_scene_raises():
+    with pytest.raises(ValueError, match="^" + re.escape(
+            "the edition > act 1 > scene 1 holds <lg>, which isn't read in a scene.") + "$"):
+        read_edition(_edition(_act('1', _scene('1', '<lg><l n="1">Roma est.</l></lg>'))), _LINES_ONLY, {}, {})
+
+
 def test_acts_of_scenes_hold_speeches_whose_speakers_take_the_reference_of_their_first_line():
     edition = _edition(_act('prologue', _scene('pr', '<milestone unit="card" n="1"/>'
                                                      '<sp><speaker>Mercvrivs</speaker><l n="1">Vt vos</l>'
@@ -888,10 +923,6 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
     ('<head>M. Tulli Ciceroni in Q. Caecilium Oratio</head><head>Quae Divinatio Dicitur</head>'
      + _poem('1', '<l n="1">Roma</l>'), _POEMS,
      "the edition holds <head>, which isn't read in the edition."),
-    (_book('1', '<lg><l n="1">Roma</l></lg>'), _BOOKS, "the edition > book 1 holds <lg>, which isn't read in a book."),
-    (_book('1', '<p>Roma est.</p>'), _BOOKS, "the edition > book 1 holds <p>, which isn't read in a book."),
-    (_act('1', _scene('3', '<l n="667">Roma</l>')), _LINES_ONLY,
-     "the edition > act 1 > scene 3 holds <l>, which isn't read in a scene."),
     (_act('front', '<l n="cast">Roma</l>'), _LINES_ONLY,
      "the edition > act front holds <l>, which isn't read in an act."),
     (_poem('1', '<lg><l n="1">Roma</l></lg>' + _poem('2', '<l n="1">est</l>')), _POEMS,
@@ -929,7 +960,7 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
         "a choice of a misprint and its correction", "an element in a choice's abbreviation",
         "an expansion in a choice's abbreviation",
         "text in a choice outside its readings", "a second heading in the edition",
-        "a line group in a book", "a paragraph in a book", "a verse in a scene", "a verse in an act",
+        "a verse in an act",
         "a poem of a line group and poems", "a poem of poems and a speech",
         "a book of verses and poems", "a chapter of paragraphs and sections", "a poem of poems and verses",
         "a note in the edition", "a line group in the edition", "a paragraph in the edition",

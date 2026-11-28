@@ -1808,6 +1808,22 @@ def _division(subtype: str, n: str, parts: str) -> str:
       ("PARA", 0, "CHAP", 4, 6, None)],
      [("Liber", "1"), ("Roma", "1.1"), ("est", "1.1"), (".", "1.1"), ("Levis", "2.1"), ("est", "2.1"),
       (".", "2.1")]),
+    (_edition_of(_division("book", "1s", '<head>Periocha</head><p>Roma est.</p>')
+                 + _division("book", "1", _division("chapter", "1", '<p>Levis est.</p>'))),
+     _CARMEN_WORK._replace(cited_division_subtypes=('book', 'chapter')),
+     [("BOOK", 0, None, 0, 3, "1s"), ("TITL", 0, "BOOK", 0, 0, None), ("PARA", 0, "BOOK", 1, 3, None),
+      ("BOOK", 1, None, 4, 6, "1"), ("CHAP", 0, "BOOK", 4, 6, "1"), ("PARA", 0, "CHAP", 4, 6, None)],
+     [("Periocha", "1s"), ("Roma", "1s"), ("est", "1s"), (".", "1s"), ("Levis", "1.1"), ("est", "1.1"),
+      (".", "1.1")]),
+    (_edition_of(_division("act", "1", _division("scene", "1", '<head>Fictor</head><l n="1">Roma est.</l>')
+                                       + _division("scene", "2", '<sp><speaker>Fictor</speaker>'
+                                                                 '<l n="2">Levis est.</l></sp>'))),
+     _CARMEN_WORK._replace(cited_division_subtypes=()),
+     [("ACT", 0, None, 0, 7, "1"), ("SCEN", 0, "ACT", 0, 3, "1"), ("TITL", 0, "SCEN", 0, 0, None),
+      ("VERS", 0, "SCEN", 1, 3, "1"), ("SCEN", 1, "ACT", 4, 7, "2"), ("SPCH", 0, "SCEN", 4, 7, None),
+      ("TITL", 0, "SPCH", 4, 4, None), ("VERS", 0, "SPCH", 5, 7, "2")],
+     [("Fictor", "1"), ("Roma", "1"), ("est", "1"), (".", "1"), ("Fictor", "2"), ("Levis", "2"), ("est", "2"),
+      (".", "2")]),
 ], ids=["verses straight in a book", "chapters straight in the edition, of paragraphs and of sections",
         "sections straight in the edition", "sections straight in a book", "a poem of a preface and a poem",
         "verses straight in the edition, with printed marks",
@@ -1815,7 +1831,8 @@ def _division(subtype: str, n: str, parts: str) -> str:
         "sections that the configuration types as poems",
         "a heading above which no division is cited", "a prologue and a satire, Persius's shape",
         "a preface and a section that the configuration types as a poem, Prudentius's shape",
-        "books in printed volumes, Livy's shape"])
+        "books in printed volumes, Livy's shape", "a book of paragraphs beside a book of chapters, Livy's shape",
+        "a scene of verses beside a scene of speeches"])
 def test_a_work_passes_validation_with(monkeypatch, tmp_path, xml, work, subdivisions, references):
     _morpheus(monkeypatch, {})
     _macronizer_echoes(monkeypatch)

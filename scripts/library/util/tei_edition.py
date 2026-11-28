@@ -21,12 +21,12 @@ _DIVISION_KINDS_BY_HOLDER: Dict[str, Tuple[str, ...]] = {
 #: The elements that the edition and each kind of division can hold, besides the edition's own heading
 _PARTS_BY_DIVISION_KIND: Dict[str, Tuple[str, ...]] = {
     'edition': ('div', 'l', 'sp', 'milestone', 'lb', 'pb'),
-    'book': ('head', 'div', 'l', 'note', 'milestone', 'lb', 'pb'),
+    'book': ('head', 'div', 'l', 'lg', 'p', 'note', 'milestone', 'lb', 'pb'),
     'poem': ('head', 'div', 'l', 'lg', 'sp', 'p', 'note', 'milestone', 'lb', 'pb'),
     'chapter': ('head', 'div', 'p', 'note', 'milestone', 'lb', 'pb'),
     'section': ('head', 'p', 'note', 'milestone', 'lb', 'pb'),
     'act': ('head', 'div', 'note', 'milestone', 'lb', 'pb'),
-    'scene': ('head', 'sp', 'note', 'milestone', 'lb', 'pb'),
+    'scene': ('head', 'sp', 'l', 'note', 'milestone', 'lb', 'pb'),
     'lg': ('head', 'l', 'lg', 'note', 'milestone', 'lb', 'pb'),
     'sp': ('speaker', 'l', 'lg', 'p', 'note', 'milestone', 'lb', 'pb'),
 }

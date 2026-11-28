@@ -124,9 +124,10 @@ In `work_content_subdivisions.csv`:
 * **Types:** `BOOK`, `POEM`, `PROL`, `EPIL`, `CHAP` (a chapter), `SECT` (a section of a chapter, of a book or of the
   work), `ACT`, `SCEN` (a scene of an act), `LGRP` (a group of lines, `<lg>`), `SPCH` (a speech, `<sp>`, whose `TITL`
   is its speaker), `TITL`, `VERS` and `PARA`.
-* **What holds what:** a book holds poems, chapters, sections or verses; a chapter, sections or paragraphs; a poem,
-  poems or its own verses, line groups, speeches and paragraphs. One that holds books, poems, chapters, sections, acts
-  or scenes holds them all of one kind, and no verse, line group, speech or paragraph of its own.
+* **What holds what:** a book holds poems, chapters, sections, or its own verses, line groups and paragraphs; a
+  chapter, sections or paragraphs; a poem, poems or its own verses, line groups, speeches and paragraphs. One that
+  holds books, poems, chapters, sections, acts or scenes holds them all of one kind, and no verse, line group, speech
+  or paragraph of its own.
 * **The roots** are all of one type: books, chapters, sections, acts or poems, or the verses or the speeches of a work
   that its edition doesn't divide. A prologue or an epilogue counts as a poem or an act: a play's prologue is an act
   that the configuration types `PROL` by its n, like Amphitruo's, and an edition's `prologue` or `preface` a poem
