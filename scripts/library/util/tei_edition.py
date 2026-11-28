@@ -139,7 +139,7 @@ class Note(NamedTuple):
 class NoteToCheckAgainstThePage(NamedTuple):
     reference: str
     text: str
-    shape: str
+    shapes: Tuple[str, ...]
 
 
 class TextBlock(NamedTuple):
@@ -232,7 +232,7 @@ class _InlineNote(NamedTuple):
     """A <note> where it is in a block's text, until it's found where its lemma matches"""
     text: str
     lemma: str | None
-    shape_to_check_against_the_page: str | None
+    shapes_to_check_against_the_page: Tuple[str, ...]
 
 
 _InlinePiece = Union[_MarkedText, LostPassage, _InlineNote]
@@ -252,7 +252,7 @@ class _JoinedText(NamedTuple):
     marked_ranges: Tuple[_MarkedRange, ...]
     notes: Tuple[Note, ...]
     added_quotation_marks: Tuple[AddedQuotationMark, ...]
-    texts_and_shapes_of_notes_to_check_against_the_page: Tuple[Tuple[str, str], ...]
+    texts_and_shapes_of_notes_to_check_against_the_page: Tuple[Tuple[str, Tuple[str, ...]], ...]
 
 
 def read_edition(root: ET.Element, cited_division_subtypes: Tuple[str, ...], types_by_n: Dict[str, str],
@@ -405,7 +405,7 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
             text = _note_text(child, where)
             notes.append(text)
             notes_to_check_against_the_page.append(
-                NoteToCheckAgainstThePage('.'.join(cited), ' '.join(text.split()), 'outside any block'))
+                NoteToCheckAgainstThePage('.'.join(cited), ' '.join(text.split()), ('outside any block',)))
         elif tag == 'head' and child.get(_XML_LANG, 'lat') != 'lat':
             notes.append(''.join(child.itertext()).strip())
         elif tag in ('head', 'speaker'):
@@ -478,8 +478,8 @@ def _block(element: ET.Element, typ: str, where: str, cited: Tuple[str, ...], ch
     regularized_spellings = tuple(RegularizedSpelling(text, piece, start, end)
                                   for text, piece, start, end in _kept_readings(joined, 'reg'))
     notes_to_check_against_the_page = tuple(
-        NoteToCheckAgainstThePage(reference, ' '.join(text.split()), shape)
-        for text, shape in joined.texts_and_shapes_of_notes_to_check_against_the_page)
+        NoteToCheckAgainstThePage(reference, ' '.join(text.split()), shapes)
+        for text, shapes in joined.texts_and_shapes_of_notes_to_check_against_the_page)
     return TextBlock(typ, n, reference, joined.pieces, deletion is not None, joined.notes, marks, numerals, expansions,
                      joined.added_quotation_marks, regularized_spellings, notes_to_check_against_the_page)
 
@@ -554,7 +554,7 @@ def _inline(element: ET.Element, where: str, tags: Tuple[str, ...], chains: _Quo
             pieces.append(LostPassage(reason))
         elif tag == 'note':
             pieces.append(_InlineNote(_note_text(child, where), _lemma(child, where),
-                                      _shape_to_check_against_the_page(child)))
+                                      _shapes_to_check_against_the_page(child)))
         pieces.append(_MarkedText(child.tail or ''))
     return pieces
 
@@ -603,15 +603,19 @@ def _joined(inline_pieces: _InlinePieces) -> _JoinedText:
     joined: List[Union[str, LostPassage]] = []
     ranges_by_element_id_and_piece: Dict[Tuple[int, int], Tuple[ET.Element, int, int]] = {}
     notes: List[Note] = []
-    texts_and_shapes_of_notes_to_check_against_the_page: List[Tuple[str, str]] = []
+    texts_and_shapes_of_notes_to_check_against_the_page: List[Tuple[str, Tuple[str, ...]]] = []
     added_quotation_marks: List[AddedQuotationMark] = []
-    for inline_piece in inline_pieces:
+    for position, inline_piece in enumerate(inline_pieces):
         last = joined[-1] if joined else None
         if isinstance(inline_piece, _InlineNote):
-            notes.append(_note(inline_piece, last if isinstance(last, str) else '', len(joined) - 1))
-            shape = inline_piece.shape_to_check_against_the_page
-            if shape is not None:
-                texts_and_shapes_of_notes_to_check_against_the_page.append((inline_piece.text, shape))
+            text_before = last if isinstance(last, str) else ''
+            notes.append(_note(inline_piece, text_before, len(joined) - 1))
+            text_after = _text_joined_after(inline_pieces, position)
+            stands_between_two_letters = text_before[-1:].isalpha() and text_after[:1].isalpha()
+            shapes = (*inline_piece.shapes_to_check_against_the_page,
+                      *(('between two letters',) if stands_between_two_letters else ()))
+            if shapes:
+                texts_and_shapes_of_notes_to_check_against_the_page.append((inline_piece.text, shapes))
         elif isinstance(inline_piece, LostPassage):
             joined.append(inline_piece)
         elif inline_piece.text and isinstance(last, str):
@@ -632,6 +636,14 @@ def _joined(inline_pieces: _InlinePieces) -> _JoinedText:
                           for (_, index), (element, start, end) in ranges_by_element_id_and_piece.items())
     return _JoinedText(tuple(joined), marked_ranges, tuple(notes), tuple(added_quotation_marks),
                        tuple(texts_and_shapes_of_notes_to_check_against_the_page))
+
+
+def _text_joined_after(inline_pieces: _InlinePieces, position: int) -> str:
+    """Returns the first text after the piece at the position, which the walker joins to the text before it, or nothing
+    where a lost passage comes first"""
+    following = next((piece for piece in inline_pieces[position + 1:]
+                      if isinstance(piece, LostPassage) or isinstance(piece, _MarkedText) and piece.text), None)
+    return following.text if isinstance(following, _MarkedText) else ''
 
 
 def _lemma(note: ET.Element, where: str) -> str | None:
@@ -672,12 +684,12 @@ def _range_of_last_words_matching(lemma: str, text: str) -> Tuple[int, int] | No
     return text_words[run_starts[0]].start(), text_words[run_starts[-1] + len(lemma_runs[-1]) - 1].end()
 
 
-def _shape_to_check_against_the_page(note: ET.Element) -> str | None:
-    if any('marg' in note.get(attribute, '').lower() for attribute in ('n', 'type', 'place')):
-        return 'marginal'
-    if note.find(f'.//{_TEI}l') is not None or note.find(f'.//{_TEI}p') is not None:
-        return 'holding a verse or a paragraph'
-    return None
+def _shapes_to_check_against_the_page(note: ET.Element) -> Tuple[str, ...]:
+    is_marginal = any('marg' in note.get(attribute, '').lower() for attribute in ('n', 'type', 'place'))
+    holds_a_verse_or_a_paragraph = note.find(f'.//{_TEI}l') is not None or note.find(f'.//{_TEI}p') is not None
+    return tuple(shape for shape, applies in (('marginal', is_marginal),
+                                              ('holding a verse or a paragraph', holds_a_verse_or_a_paragraph))
+                 if applies)
 
 
 def _note_text(note: ET.Element, where: str) -> str:

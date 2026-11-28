@@ -68,7 +68,8 @@ _NOTES_BY_EDITORIAL_MARK = {'addition': 'added by the editor', 'deletion': 'mark
 _WHAT_MAKES_A_NOTE_ONE_TO_CHECK_BY_ITS_SHAPE = {
     'outside any block': 'stands outside any verse, title or paragraph',
     'marginal': 'is marginal by its n, type or place',
-    'holding a verse or a paragraph': 'holds a verse or a paragraph'}
+    'holding a verse or a paragraph': 'holds a verse or a paragraph',
+    'between two letters': 'stands between two letters, which are read as one word'}
 
 
 class WorkConfiguration(NamedTuple):
@@ -1023,12 +1024,17 @@ def _problems_of_notes_checked_against_the_page(parts: Sequence[Division | TextB
             listed[reference_and_text] -= 1
         else:
             problems.append(
-                f"{work.edition_urn} {note.reference}: the note {note.text!r} "
-                f"{_WHAT_MAKES_A_NOTE_ONE_TO_CHECK_BY_ITS_SHAPE[note.shape]}, so notes_checked_against_the_page must "
-                f"list {reference_and_text!r} once it's read against the printed page")
+                f"{work.edition_urn} {note.reference}: the note {note.text!r} {_what_makes_it_one_to_check(note)}, so "
+                f"notes_checked_against_the_page must list {reference_and_text!r} once it's read against the printed "
+                f"page")
     problems.extend(f"{work.edition_urn} {reference}: notes_checked_against_the_page lists the note {text!r}, but "
                     f"the edition has no such note to check there" for reference, text in listed.elements())
     return problems
+
+
+def _what_makes_it_one_to_check(note: NoteToCheckAgainstThePage) -> str:
+    reasons = [_WHAT_MAKES_A_NOTE_ONE_TO_CHECK_BY_ITS_SHAPE[shape] for shape in note.shapes]
+    return f"{', '.join(reasons[:-1])} and {reasons[-1]}" if len(reasons) > 1 else reasons[0]
 
 
 def _raise_for_problems(problems: List[str]):

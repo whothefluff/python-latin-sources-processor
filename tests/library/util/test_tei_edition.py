@@ -1,6 +1,7 @@
 import re
 # noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
+from typing import cast
 
 import pytest
 
@@ -435,37 +436,70 @@ def test_a_note_outside_any_block_is_one_to_check_against_the_page_with_its_divi
     assert read_edition(edition, ('book', 'poem'), {}, {}) == (
         Division('BOOK', '1', (
             Division('POEM', '21', (_verse('1', '1.21.1', 'Aureli,'),), ('Desunt cetera 18-20.',), (
-                NoteToCheckAgainstThePage('1.21', 'Desunt cetera 18-20.', 'outside any block'),)),), ()),
+                NoteToCheckAgainstThePage('1.21', 'Desunt cetera 18-20.', ('outside any block',)),)),), ()),
         Division('BOOK', '2', (_verse('62', '2.62', 'ne seriem rerum scindere cogar, erunt.'),),
                  ('1. A — K — IAN — F', 'vulg. \n  qua nimium placui,'), (
-                     NoteToCheckAgainstThePage('2', '1. A — K — IAN — F', 'outside any block'),
-                     NoteToCheckAgainstThePage('2', 'vulg. qua nimium placui,', 'outside any block'))))
+                     NoteToCheckAgainstThePage('2', '1. A — K — IAN — F', ('outside any block',)),
+                     NoteToCheckAgainstThePage('2', 'vulg. qua nimium placui,', ('outside any block',)))))
 
 
-@pytest.mark.parametrize("note, text, shape", [
-    ('<note n="Marg" place="unspecified" anchored="true">135</note>', '135', 'marginal'),
-    ('<note type="margin" place="unspecified" anchored="true">A.U.C. 287</note>', 'A.U.C. 287', 'marginal'),
-    ('<note place="marg"><hi rend="italics">LO</hi></note>', 'LO', 'marginal'),
+@pytest.mark.parametrize("note, text, shapes", [
+    ('<note n="Marg" place="unspecified" anchored="true">135</note>', '135', ('marginal',)),
+    ('<note type="margin" place="unspecified" anchored="true">A.U.C. 287</note>', 'A.U.C. 287', ('marginal',)),
+    ('<note place="marg"><hi rend="italics">LO</hi></note>', 'LO', ('marginal',)),
     ('<note place="unspecified" anchored="true">Mane V | supplendos censet Sudhausius: <quote rend="blockquote">'
      '<l>temptat et ipse gemens</l></quote></note>', 'Mane V | supplendos censet Sudhausius: temptat et ipse gemens',
-     'holding a verse or a paragraph'),
-    ('<note><p>est A</p></note>', 'est A', 'holding a verse or a paragraph'),
+     ('holding a verse or a paragraph',)),
+    ('<note><p>est A</p></note>', 'est A', ('holding a verse or a paragraph',)),
+    ('<note place="margin">vulg. <l>temptat</l></note>', 'vulg. temptat',
+     ('marginal', 'holding a verse or a paragraph')),
 ], ids=["marginal by its n, in any case", "marginal by its type", "marginal by its place", "holding a verse",
-        "holding a paragraph"])
+        "holding a paragraph", "marginal and holding a verse"])
 def test_a_block_s_note_that_is_marginal_or_holds_a_verse_or_a_paragraph_is_one_to_check_against_the_page(
-        note, text, shape):
+        note, text, shapes):
     edition = _edition(_poem('1', f'<l n="467">mene{note} vale<note>Cf. v. 12</note></l>'))
 
     assert read_edition(edition, _POEMS, {}, {}) == (
         Division('POEM', '1', (_verse('467', '1.467', 'mene vale', notes=(text, 'Cf. v. 12'),
                                       notes_to_check_against_the_page=(
-                                          NoteToCheckAgainstThePage('1.467', text, shape),)),), ()),)
+                                          NoteToCheckAgainstThePage('1.467', text, shapes),)),), ()),)
+
+
+@pytest.mark.parametrize("verse, text, notes_to_check_against_the_page", [
+    ('L. Quin<note>Quin ... T: suppl. Peyron</note><add>ctius</add> pater', 'L. Quinctius pater',
+     (NoteToCheckAgainstThePage('1.1', 'Quin ... T: suppl. Peyron', ('between two letters',)),)),
+    ('sub terris toto<note>toto d.</note><note>die om. E</note>die.', 'sub terris totodie.',
+     (NoteToCheckAgainstThePage('1.1', 'toto d.', ('between two letters',)),
+      NoteToCheckAgainstThePage('1.1', 'die om. E', ('between two letters',)))),
+    ('consu<note>consulatum B</note><pb n="156"/>latum', 'consulatum',
+     (NoteToCheckAgainstThePage('1.1', 'consulatum B', ('between two letters',)),)),
+    ('sinum Corinthiacum<note type="margin" place="unspecified">6</note>LXXXV', 'sinum CorinthiacumLXXXV',
+     (NoteToCheckAgainstThePage('1.1', '6', ('marginal', 'between two letters')),)),
+    ('tradit Iuba<note>Iuba om. D</note> praetermissa<note>praetermissa R</note>, ait<note>ait E</note>',
+     'tradit Iuba praetermissa, ait', ()),
+    ('<note>Ait A</note>Ait <note>Roma B</note>Roma,<note>est C</note>est', 'Ait Roma,est', ()),
+], ids=["inside a word, before an addition", "two in a row", "before a page break", "a marginal one",
+        "before a space, before a sign and at its block's end", "at its block's start, after a space and after a sign"])
+def test_a_note_between_two_letters_of_its_block_is_one_to_check_against_the_page(
+        verse, text, notes_to_check_against_the_page):
+    poem = cast(Division, read_edition(_edition(_poem('1', f'<l n="1">{verse}</l>')), _POEMS, {}, {})[0])
+    block = cast(TextBlock, poem.parts[0])
+
+    assert (block.name, block.notes_to_check_against_the_page) == (text, notes_to_check_against_the_page)
+
+
+def test_a_note_between_a_letter_and_a_lost_passage_or_an_added_mark_is_none_to_check_against_the_page():
+    edition = _edition(_poem('1', '<l n="1">et levis<note>levis A</note><gap reason="lost"/>que</l>'
+                                  '<l n="2">ait<note>ait B</note><q>est</q></l>'))
+
+    poem = cast(Division, read_edition(edition, _POEMS, {}, {})[0])
+    assert [block.notes_to_check_against_the_page for block in poem.parts] == [(), ()]
 
 
 @pytest.mark.parametrize("note, text, notes_to_check_against_the_page", [
     ('<note>dupondium sicel <note place="marg">L</note> quibus</note>', 'dupondium sicel L quibus', ()),
     ('<note>cf. <note><l>temptat et ipse gemens</l></note></note>', 'cf. temptat et ipse gemens',
-     (NoteToCheckAgainstThePage('1.467', 'cf. temptat et ipse gemens', 'holding a verse or a paragraph'),)),
+     (NoteToCheckAgainstThePage('1.467', 'cf. temptat et ipse gemens', ('holding a verse or a paragraph',)),)),
 ], ids=["a marginal note inside a note that isn't marginal", "a verse in a note inside a note"])
 def test_a_note_inside_a_note_is_read_as_text_of_the_note_that_holds_it(note, text, notes_to_check_against_the_page):
     edition = _edition(_poem('1', f'<l n="467">mene{note} vale</l>'))

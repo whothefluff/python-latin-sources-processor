@@ -1875,8 +1875,17 @@ def test_an_addition_that_holds_only_a_lost_passage_gets_no_note(monkeypatch, tm
     ('<note>Desunt cetera.</note><l n="1">Aureli, pater.</l><note>Desunt cetera.</note>', [('1.21', 'Desunt cetera.')],
      ["1.21: the note 'Desunt cetera.' stands outside any verse, title or paragraph, so "
       "notes_checked_against_the_page must list ('1.21', 'Desunt cetera.') once it's read against the printed page"]),
+    ('<l n="1">L. Quin<note>Quin ... T: suppl. Peyron</note><add>ctius</add> pater.</l>', [], [
+        "1.21.1: the note 'Quin ... T: suppl. Peyron' stands between two letters, which are read as one word, so "
+        "notes_checked_against_the_page must list ('1.21.1', 'Quin ... T: suppl. Peyron') once it's read against the "
+        "printed page"]),
+    ('<l n="1">sinum Corinthiacum<note type="margin" place="unspecified">6</note>LXXXV est.</l>', [], [
+        "1.21.1: the note '6' is marginal by its n, type or place and stands between two letters, which are read as "
+        "one word, so notes_checked_against_the_page must list ('1.21.1', '6') once it's read against the printed "
+        "page"]),
 ], ids=["a note outside any block", "a marginal note", "a note that holds a verse",
-        "a note that is listed and isn't one to check", "the same note twice, listed once"])
+        "a note that is listed and isn't one to check", "the same note twice, listed once",
+        "a note between two letters", "a marginal note between two letters"])
 def test_a_note_to_check_against_the_page_that_the_configuration_doesnt_list_or_one_listed_for_nothing_stops_the_work(
         monkeypatch, tmp_path, poem, checked, problems):
     _morpheus(monkeypatch, {})
@@ -1904,6 +1913,21 @@ def test_notes_checked_against_the_page_are_listed_as_many_times_as_the_edition_
 
     assert _rows(tmp_path / "work_content_supplementary.csv", "workId") == [
         ("NOTE", 0, 0, 3, "I"), ("NOTE", 1, 0, 3, "Desunt cetera."), ("NOTE", 2, 0, 3, "Desunt cetera.")]
+
+
+def test_a_note_inside_one_word_that_the_configuration_vouches_for_leaves_its_word_one_token(monkeypatch, tmp_path):
+    xml = _carmina(_poem("21", '<l n="1">et summi<note><w type="lemma">summi</w> summique <hi rend="italic">Muell.'
+                               '</hi></note><add>que</add> viri.</l>'))
+    work = _CARMEN_WORK._replace(notes_checked_against_the_page=[('1.21.1', 'summi summique Muell.')])
+    _morpheus(monkeypatch, {})
+    _macronizer_echoes(monkeypatch)
+
+    process_work.process_verse(xml, tmp_path, work)
+    process_work.validate_csv_files(xml, tmp_path, work)
+
+    assert _references(tmp_path) == [(word, "1.21.1") for word in ("et", "summique", "viri", ".")]
+    assert _rows(tmp_path / "work_content_supplementary.csv", "workId") == [
+        ("NOTE", 0, 1, 1, "added by the editor"), ("NOTE", 1, 1, 1, "summi summique Muell.")]
 
 
 def test_a_printed_mark_that_code_cant_follow_in_a_verse_that_no_division_holds_counts_in_the_whole_edition(
