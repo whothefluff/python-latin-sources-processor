@@ -20,15 +20,15 @@ _DIVISION_KINDS_BY_HOLDER: Dict[str, Tuple[str, ...]] = {
 }
 #: The elements that the edition and each kind of division can hold, besides the edition's own heading
 _PARTS_BY_DIVISION_KIND: Dict[str, Tuple[str, ...]] = {
-    'edition': ('div', 'l', 'sp', 'milestone', 'lb', 'pb'),
-    'book': ('head', 'div', 'l', 'lg', 'p', 'note', 'milestone', 'lb', 'pb'),
-    'poem': ('head', 'div', 'l', 'lg', 'sp', 'p', 'note', 'milestone', 'lb', 'pb'),
-    'chapter': ('head', 'div', 'p', 'note', 'milestone', 'lb', 'pb'),
-    'section': ('head', 'p', 'note', 'milestone', 'lb', 'pb'),
+    'edition': ('div', 'l', 'sp', 'gap', 'milestone', 'lb', 'pb'),
+    'book': ('head', 'div', 'l', 'lg', 'p', 'gap', 'note', 'milestone', 'lb', 'pb'),
+    'poem': ('head', 'div', 'l', 'lg', 'sp', 'p', 'gap', 'note', 'milestone', 'lb', 'pb'),
+    'chapter': ('head', 'div', 'p', 'gap', 'note', 'milestone', 'lb', 'pb'),
+    'section': ('head', 'p', 'gap', 'note', 'milestone', 'lb', 'pb'),
     'act': ('head', 'div', 'note', 'milestone', 'lb', 'pb'),
-    'scene': ('head', 'sp', 'l', 'note', 'milestone', 'lb', 'pb'),
-    'lg': ('head', 'l', 'lg', 'note', 'milestone', 'lb', 'pb'),
-    'sp': ('speaker', 'l', 'lg', 'p', 'note', 'milestone', 'lb', 'pb'),
+    'scene': ('head', 'sp', 'l', 'gap', 'note', 'milestone', 'lb', 'pb'),
+    'lg': ('head', 'l', 'lg', 'gap', 'note', 'milestone', 'lb', 'pb'),
+    'sp': ('speaker', 'l', 'lg', 'p', 'gap', 'note', 'milestone', 'lb', 'pb'),
 }
 _DIVISION_TYPES_BY_KIND = {'book': 'BOOK', 'poem': 'POEM', 'chapter': 'CHAP', 'section': 'SECT', 'act': 'ACT',
                            'scene': 'SCEN', 'lg': 'LGRP', 'sp': 'SPCH'}
@@ -67,6 +67,8 @@ _LEFT_OUT_OF_AN_ABBREVIATION_TAGS = ('expan',)
 _PRINTED_READING_TAGS_BY_CHOICE: Dict[Tuple[str, ...], str] = {('abbr', 'expan'): 'abbr', ('orig', 'reg'): 'orig'}
 _OPENING_MARK_PLACEHOLDER, _CLOSING_MARK_PLACEHOLDER = '“', '”'
 _LOST_PASSAGE_REASONS_BY_GAP_REASON = {'lost': 'lost', 'omitted': 'omitted', 'ellipsis': 'omitted'}
+#: The blocks that take a lost passage straight in their division, which is part of their text
+_BLOCK_TYPES_OF_LOST_PASSAGES_BESIDE_THEM = ('VERS', 'PARA')
 _BLOCK_TYPES_NO_EDITION_PRINTS_A_DIGIT_IN = ('VERS', 'PARA')
 _DIGIT_WITH_THE_WORDS_AROUND_IT = re.compile(r'(?:\S+\s+)?\S*\d\S*(?:\s+\S+)?')
 #: A poet can divide a word between two verses, so a verse's hyphen is a printed line's only with a letter after it
@@ -415,9 +417,19 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
     notes_to_check_against_the_page: List[NoteToCheckAgainstThePage] = []
     # A speaker, or a heading above which no division is cited
     title_placed_by_its_text: ET.Element | None = None
+    lost_passages_before_the_first_block: List[LostPassage] = []
     for child in children:
         tag = _tag(child)
-        if tag == 'note':
+        if tag == 'gap' or _is_a_lost_line(child):
+            lost_passage = _lost_passage(child if tag == 'gap' else child[0], where)
+            part_before = parts[-1] if parts else None
+            if isinstance(part_before, TextBlock) and part_before.typ in _BLOCK_TYPES_OF_LOST_PASSAGES_BESIDE_THEM:
+                parts[-1] = part_before._replace(pieces=(*part_before.pieces, lost_passage))
+            elif part_before is None or part_before.typ == 'TITL':
+                lost_passages_before_the_first_block.append(lost_passage)
+            else:
+                raise _lost_passage_of_no_block(where)
+        elif tag == 'note':
             if _lemma(child, where) is not None:
                 raise ValueError(f"{where} holds a note with a lemma outside a verse, title or paragraph, which isn't "
                                  "read.")
@@ -428,12 +440,14 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
         elif tag == 'head' and child.get(_XML_LANG, 'lat') != 'lat':
             notes.append(''.join(child.itertext()).strip())
         elif tag in ('head', 'speaker'):
-            if parts or title_placed_by_its_text is not None:
+            if parts or title_placed_by_its_text is not None or lost_passages_before_the_first_block:
                 raise ValueError(f"{where} has a title after its text or another title.")
             if tag == 'head' and cited:
                 parts.append(_block(child, 'TITL', where, cited, chains))
             else:
                 title_placed_by_its_text = child
+        elif tag in ('div', 'lg', 'sp') and lost_passages_before_the_first_block:
+            raise _lost_passage_of_no_block(where)
         elif tag == 'div':
             parts.append(_division(child, cast(str, division_kind), where, cited, cited_division_subtypes,
                                    types_by_n, types_by_subtype, chains))
@@ -441,7 +455,11 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
             parts.append(_division(child, tag, where, cited, cited_division_subtypes, types_by_n, types_by_subtype,
                                    chains))
         elif tag in ('l', 'p'):
-            parts.append(_block(child, _BLOCK_TYPES_BY_TAG[tag], where, cited, chains))
+            parts.append(_block(child, _BLOCK_TYPES_BY_TAG[tag], where, cited, chains,
+                                lost_passages_before=tuple(lost_passages_before_the_first_block)))
+            lost_passages_before_the_first_block.clear()
+    if lost_passages_before_the_first_block:
+        raise _lost_passage_of_no_block(where)
     first_said = next(_blocks_said(parts), None)
     if first_said is None and (title_placed_by_its_text is not None or not parts):
         raise ValueError(f"{where} has no text.")
@@ -449,6 +467,18 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
         parts.insert(0, _block(title_placed_by_its_text, 'TITL', where, cited, chains,
                                cast(TextBlock, first_said).reference))
     return tuple(parts), tuple(notes), tuple(notes_to_check_against_the_page)
+
+
+def _is_a_lost_line(element: ET.Element) -> bool:
+    """A verse without an n that is only a lost passage: the page gives a lost line no number"""
+    children = list(element)
+    return (_tag(element) == 'l' and not element.get('n') and len(children) == 1 and _tag(children[0]) == 'gap'
+            and not (element.text or '').strip() and not (children[0].tail or '').strip())
+
+
+def _lost_passage_of_no_block(where: str) -> ValueError:
+    return ValueError(f"{where} holds a lost passage with no verse or paragraph right before it, or at its start right "
+                      f"after it, which isn't read there.")
 
 
 def _blocks_said(parts: Sequence[Union[Division, TextBlock]]) -> Iterator[TextBlock]:
@@ -461,8 +491,9 @@ def _blocks_said(parts: Sequence[Union[Division, TextBlock]]) -> Iterator[TextBl
 
 
 def _block(element: ET.Element, typ: str, where: str, cited: Tuple[str, ...], chains: _QuotationChains,
-           reference: str | None = None) -> TextBlock:
-    """Returns the block, with the reference given, or else one made of what's cited and a verse's n"""
+           reference: str | None = None, lost_passages_before: Tuple[LostPassage, ...] = ()) -> TextBlock:
+    """Returns the block, with the reference given, or else one made of what's cited and a verse's n, and with the
+    lost passages given at its start"""
     tag = _tag(element)
     n = element.get('n') if typ == 'VERS' else None
     if typ == 'VERS' and not n:
@@ -472,8 +503,10 @@ def _block(element: ET.Element, typ: str, where: str, cited: Tuple[str, ...], ch
     if not reference:
         raise ValueError(f"{where} would have no reference: no division above it is cited.")
     deletion = _whole_deletion(element)
-    joined = _joined(_inline(deletion if deletion is not None else element, where, _INLINE_TAGS, chains))
-    if not any(isinstance(piece, LostPassage) or piece.strip() for piece in joined.pieces):
+    joined = _joined([*lost_passages_before,
+                      *_inline(deletion if deletion is not None else element, where, _INLINE_TAGS, chains)])
+    own_pieces = joined.pieces[len(lost_passages_before):]
+    if not any(isinstance(piece, LostPassage) or piece.strip() for piece in own_pieces):
         raise ValueError(f"{where} has no text.")
     texts = tuple(piece for piece in joined.pieces if isinstance(piece, str))
     digit = _DIGIT_WITH_THE_WORDS_AROUND_IT.search(' '.join(texts))
@@ -566,16 +599,20 @@ def _inline(element: ET.Element, where: str, tags: Tuple[str, ...], chains: _Quo
         elif tag == 'lb':
             pieces.append(_MarkedText(' '))
         elif tag == 'gap':
-            reason = _LOST_PASSAGE_REASONS_BY_GAP_REASON.get(child.get('reason', ''))
-            if reason is None:
-                *reasons, last = _LOST_PASSAGE_REASONS_BY_GAP_REASON
-                raise ValueError(f"{where} has a gap whose reason isn't {', '.join(reasons)} or {last}.")
-            pieces.append(LostPassage(reason))
+            pieces.append(_lost_passage(child, where))
         elif tag == 'note':
             pieces.append(_InlineNote(_note_text(child, where), _lemma(child, where),
                                       _shapes_to_check_against_the_page(child)))
         pieces.append(_MarkedText(child.tail or ''))
     return pieces
+
+
+def _lost_passage(gap: ET.Element, where: str) -> LostPassage:
+    reason = _LOST_PASSAGE_REASONS_BY_GAP_REASON.get(gap.get('reason', ''))
+    if reason is None:
+        *reasons, last = _LOST_PASSAGE_REASONS_BY_GAP_REASON
+        raise ValueError(f"{where} has a gap whose reason isn't {', '.join(reasons)} or {last}.")
+    return LostPassage(reason)
 
 
 def _is_a_label_of_another_numbering(label: ET.Element) -> bool:

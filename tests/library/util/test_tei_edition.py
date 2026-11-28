@@ -484,6 +484,90 @@ def test_a_line_group_in_a_scene_raises():
         read_edition(_edition(_act('1', _scene('1', '<lg><l n="1">Roma est.</l></lg>'))), _LINES_ONLY, {}, {})
 
 
+@pytest.mark.parametrize("body, cited, divisions", [
+    (_book('1', '<l n="780">Thessalis in seros Ditis servaverat usus:</l> <gap reason="omitted"/>'
+                '<l n="781">tergeminam cum placat eram Stygiasque supremo</l>'), _BOOKS,
+     (Division('BOOK', '1', (
+         _verse('780', '1.780', 'Thessalis in seros Ditis servaverat usus:', LostPassage('omitted')),
+         _verse('781', '1.781', 'tergeminam cum placat eram Stygiasque supremo')), ()),)),
+    (_section('31', '<p>Nam ut sibi duodecim lictores cum fascibus anteire liceret '
+                    '<gap reason="lost" rend=". . . . ."/> </p> <gap reason="lost" extent="2 pages"/>'), _SECTIONS,
+     (Division('SECT', '31', (_paragraph('31', 'Nam ut sibi duodecim lictores cum fascibus anteire liceret ',
+                                         LostPassage('lost'), ' ', LostPassage('lost')),), ()),)),
+    (_book('3', '<l n="97">atque oculei partes animantis totius extant.</l><l><gap reason="lost"/></l>'
+                '<l n="98">sensum animi certa non esse in parte locatum,</l>'), _BOOKS,
+     (Division('BOOK', '3', (_verse('97', '3.97', 'atque oculei partes animantis totius extant.', LostPassage('lost')),
+                             _verse('98', '3.98', 'sensum animi certa non esse in parte locatum,')), ()),)),
+    ('<l n="165">mersus ut in limo magno sub sideris aestu</l><gap reason="lost" rend=". . . . . . . . ."/>'
+     '<l n="166">obuia uibranti carpens grauis aere linguae</l>', _LINES_ONLY,
+     (_verse('165', '165', 'mersus ut in limo magno sub sideris aestu', LostPassage('lost')),
+      _verse('166', '166', 'obuia uibranti carpens grauis aere linguae'))),
+], ids=["a gap after a verse", "a gap after a paragraph", "a verse without n that is only a gap",
+        "a gap straight in the edition"])
+def test_a_lost_passage_straight_in_a_division_ends_the_verse_or_the_paragraph_right_before_it(body, cited, divisions):
+    assert read_edition(_edition(body), cited, {}, {}) == divisions
+
+
+@pytest.mark.parametrize("body, cited, divisions", [
+    (_poem('8', '<gap reason="omitted"/><l n="a"><add>Discutiunt nobis placidos portenta sopores,</add></l>'), _POEMS,
+     (Division('POEM', '8', (_verse('a', '8.a', LostPassage('omitted'), 'Discutiunt nobis placidos portenta sopores,',
+                                    marks=(EditorialMark('addition', 1, 0, 43),)),), ()),)),
+    (_poem('20', '<head>PATER AD FILIUM</head><gap reason="omitted"/>'
+                 '<l n="1">debeo et hanc nostris, fili dulcissime, curis</l>'), _POEMS,
+     (Division('POEM', '20', (
+         _title('20', 'PATER AD FILIUM'),
+         _verse('1', '20.1', LostPassage('omitted'), 'debeo et hanc nostris, fili dulcissime, curis')), ()),)),
+    (_chapter('1', _section('1', '<gap rend="* * * * * * * * " reason="lost"/> <pb n="p.2"/> '
+                                 '<note resp="editor" xml:lang="mul">See p. xxi.</note> '
+                                 '<p rend="align(indent)">Annum agens sextum decimum patrem amisit;</p>')),
+     ('chapter', 'section'),
+     (Division('CHAP', '1', (Division('SECT', '1', (_paragraph('1.1', LostPassage('lost'),
+                                                               'Annum agens sextum decimum patrem amisit;'),),
+                                      ('See p. xxi.',),
+                                      (NoteToCheckAgainstThePage('1.1', 'See p. xxi.', ('outside any block',)),)),),
+               ()),)),
+], ids=["a gap before a poem's first verse", "a gap after a heading", "a gap before a section's first paragraph"])
+def test_a_lost_passage_straight_in_a_division_before_any_part_starts_its_first_verse_or_paragraph(
+        body, cited, divisions):
+    assert read_edition(_edition(body), cited, {}, {}) == divisions
+
+
+@pytest.mark.parametrize("body, error", [
+    (_act('2', _scene('1', '<sp><speaker>(unknown)</speaker><l><gap reason="lost"/></l></sp>')),
+     "the edition > act 2 > scene 1 > sp holds a lost passage with no verse or paragraph right before it, or at its "
+     "start right after it, which isn't read there."),
+    (_poem('1', '<lg><l n="1">Roma</l></lg><gap reason="lost"/><l n="2">est</l>'),
+     "the edition > poem 1 holds a lost passage with no verse or paragraph right before it, or at its start right "
+     "after it, which isn't read there."),
+    (_book('1', _poem('1', '<l n="1">Roma</l>') + '<gap reason="lost"/>' + _poem('2', '<l n="1">est</l>')),
+     "the edition > book 1 holds a lost passage with no verse or paragraph right before it, or at its start right "
+     "after it, which isn't read there."),
+    (_poem('1', '<gap reason="lost"/><lg><l n="1">Roma</l></lg><l n="2">est</l>'),
+     "the edition > poem 1 holds a lost passage with no verse or paragraph right before it, or at its start right "
+     "after it, which isn't read there."),
+    (_poem('1', '<gap reason="lost"/><head>Carmen</head><l n="1">Roma</l>'),
+     "the edition > poem 1 has a title after its text or another title."),
+    (_poem('1', '<l n="1">Roma</l><gap/>'), "the edition > poem 1 has a gap whose reason isn't lost, omitted or "
+                                            "ellipsis."),
+], ids=["a lost line alone in its speech", "a gap after a line group", "a gap between two divisions",
+        "a gap before a line group and a verse", "a heading after a gap", "a gap without a reason"])
+def test_a_lost_passage_straight_in_a_division_that_belongs_to_no_verse_or_paragraph_raises(body, error):
+    with pytest.raises(ValueError, match="^" + re.escape(error) + "$"):
+        read_edition(_edition(body), _BOOKS_AND_POEMS, {}, {})
+
+
+@pytest.mark.parametrize("verse", ['<l>Levis <gap reason="lost"/></l>', '<l><gap reason="lost"/> est</l>'],
+                         ids=["before its gap", "after its gap"])
+def test_a_verse_without_n_with_text_beside_its_gap_raises_like_any_verse_without_n(verse):
+    with pytest.raises(ValueError, match="^" + re.escape("A line in the edition > poem 1 has no n.") + "$"):
+        read_edition(_edition(_poem('1', f'<l n="1">Roma</l>{verse}')), _POEMS, {}, {})
+
+
+def test_a_verse_with_nothing_but_the_lost_passage_before_it_has_no_text():
+    with pytest.raises(ValueError, match="^" + re.escape("the edition > poem 1 > l 1 has no text.") + "$"):
+        read_edition(_edition(_poem('1', '<gap reason="lost"/><l n="1"> </l>')), _POEMS, {}, {})
+
+
 def test_acts_of_scenes_hold_speeches_whose_speakers_take_the_reference_of_their_first_line():
     edition = _edition(_act('prologue', _scene('pr', '<milestone unit="card" n="1"/>'
                                                      '<sp><speaker>Mercvrivs</speaker><l n="1">Vt vos</l>'

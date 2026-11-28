@@ -1700,6 +1700,17 @@ def _poem(n: str, blocks: str) -> str:
     (_carmina(_poem("1", '<p>Roma <label type="alt_section">(9)</label> est <q>iam <label place="margin">(10)</label>'
                          ' levis</q>.</p>')), _CARMEN_WORK,
      [("PARA", "Roma est “iam levis”.")]),
+    (_carmina(_poem("1", '<l n="1">Roma est.</l> <gap reason="omitted"/> <l><gap reason="lost"/></l>'
+                         '<l n="2">Levis est.</l>')
+              + _poem("2", '<head>Carmen</head><gap reason="lost"/><l n="1">Iam est.</l>')
+              + _poem("3", '<p>Roma est.</p> <gap reason="lost"/>')), _CARMEN_WORK,
+     [("VERS", "Roma est.[...][...]"), ("VERS", "Levis est."), ("POEM", "Carmen"), ("TITL", "Carmen"),
+      ("VERS", "[...]Iam est."), ("PARA", "Roma est.[...]")]),
+    (_carmina(_poem("1", '<lg><l n="1">Roma est.</l><gap reason="lost"/></lg>'
+                         '<sp><speaker>Fictor</speaker><gap reason="lost"/><l n="2">Levis est.</l> <gap reason="lost"/>'
+                         '</sp>')),
+     _CARMEN_WORK,
+     [("VERS", "Roma est.[...]"), ("SPCH", "Fictor"), ("TITL", "Fictor"), ("VERS", "[...]Levis est.[...]")]),
 ], ids=["a paragraph that is only a lost passage", "a verse that is only a lost passage",
         "a lost passage between two words", "a lost passage against the word after it",
         "two lost passages with a sign between them", "a title with whitespace after it", "a title over two lines",
@@ -1708,7 +1719,9 @@ def _poem(n: str, blocks: str) -> str:
         "an abbreviation with an apostrophe", "a closing mark before a word that starts with s",
         "two straight pairs against three single openings",
         "a quotation inside a straight mark, after a ’ that follows a letter",
-        "a verse inside a note between verses", "labels of another numbering in a paragraph and in a quotation"])
+        "a verse inside a note between verses", "labels of another numbering in a paragraph and in a quotation",
+        "lost passages straight in a poem, after a verse or a paragraph and before the first verse",
+        "lost passages straight in a line group and in a speech, one of them after its speaker"])
 def test_validation_passes_an_edition_with(monkeypatch, tmp_path, xml, work, names):
     _morpheus(monkeypatch, {})
     _macronizer_echoes(monkeypatch)
@@ -1824,6 +1837,15 @@ def _division(subtype: str, n: str, parts: str) -> str:
       ("TITL", 0, "SPCH", 4, 4, None), ("VERS", 0, "SPCH", 5, 7, "2")],
      [("Fictor", "1"), ("Roma", "1"), ("est", "1"), (".", "1"), ("Fictor", "2"), ("Levis", "2"), ("est", "2"),
       (".", "2")]),
+    (_edition_of(_division("act", "1", _division("scene", "1", '<l n="1">Roma est.</l><gap reason="lost"/>'))),
+     _CARMEN_WORK._replace(cited_division_subtypes=()),
+     [("ACT", 0, None, 0, 3, "1"), ("SCEN", 0, "ACT", 0, 3, "1"), ("VERS", 0, "SCEN", 0, 3, "1")],
+     [("Roma", "1"), ("est", "1"), (".", "1"), ("", "1")]),
+    (_edition_of(_division("chapter", "1", '<gap reason="lost"/> <pb n="2"/> <milestone unit="section" n="1"/> <lb/> '
+                                          '<note>Roma.</note> <p>Levis est.</p><gap reason="lost"/>')),
+     _CARMEN_WORK._replace(cited_division_subtypes=('chapter',), notes_checked_against_the_page=[('1', 'Roma.')]),
+     [("CHAP", 0, None, 0, 4, "1"), ("PARA", 0, "CHAP", 0, 4, None)],
+     [("", "1"), ("Levis", "1"), ("est", "1"), (".", "1"), ("", "1")]),
 ], ids=["verses straight in a book", "chapters straight in the edition, of paragraphs and of sections",
         "sections straight in the edition", "sections straight in a book", "a poem of a preface and a poem",
         "verses straight in the edition, with printed marks",
@@ -1832,7 +1854,10 @@ def _division(subtype: str, n: str, parts: str) -> str:
         "a heading above which no division is cited", "a prologue and a satire, Persius's shape",
         "a preface and a section that the configuration types as a poem, Prudentius's shape",
         "books in printed volumes, Livy's shape", "a book of paragraphs beside a book of chapters, Livy's shape",
-        "a scene of verses beside a scene of speeches"])
+        "a scene of verses beside a scene of speeches",
+        "a lost passage straight in a scene",
+        "lost passages straight in a chapter, after a paragraph and before one past a page break, a milestone, a line "
+        "break and a note"])
 def test_a_work_passes_validation_with(monkeypatch, tmp_path, xml, work, subdivisions, references):
     _morpheus(monkeypatch, {})
     _macronizer_echoes(monkeypatch)

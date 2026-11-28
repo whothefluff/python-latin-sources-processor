@@ -1627,8 +1627,8 @@ def _blocks_outside_notes(body: ET.Element) -> Iterator[Tuple[ET.Element, int | 
     def walk(element: ET.Element, div_id: int | None) -> Iterator[Tuple[ET.Element, int | None]]:
         for child in element:
             is_heading = child.tag == f'{_TEI}head'
-            is_block = child.tag in (f'{_TEI}l', f'{_TEI}p', f'{_TEI}speaker') or is_heading \
-                and child.get(_XML_LANG, 'lat') == 'lat' and element.get('type') != 'edition'
+            is_block = child.tag in (f'{_TEI}l', f'{_TEI}p', f'{_TEI}speaker') and not _is_a_lost_line(child) \
+                or is_heading and child.get(_XML_LANG, 'lat') == 'lat' and element.get('type') != 'edition'
             if is_block:
                 yield child, div_id
             elif child.tag != f'{_TEI}note' and not is_heading:
@@ -1664,10 +1664,55 @@ class _ExpectedBlockText(NamedTuple):
     text: str
 
 
+def _is_a_lost_line(element: ET.Element) -> bool:
+    """A verse without an n that is only a lost passage, the lost passage of the verse beside it"""
+    children = list(element)
+    return (element.tag == f'{_TEI}l' and not element.get('n') and len(children) == 1
+            and children[0].tag == f'{_TEI}gap' and not (element.text or '').strip()
+            and not (children[0].tail or '').strip())
+
+
+class _LostPassagesBesideBlocks(NamedTuple):
+    """By the id of a verse or a paragraph, the number of lost passages straight in its division at its start and at
+    its end"""
+    at_the_start: Dict[int, int]
+    at_the_end: Dict[int, int]
+
+
+_HOLDERS_OF_BLOCKS = (f'{_TEI}div', f'{_TEI}lg', f'{_TEI}sp')
+_PARTS_THAT_A_LOST_PASSAGE_PASSES = (f'{_TEI}head', f'{_TEI}speaker', f'{_TEI}note', f'{_TEI}milestone', f'{_TEI}pb',
+                                     f'{_TEI}lb')
+
+
+def _lost_passages_beside_blocks(body: ET.Element) -> _LostPassagesBesideBlocks:
+    """A lost passage straight in a division belongs to the verse or the paragraph right before it, or, where no part of
+    its division stands before it, to the first part after it if that's a verse or a paragraph"""
+    beside = _LostPassagesBesideBlocks({}, {})
+    for holder in _elements_outside_notes(body):
+        if holder.tag not in _HOLDERS_OF_BLOCKS:
+            continue
+        part_before: ET.Element | None = None
+        before_any_part = 0
+        for child in holder:
+            if child.tag == f'{_TEI}gap' or _is_a_lost_line(child):
+                if part_before is not None and part_before.tag in (f'{_TEI}l', f'{_TEI}p'):
+                    beside.at_the_end[id(part_before)] = beside.at_the_end.get(id(part_before), 0) + 1
+                elif part_before is None:
+                    before_any_part += 1
+            elif child.tag not in _PARTS_THAT_A_LOST_PASSAGE_PASSES:
+                if part_before is None and child.tag in (f'{_TEI}l', f'{_TEI}p'):
+                    beside.at_the_start[id(child)] = before_any_part
+                part_before = child
+    return beside
+
+
 def _expected_blocks(root: ET.Element) -> List[_ExpectedBlock]:
     body = _body_of(root)
     chains = _quotation_chains(body)
-    return [_ExpectedBlock(element, div_id, _expected_items(element, chains))
+    beside = _lost_passages_beside_blocks(body)
+    return [_ExpectedBlock(element, div_id, [*[_ExpectedLostPassage()] * beside.at_the_start.get(id(element), 0),
+                                             *_expected_items(element, chains),
+                                             *[_ExpectedLostPassage()] * beside.at_the_end.get(id(element), 0)])
             for element, div_id in _blocks_outside_notes(body)]
 
 
