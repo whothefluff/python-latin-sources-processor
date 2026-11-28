@@ -622,6 +622,31 @@ def test_a_heading_after_its_division_s_first_part_or_a_second_speaker_raises(bo
         read_edition(_edition(body), _BOOKS_CHAPTERS_AND_SECTIONS, {}, {})
 
 
+@pytest.mark.parametrize("title_page, first_part, divisions", [
+    ('<head rend="align(center)">M. Tulli Ciceroni in Q. Caecilium Oratio</head> '
+     '<head rend="align(center)">Quae Divinatio Dicitur</head> ',
+     _section('1', '<p rend="align(indent)"><milestone n="1" unit="chapter"/> <reg>si</reg> quis vestrum, iudices</p>'),
+     (Division('SECT', '1', (_paragraph('1', ' si quis vestrum, iudices'),), ()),)),
+    ('<docAuthor>Flavius Vopiscus Syracusius</docAuthor>',
+     _section('1', '<p><milestone unit="section" n="1"/> Hilaribus, quibus omnia festa</p>'),
+     (Division('SECT', '1', (_paragraph('1', ' Hilaribus, quibus omnia festa'),), ()),)),
+], ids=["two headings", "an author's name"])
+def test_the_edition_s_title_page_before_its_first_part_is_left_out(title_page, first_part, divisions):
+    assert read_edition(_edition(title_page + first_part), _SECTIONS, {}, {}) == divisions
+
+
+def test_a_commentary_beside_the_edition_is_left_out():
+    edition = ET.fromstring('<TEI xmlns="http://www.tei-c.org/ns/1.0"><text><body><div type="commentary">'
+                            '<div type="textpart" subtype="book" n="1"><list type="simple">'
+                            '<item>Praefatur poeta argumentum. <bibl n="Luc. 1.1">1</bibl></item></list></div></div>'
+                            '<div xml:lang="lat" type="edition">'
+                            + _book('1', '<l n="1">Bella per Emathios plus quam civilia campos</l>')
+                            + '</div></body></text></TEI>')
+
+    assert read_edition(edition, _BOOKS, {}, {}) == (
+        Division('BOOK', '1', (_verse('1', '1.1', 'Bella per Emathios plus quam civilia campos'),), ()),)
+
+
 def test_acts_of_scenes_hold_speeches_whose_speakers_take_the_reference_of_their_first_line():
     edition = _edition(_act('prologue', _scene('pr', '<milestone unit="card" n="1"/>'
                                                      '<sp><speaker>Mercvrivs</speaker><l n="1">Vt vos</l>'
@@ -1056,9 +1081,10 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
                 '</choice></l>'), _POEMS, "the edition > poem 1 > l 1 holds <expan>, which isn't read there."),
     (_poem('1', '<l n="1"><choice>locutu\'s <abbr>locutu\'s</abbr><expan>locutus es</expan></choice></l>'), _POEMS,
      "the edition > poem 1 > l 1 has text outside its parts, which isn't read."),
-    ('<head>M. Tulli Ciceroni in Q. Caecilium Oratio</head><head>Quae Divinatio Dicitur</head>'
-     + _poem('1', '<l n="1">Roma</l>'), _POEMS,
+    (_poem('1', '<l n="1">Roma</l>') + '<head>Quae Divinatio Dicitur</head>' + _poem('2', '<l n="1">est</l>'), _POEMS,
      "the edition holds <head>, which isn't read in the edition."),
+    (_poem('1', '<l n="1">Roma</l>') + '<docAuthor>Flavius Vopiscus Syracusius</docAuthor>'
+     + _poem('2', '<l n="1">est</l>'), _POEMS, "the edition holds <docAuthor>, which isn't read in the edition."),
     (_act('front', '<l n="cast">Roma</l>'), _LINES_ONLY,
      "the edition > act front holds <l>, which isn't read in an act."),
     (_poem('1', '<lg><l n="1">Roma</l></lg>' + _poem('2', '<l n="1">est</l>')), _POEMS,
@@ -1095,7 +1121,8 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
         "a note with a lemma between verses",
         "a choice of a misprint and its correction", "an element in a choice's abbreviation",
         "an expansion in a choice's abbreviation",
-        "text in a choice outside its readings", "a second heading in the edition",
+        "text in a choice outside its readings", "a heading after the edition's first part",
+        "an author's name after the edition's first part",
         "a verse in an act",
         "a poem of a line group and poems", "a poem of poems and a speech",
         "a book of verses and poems", "a chapter of paragraphs and sections", "a poem of poems and verses",

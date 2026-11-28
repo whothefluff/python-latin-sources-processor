@@ -18,7 +18,7 @@ _DIVISION_KINDS_BY_HOLDER: Dict[str, Tuple[str, ...]] = {
     'chapter': ('section',),
     'act': ('scene',),
 }
-#: The elements that the edition and each kind of division can hold, besides the edition's own heading
+#: The elements that the edition and each kind of division can hold, besides the edition's title page
 _PARTS_BY_DIVISION_KIND: Dict[str, Tuple[str, ...]] = {
     'edition': ('div', 'l', 'sp', 'gap', 'milestone', 'lb', 'pb'),
     'book': ('head', 'div', 'l', 'lg', 'p', 'gap', 'note', 'milestone', 'lb', 'pb'),
@@ -47,6 +47,7 @@ _DIVISION_KINDS_BY_TYPE = {_DIVISION_TYPES_BY_KIND[kind]: kind for kind in _NUMB
 _BLOCK_TYPES_BY_TAG = {'head': 'TITL', 'speaker': 'TITL', 'l': 'VERS', 'p': 'PARA'}
 #: Layout and numberings between the parts of the edition or of a division, which are left out wherever they are
 _LEFT_OUT_BETWEEN_PARTS_TAGS = ('milestone', 'lb', 'pb')
+_TITLE_PAGE_TAGS = ('head', 'docAuthor')
 #: The elements with a division's own text, which a division that holds divisions doesn't have
 _TEXT_OF_ITS_OWN_TAGS = ('l', 'lg', 'sp', 'p')
 #: A <quote> isn't always a quotation, so it gets no marks yet. A <reg> outside a <choice> has no other spelling
@@ -272,16 +273,26 @@ def read_edition(root: ET.Element, cited_division_subtypes: Tuple[str, ...], typ
     body = root.find(f'{_TEI}text/{_TEI}body')
     if body is None:
         raise ValueError("The TEI file has no <text><body>.")
-    editions = [child for child in _children(body, 'the body') if _tag(child) != 'pb']
+    editions = [child for child in _children(body, 'the body') if _tag(child) != 'pb' and not _is_a_commentary(child)]
     if len(editions) != 1 or _tag(editions[0]) != 'div' or editions[0].get('type') != 'edition':
         raise ValueError('The body must hold one <div type="edition"> and nothing else.')
-    children = _without_printed_volumes(_children(editions[0], 'the edition'))
-    first = next((child for child in children if _tag(child) not in _LEFT_OUT_BETWEEN_PARTS_TAGS), None)
-    if first is not None and _tag(first) == 'head':
-        children.remove(first)  # the work's title, which its header gives
+    children = _without_the_title_page(_without_printed_volumes(_children(editions[0], 'the edition')))
     parts, _, _ = _parts_and_notes(children, 'edition', 'the edition', (), cited_division_subtypes, types_by_n,
                                 types_by_subtype, _quotation_chains(body))
     return parts
+
+
+def _is_a_commentary(element: ET.Element) -> bool:
+    """EpiDoc's division for a commentary beside the edition, which is nothing of the work's"""
+    return _tag(element) == 'div' and element.get('type') == 'commentary'
+
+
+def _without_the_title_page(children: List[ET.Element]) -> List[ET.Element]:
+    """Returns the edition's children without its headings and its author's name before its first part, both in its
+    header too"""
+    first_part = next((position for position, child in enumerate(children)
+                       if _tag(child) not in (*_TITLE_PAGE_TAGS, *_LEFT_OUT_BETWEEN_PARTS_TAGS)), len(children))
+    return [child for child in children[:first_part] if _tag(child) not in _TITLE_PAGE_TAGS] + children[first_part:]
 
 
 def _without_printed_volumes(children: List[ET.Element]) -> List[ET.Element]:

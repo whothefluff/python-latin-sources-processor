@@ -1709,6 +1709,12 @@ def _poem(n: str, blocks: str) -> str:
     (_carmina(_poem("1", '<head>Carmen</head> <head xml:lang="eng">Youths</head> <head>Primum</head><pb n="2"/>'
                          '<head>Levis</head><l n="1">Roma est.</l>')), _CARMEN_WORK,
      [("POEM", "Carmen Primum Levis"), ("TITL", "Carmen Primum Levis"), ("VERS", "Roma est.")]),
+    (_carmina(_poem("1", '<l n="1">Roma est.</l>')).replace(
+        '<div type="edition">', '<div type="commentary"><div type="textpart" subtype="book" n="1"><list type="simple">'
+                                '<item>Praefatur poeta. <bibl n="Fict. 1.1">1</bibl></item></list></div></div>'
+                                '<div type="edition"><head>Carmina</head> <head>Quae Prima Dicuntur</head> '
+                                '<docAuthor>Fictor</docAuthor>'),
+     _CARMEN_WORK, [("VERS", "Roma est.")]),
     (_carmina(_poem("1", '<lg><l n="1">Roma est.</l><gap reason="lost"/></lg>'
                          '<sp><speaker>Fictor</speaker><gap reason="lost"/><l n="2">Levis est.</l> <gap reason="lost"/>'
                          '</sp>')),
@@ -1725,6 +1731,7 @@ def _poem(n: str, blocks: str) -> str:
         "a verse inside a note between verses", "labels of another numbering in a paragraph and in a quotation",
         "lost passages straight in a poem, after a verse or a paragraph and before the first verse",
         "Latin headings in a row, with one in English and a page break among them",
+        "the edition's title page and a commentary beside it",
         "lost passages straight in a line group and in a speech, one of them after its speaker"])
 def test_validation_passes_an_edition_with(monkeypatch, tmp_path, xml, work, names):
     _morpheus(monkeypatch, {})
