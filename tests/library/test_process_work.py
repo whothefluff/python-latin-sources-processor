@@ -1706,6 +1706,9 @@ def _poem(n: str, blocks: str) -> str:
               + _poem("3", '<p>Roma est.</p> <gap reason="lost"/>')), _CARMEN_WORK,
      [("VERS", "Roma est.[...][...]"), ("VERS", "Levis est."), ("POEM", "Carmen"), ("TITL", "Carmen"),
       ("VERS", "[...]Iam est."), ("PARA", "Roma est.[...]")]),
+    (_carmina(_poem("1", '<head>Carmen</head> <head xml:lang="eng">Youths</head> <head>Primum</head><pb n="2"/>'
+                         '<head>Levis</head><l n="1">Roma est.</l>')), _CARMEN_WORK,
+     [("POEM", "Carmen Primum Levis"), ("TITL", "Carmen Primum Levis"), ("VERS", "Roma est.")]),
     (_carmina(_poem("1", '<lg><l n="1">Roma est.</l><gap reason="lost"/></lg>'
                          '<sp><speaker>Fictor</speaker><gap reason="lost"/><l n="2">Levis est.</l> <gap reason="lost"/>'
                          '</sp>')),
@@ -1721,6 +1724,7 @@ def _poem(n: str, blocks: str) -> str:
         "a quotation inside a straight mark, after a ’ that follows a letter",
         "a verse inside a note between verses", "labels of another numbering in a paragraph and in a quotation",
         "lost passages straight in a poem, after a verse or a paragraph and before the first verse",
+        "Latin headings in a row, with one in English and a page break among them",
         "lost passages straight in a line group and in a speech, one of them after its speaker"])
 def test_validation_passes_an_edition_with(monkeypatch, tmp_path, xml, work, names):
     _morpheus(monkeypatch, {})
@@ -1837,6 +1841,12 @@ def _division(subtype: str, n: str, parts: str) -> str:
       ("TITL", 0, "SPCH", 4, 4, None), ("VERS", 0, "SPCH", 5, 7, "2")],
      [("Fictor", "1"), ("Roma", "1"), ("est", "1"), (".", "1"), ("Fictor", "2"), ("Levis", "2"), ("est", "2"),
       (".", "2")]),
+    (_carmina('<head>Liber</head>' + _division("poem", "1", '<head>Carmen</head> <head>Primum</head>'
+                                                            '<l n="1">Roma est.</l>')),
+     _CARMEN_WORK,
+     [("BOOK", 0, None, 0, 5, "1"), ("TITL", 0, "BOOK", 0, 0, None), ("POEM", 0, "BOOK", 1, 5, "1"),
+      ("TITL", 0, "POEM", 1, 2, None), ("VERS", 0, "POEM", 3, 5, "1")],
+     [("Liber", "1"), ("Carmen", "1.1"), ("Primum", "1.1"), ("Roma", "1.1.1"), ("est", "1.1.1"), (".", "1.1.1")]),
     (_edition_of(_division("act", "1", _division("scene", "1", '<l n="1">Roma est.</l><gap reason="lost"/>'))),
      _CARMEN_WORK._replace(cited_division_subtypes=()),
      [("ACT", 0, None, 0, 3, "1"), ("SCEN", 0, "ACT", 0, 3, "1"), ("VERS", 0, "SCEN", 0, 3, "1")],
@@ -1854,7 +1864,7 @@ def _division(subtype: str, n: str, parts: str) -> str:
         "a heading above which no division is cited", "a prologue and a satire, Persius's shape",
         "a preface and a section that the configuration types as a poem, Prudentius's shape",
         "books in printed volumes, Livy's shape", "a book of paragraphs beside a book of chapters, Livy's shape",
-        "a scene of verses beside a scene of speeches",
+        "a scene of verses beside a scene of speeches", "a poem's headings under its book's",
         "a lost passage straight in a scene",
         "lost passages straight in a chapter, after a paragraph and before one past a page break, a milestone, a line "
         "break and a note"])

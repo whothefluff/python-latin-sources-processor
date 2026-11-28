@@ -4,7 +4,7 @@ import re
 import unicodedata
 # noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
-from typing import Dict, Iterator, List, NamedTuple, Sequence, Set, Tuple, Union, cast
+from typing import Dict, Iterable, Iterator, List, NamedTuple, Sequence, Set, Tuple, Union, cast
 
 TEI_NAMESPACE = 'http://www.tei-c.org/ns/1.0'
 _TEI = f'{{{TEI_NAMESPACE}}}'
@@ -415,8 +415,8 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
     parts: List[Union[Division, TextBlock]] = []
     notes: List[str] = []
     notes_to_check_against_the_page: List[NoteToCheckAgainstThePage] = []
-    # A speaker, or a heading above which no division is cited
-    title_placed_by_its_text: ET.Element | None = None
+    # A speaker, or the Latin headings in a row before the first part
+    title_elements: List[ET.Element] = []
     lost_passages_before_the_first_block: List[LostPassage] = []
     for child in children:
         tag = _tag(child)
@@ -425,7 +425,7 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
             part_before = parts[-1] if parts else None
             if isinstance(part_before, TextBlock) and part_before.typ in _BLOCK_TYPES_OF_LOST_PASSAGES_BESIDE_THEM:
                 parts[-1] = part_before._replace(pieces=(*part_before.pieces, lost_passage))
-            elif part_before is None or part_before.typ == 'TITL':
+            elif part_before is None:
                 lost_passages_before_the_first_block.append(lost_passage)
             else:
                 raise _lost_passage_of_no_block(where)
@@ -440,12 +440,9 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
         elif tag == 'head' and child.get(_XML_LANG, 'lat') != 'lat':
             notes.append(''.join(child.itertext()).strip())
         elif tag in ('head', 'speaker'):
-            if parts or title_placed_by_its_text is not None or lost_passages_before_the_first_block:
+            if parts or lost_passages_before_the_first_block or tag == 'speaker' and title_elements:
                 raise ValueError(f"{where} has a title after its text or another title.")
-            if tag == 'head' and cited:
-                parts.append(_block(child, 'TITL', where, cited, chains))
-            else:
-                title_placed_by_its_text = child
+            title_elements.append(child)
         elif tag in ('div', 'lg', 'sp') and lost_passages_before_the_first_block:
             raise _lost_passage_of_no_block(where)
         elif tag == 'div':
@@ -455,17 +452,19 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
             parts.append(_division(child, tag, where, cited, cited_division_subtypes, types_by_n, types_by_subtype,
                                    chains))
         elif tag in ('l', 'p'):
-            parts.append(_block(child, _BLOCK_TYPES_BY_TAG[tag], where, cited, chains,
+            parts.append(_block((child,), _BLOCK_TYPES_BY_TAG[tag], where, cited, chains,
                                 lost_passages_before=tuple(lost_passages_before_the_first_block)))
             lost_passages_before_the_first_block.clear()
     if lost_passages_before_the_first_block:
         raise _lost_passage_of_no_block(where)
+    # A speaker, or a heading under no cited division
+    is_placed_by_its_text = bool(title_elements) and (not cited or _tag(title_elements[0]) == 'speaker')
     first_said = next(_blocks_said(parts), None)
-    if first_said is None and (title_placed_by_its_text is not None or not parts):
+    if first_said is None and (is_placed_by_its_text or not parts and not title_elements):
         raise ValueError(f"{where} has no text.")
-    if title_placed_by_its_text is not None:
-        parts.insert(0, _block(title_placed_by_its_text, 'TITL', where, cited, chains,
-                               cast(TextBlock, first_said).reference))
+    if title_elements:
+        parts.insert(0, _block(title_elements, 'TITL', where, cited, chains,
+                               cast(TextBlock, first_said).reference if is_placed_by_its_text else None))
     return tuple(parts), tuple(notes), tuple(notes_to_check_against_the_page)
 
 
@@ -490,10 +489,11 @@ def _blocks_said(parts: Sequence[Union[Division, TextBlock]]) -> Iterator[TextBl
             yield part
 
 
-def _block(element: ET.Element, typ: str, where: str, cited: Tuple[str, ...], chains: _QuotationChains,
+def _block(elements: Sequence[ET.Element], typ: str, where: str, cited: Tuple[str, ...], chains: _QuotationChains,
            reference: str | None = None, lost_passages_before: Tuple[LostPassage, ...] = ()) -> TextBlock:
-    """Returns the block, with the reference given, or else one made of what's cited and a verse's n, and with the
-    lost passages given at its start"""
+    """Returns the block of the element, or of a title's headings in a row with a space between each two, with the
+    reference given, or else one made of what's cited and a verse's n, and with the lost passages given at its start"""
+    element = elements[0]
     tag = _tag(element)
     n = element.get('n') if typ == 'VERS' else None
     if typ == 'VERS' and not n:
@@ -502,9 +502,11 @@ def _block(element: ET.Element, typ: str, where: str, cited: Tuple[str, ...], ch
     reference = reference or '.'.join(cited + ((n,) if n else ()))
     if not reference:
         raise ValueError(f"{where} would have no reference: no division above it is cited.")
-    deletion = _whole_deletion(element)
-    joined = _joined([*lost_passages_before,
-                      *_inline(deletion if deletion is not None else element, where, _INLINE_TAGS, chains)])
+    deletions = [_whole_deletion(each) for each in elements]
+    is_deleted = all(deletion is not None for deletion in deletions)
+    joined = _joined([*lost_passages_before, *_with_a_space_between(
+        _inline(cast(ET.Element, deletion) if is_deleted else each, where, _INLINE_TAGS, chains)
+        for each, deletion in zip(elements, deletions))])
     own_pieces = joined.pieces[len(lost_passages_before):]
     if not any(isinstance(piece, LostPassage) or piece.strip() for piece in own_pieces):
         raise ValueError(f"{where} has no text.")
@@ -532,8 +534,13 @@ def _block(element: ET.Element, typ: str, where: str, cited: Tuple[str, ...], ch
     notes_to_check_against_the_page = tuple(
         NoteToCheckAgainstThePage(reference, ' '.join(text.split()), shapes)
         for text, shapes in joined.texts_and_shapes_of_notes_to_check_against_the_page)
-    return TextBlock(typ, n, reference, joined.pieces, deletion is not None, joined.notes, marks, numerals, expansions,
+    return TextBlock(typ, n, reference, joined.pieces, is_deleted, joined.notes, marks, numerals, expansions,
                      joined.added_quotation_marks, regularized_spellings, notes_to_check_against_the_page)
+
+
+def _with_a_space_between(pieces_of_each: Iterable[_InlinePieces]) -> _InlinePieces:
+    return [piece for position, pieces in enumerate(pieces_of_each)
+            for piece in ([_MarkedText(' ')] if position else []) + pieces]
 
 
 class _CharacterOfAText(NamedTuple):

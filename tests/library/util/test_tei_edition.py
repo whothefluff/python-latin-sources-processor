@@ -568,6 +568,60 @@ def test_a_verse_with_nothing_but_the_lost_passage_before_it_has_no_text():
         read_edition(_edition(_poem('1', '<gap reason="lost"/><l n="1"> </l>')), _POEMS, {}, {})
 
 
+@pytest.mark.parametrize("body, cited, divisions", [
+    (_book('2', '<head>C. PLINI SECVNDI</head> <head>NATVRALIS HISTORIAE</head> <head>LIBER II</head> '
+                '<note place="unspecified">Lib. II.</note>' + _chapter('1', '<p>Mundum et hoc quodcumque</p>')),
+     ('book', 'chapter'),
+     (Division('BOOK', '2', (_title('2', 'C. PLINI SECVNDI NATVRALIS HISTORIAE LIBER II'),
+                             Division('CHAP', '1', (_paragraph('2.1', 'Mundum et hoc quodcumque'),), ())),
+               ('Lib. II.',), (NoteToCheckAgainstThePage('2', 'Lib. II.', ('outside any block',)),)),)),
+    (_book('7', '<head>C. PLINI SECVNDI</head> <head>LIBRI VII–XV</head> <pb xml:id="v.2.p.1"/> <head>LIBER VII</head>'
+           + _chapter('praef', '<p>Mundus</p>')),
+     ('book', 'chapter'),
+     (Division('BOOK', '7', (_title('7', 'C. PLINI SECVNDI LIBRI VII–XV LIBER VII'),
+                             Division('CHAP', 'praef', (_paragraph('7.praef', 'Mundus'),), ())), ()),)),
+    (_book('2', '<head rend="align(center)">Paradoxon II</head> <head type="subhead" xml:lang="grc" '
+                'rend="align(indent)">ὅτι αὐτάρκης ἡ ἀρετὴ πρὸς εὐδαιμονίαν</head> <head type="subhead" '
+                'rend="align(indent)"> <del>In quo virtus sit, ei nihil deesse ad beate vivendum.</del> </head>'
+           + _section('16', '<p>nec vero ego M. Regulum aerumnosum nec infelicem putavi;</p>')),
+     ('book', 'section'),
+     (Division('BOOK', '2', (
+         TextBlock('TITL', None, '2', ('Paradoxon II  In quo virtus sit, ei nihil deesse ad beate vivendum. ',), False,
+                   (), (EditorialMark('deletion', 0, 14, 67),)),
+         Division('SECT', '16', (_paragraph('2.16', 'nec vero ego M. Regulum aerumnosum nec infelicem putavi;'),), ())),
+               ('ὅτι αὐτάρκης ἡ ἀρετὴ πρὸς εὐδαιμονίαν',)),)),
+    (_book('2', '<head><del>Liber</del></head> <head>Secundus</head>' + _chapter('1', '<p>Mundum</p>')),
+     ('book', 'chapter'),
+     (Division('BOOK', '2', (
+         TextBlock('TITL', None, '2', ('Liber Secundus',), False, (), (EditorialMark('deletion', 0, 0, 5),)),
+         Division('CHAP', '1', (_paragraph('2.1', 'Mundum'),), ())), ()),)),
+], ids=["three headings, then a note", "headings with a page break between them",
+        "a Latin heading after one in another language, marked for deletion",
+        "a first heading marked for deletion and one that isn't"])
+def test_the_latin_headings_in_a_row_at_a_division_s_top_are_one_title_with_a_space_between_each_two(
+        body, cited, divisions):
+    assert read_edition(_edition(body), cited, {}, {}) == divisions
+
+
+def test_a_cited_division_with_only_a_heading_is_its_title_alone():
+    edition = _edition(_book('1', '<head>Liber I</head>') + _book('2', '<l n="1">Roma est.</l>'))
+
+    assert read_edition(edition, _BOOKS, {}, {}) == (
+        Division('BOOK', '1', (_title('1', 'Liber I'),), ()),
+        Division('BOOK', '2', (_verse('1', '2.1', 'Roma est.'),), ()))
+
+
+@pytest.mark.parametrize("body, error", [
+    (_book('2', '<head>C. PLINI SECVNDI</head>' + _chapter('1', '<p>Mundum</p>') + '<head>LIBER II</head>'),
+     "the edition > book 2 has a title after its text or another title."),
+    (_poem('1', '<sp><speaker>Damon</speaker><speaker>Alphesiboeus</speaker><l n="1">Roma</l></sp>'),
+     "the edition > poem 1 > sp has a title after its text or another title."),
+], ids=["a heading after the first part", "two speakers"])
+def test_a_heading_after_its_division_s_first_part_or_a_second_speaker_raises(body, error):
+    with pytest.raises(ValueError, match="^" + re.escape(error) + "$"):
+        read_edition(_edition(body), _BOOKS_CHAPTERS_AND_SECTIONS, {}, {})
+
+
 def test_acts_of_scenes_hold_speeches_whose_speakers_take_the_reference_of_their_first_line():
     edition = _edition(_act('prologue', _scene('pr', '<milestone unit="card" n="1"/>'
                                                      '<sp><speaker>Mercvrivs</speaker><l n="1">Vt vos</l>'
@@ -967,8 +1021,6 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
                                                       "group."),
     (_poem('1', '<l n="1">Roma</l><head>Carmen</head>'), _POEMS, "the edition > poem 1 has a title after its text or "
                                                                  "another title."),
-    (_poem('1', '<head>Carmen</head><head>Alterum</head><l n="1">Roma</l>'), _POEMS,
-     "the edition > poem 1 has a title after its text or another title."),
     (_poem('1', '<l n="1"> </l>'), _POEMS, "the edition > poem 1 > l 1 has no text."),
     (_poem('1', '<note>Desunt cetera.</note>'), _POEMS, "the edition > poem 1 has no text."),
     (_section('praef', '<head>Ausonius Gregorio filio sal.</head><p n="pr">En umquam vidisti</p>'), _LINES_ONLY,
@@ -1034,7 +1086,7 @@ def test_typography_of_another_rend_raises(typography, opening_tag):
         "a gap for another reason", "text outside a verse", "a verse without n", "a poem without n",
         "books and poems at the top", "a book in a poem", "a book in a book", "another subtype",
         "a speech in a line group", "a paragraph in a line group",
-        "a title after a verse", "two titles",
+        "a title after a verse",
         "a verse without text", "a poem without text", "a paragraph under no division that the edition cites",
         "a heading without text under no division that the edition cites",
         "an empty edition", "a book of poems and chapters", "a verse in a section", "a chapter in a chapter",

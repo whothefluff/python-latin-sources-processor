@@ -1622,15 +1622,16 @@ class _ExpectedBlock(NamedTuple):
     items: List[_ExpectedItem]
 
 
-def _blocks_outside_notes(body: ET.Element) -> Iterator[Tuple[ET.Element, int | None]]:
-    """Yields each verse, paragraph, Latin title and speaker with the id of the <div> that holds it"""
-    def walk(element: ET.Element, div_id: int | None) -> Iterator[Tuple[ET.Element, int | None]]:
+def _blocks_outside_notes(body: ET.Element) -> Iterator[Tuple[ET.Element, int | None, ET.Element]]:
+    """Yields each verse, paragraph, Latin title and speaker with the id of the <div> that holds it, and the element
+    that it stands in"""
+    def walk(element: ET.Element, div_id: int | None) -> Iterator[Tuple[ET.Element, int | None, ET.Element]]:
         for child in element:
             is_heading = child.tag == f'{_TEI}head'
             is_block = child.tag in (f'{_TEI}l', f'{_TEI}p', f'{_TEI}speaker') and not _is_a_lost_line(child) \
                 or is_heading and child.get(_XML_LANG, 'lat') == 'lat' and element.get('type') != 'edition'
             if is_block:
-                yield child, div_id
+                yield child, div_id, element
             elif child.tag != f'{_TEI}note' and not is_heading:
                 yield from walk(child, id(child) if child.tag == f'{_TEI}div' else div_id)
     return walk(body, None)
@@ -1707,13 +1708,23 @@ def _lost_passages_beside_blocks(body: ET.Element) -> _LostPassagesBesideBlocks:
 
 
 def _expected_blocks(root: ET.Element) -> List[_ExpectedBlock]:
+    """Returns the blocks of the body outside notes, where a division's Latin headings in a row are one title, with a
+    space between each two"""
     body = _body_of(root)
     chains = _quotation_chains(body)
     beside = _lost_passages_beside_blocks(body)
-    return [_ExpectedBlock(element, div_id, [*[_ExpectedLostPassage()] * beside.at_the_start.get(id(element), 0),
-                                             *_expected_items(element, chains),
-                                             *[_ExpectedLostPassage()] * beside.at_the_end.get(id(element), 0)])
-            for element, div_id in _blocks_outside_notes(body)]
+    blocks: List[_ExpectedBlock] = []
+    holder_of_the_last_block: ET.Element | None = None
+    for element, div_id, holder in _blocks_outside_notes(body):
+        items = [*[_ExpectedLostPassage()] * beside.at_the_start.get(id(element), 0), *_expected_items(element, chains),
+                 *[_ExpectedLostPassage()] * beside.at_the_end.get(id(element), 0)]
+        follows_a_heading = holder is holder_of_the_last_block and blocks[-1].element.tag == f'{_TEI}head'
+        if element.tag == f'{_TEI}head' and follows_a_heading:
+            blocks[-1] = blocks[-1]._replace(items=[*blocks[-1].items, ' ', *items])
+        else:
+            blocks.append(_ExpectedBlock(element, div_id, items))
+        holder_of_the_last_block = holder
+    return blocks
 
 
 def _mark_places(blocks: List[_ExpectedBlock]) -> List[_MarkPlace]:
