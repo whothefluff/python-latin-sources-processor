@@ -1562,10 +1562,10 @@ _ExpectedItem = Union[str, _ExpectedAddedMark, _ExpectedLostPassage]
 
 def _expected_items(element: ET.Element, chains: _QuotationChains) -> List[_ExpectedItem]:
     """Reads the element by the checks' own rules, not by the walker's code, so that they don't share its mistakes,
-    a character at a time, with the marks around each chain of <q>s. A line break separates two words. A <choice>
-    holds only its readings, so the whitespace between them isn't text, and of two spellings the regularized one
-    isn't either"""
-    if element.tag in _TAGS_LEFT_OUT_OF_THE_TEXT:
+    a character at a time, with the marks around each chain of <q>s. A line break separates two words, and a label of
+    another numbering is left out like its milestone. A <choice> holds only its readings, so the whitespace between
+    them isn't text, and of two spellings the regularized one isn't either"""
+    if element.tag in _TAGS_LEFT_OUT_OF_THE_TEXT or _is_a_label_of_another_numbering(element):
         return []
     if element.tag == f'{_TEI}gap':
         return [_ExpectedLostPassage()]
@@ -1582,6 +1582,11 @@ def _expected_items(element: ET.Element, chains: _QuotationChains) -> List[_Expe
         closing = [_ExpectedAddedMark(False, None)] if id(element) in chains.closing else []
         items = [*opening, *items, *closing]
     return items
+
+
+def _is_a_label_of_another_numbering(element: ET.Element) -> bool:
+    return element.tag == f'{_TEI}label' and (
+            (element.get('type') or '').startswith('alt_') or element.get('place') == 'margin')
 
 
 def _quotation_chains(body: ET.Element) -> _QuotationChains:

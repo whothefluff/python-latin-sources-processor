@@ -1697,6 +1697,9 @@ def _poem(n: str, blocks: str) -> str:
                          '<l n="2">Iam est.</l>')),
      _CARMEN_WORK._replace(notes_checked_against_the_page=[('1.1', 'vulg. Levis est.')]),
      [("VERS", "Roma est."), ("VERS", "Iam est.")]),
+    (_carmina(_poem("1", '<p>Roma <label type="alt_section">(9)</label> est <q>iam <label place="margin">(10)</label>'
+                         ' levis</q>.</p>')), _CARMEN_WORK,
+     [("PARA", "Roma est “iam levis”.")]),
 ], ids=["a paragraph that is only a lost passage", "a verse that is only a lost passage",
         "a lost passage between two words", "a lost passage against the word after it",
         "two lost passages with a sign between them", "a title with whitespace after it", "a title over two lines",
@@ -1705,7 +1708,7 @@ def _poem(n: str, blocks: str) -> str:
         "an abbreviation with an apostrophe", "a closing mark before a word that starts with s",
         "two straight pairs against three single openings",
         "a quotation inside a straight mark, after a ’ that follows a letter",
-        "a verse inside a note between verses"])
+        "a verse inside a note between verses", "labels of another numbering in a paragraph and in a quotation"])
 def test_validation_passes_an_edition_with(monkeypatch, tmp_path, xml, work, names):
     _morpheus(monkeypatch, {})
     _macronizer_echoes(monkeypatch)

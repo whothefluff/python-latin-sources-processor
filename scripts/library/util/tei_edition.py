@@ -60,7 +60,9 @@ _READ_AS_TEXT_TAGS = (*_READ_AS_PLAIN_TEXT_TAGS, *_TYPOGRAPHY_TAGS, *_READ_AS_MA
 _QUOTATION_TAGS = ('q',)
 _READ_EACH_IN_ITS_OWN_WAY_TAGS = ('choice', 'abbr', 'lb', 'gap', 'note')
 _LEFT_OUT_TAGS = ('milestone', 'pb')
-_INLINE_TAGS = (*_READ_AS_TEXT_TAGS, *_QUOTATION_TAGS, *_READ_EACH_IN_ITS_OWN_WAY_TAGS, *_LEFT_OUT_TAGS)
+#: Read only where it prints another numbering, which is left out like the milestone beside it
+_LABEL_TAGS = ('label',)
+_INLINE_TAGS = (*_READ_AS_TEXT_TAGS, *_QUOTATION_TAGS, *_READ_EACH_IN_ITS_OWN_WAY_TAGS, *_LEFT_OUT_TAGS, *_LABEL_TAGS)
 _LEFT_OUT_OF_AN_ABBREVIATION_TAGS = ('expan',)
 _PRINTED_READING_TAGS_BY_CHOICE: Dict[Tuple[str, ...], str] = {('abbr', 'expan'): 'abbr', ('orig', 'reg'): 'orig'}
 _OPENING_MARK_PLACEHOLDER, _CLOSING_MARK_PLACEHOLDER = '“', '”'
@@ -402,8 +404,7 @@ def _parts_and_notes(children: List[ET.Element], holder: str, where: str, cited:
     notes, and its notes to check against the page"""
     for child in children:
         if _tag(child) not in _PARTS_BY_DIVISION_KIND[holder]:
-            raise ValueError(f"{where} holds <{_tag(child)}>, which isn't read in "
-                             f"{_with_its_article(_DIVISION_KIND_NAMES[holder])}.")
+            raise _not_read(child, where, f"in {_with_its_article(_DIVISION_KIND_NAMES[holder])}")
     division_kind = _division_kind_held(children, holder, where, types_by_subtype)
     text_of_its_own = next((child for child in children if _tag(child) in _TEXT_OF_ITS_OWN_TAGS), None)
     if division_kind is not None and text_of_its_own is not None:
@@ -542,8 +543,8 @@ def _inline(element: ET.Element, where: str, tags: Tuple[str, ...], chains: _Quo
     pieces: _InlinePieces = [_MarkedText(element.text or '')]
     for child in element:
         tag = _tag(child)
-        if tag not in tags:
-            raise ValueError(f"{where} holds <{tag}>, which isn't read there.")
+        if tag not in tags or tag in _LABEL_TAGS and not _is_a_label_of_another_numbering(child):
+            raise _not_read(child, where, 'there')
         if tag in _TYPOGRAPHY_TAGS and child.get('rend') not in _TYPOGRAPHY_RENDS_READ_AS_TEXT:
             raise ValueError(f"{where} holds <{tag} rend=\"{child.get('rend', '')}\">, but only "
                              f"{' and '.join(_TYPOGRAPHY_RENDS_READ_AS_TEXT)} typography is read there.")
@@ -575,6 +576,19 @@ def _inline(element: ET.Element, where: str, tags: Tuple[str, ...], chains: _Quo
                                       _shapes_to_check_against_the_page(child)))
         pieces.append(_MarkedText(child.tail or ''))
     return pieces
+
+
+def _is_a_label_of_another_numbering(label: ET.Element) -> bool:
+    return (label.get('type') or '').startswith('alt_') or label.get('place') == 'margin'
+
+
+def _not_read(element: ET.Element, where: str, place: str) -> ValueError:
+    """Returns the error for an element that isn't read in the place given, which names the edition's fix for a label
+    without a type: code can't tell its heading from a number"""
+    if _tag(element) in _LABEL_TAGS and element.get('type') is None and not _is_a_label_of_another_numbering(element):
+        return ValueError(f"{where} holds a <label> without a type, which the edition should give one, or the element "
+                          f"that it stands for.")
+    return ValueError(f"{where} holds <{_tag(element)}>, which isn't read {place}.")
 
 
 def _quoted(element: ET.Element, where: str, tags: Tuple[str, ...], chains: _QuotationChains) -> _InlinePieces:

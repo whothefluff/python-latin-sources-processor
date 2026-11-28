@@ -413,6 +413,42 @@ def test_a_printed_volume_s_index_or_text_or_one_inside_a_division_raises(body, 
         read_edition(_edition(body), _BOOKS_CHAPTERS_AND_SECTIONS, {}, {})
 
 
+@pytest.mark.parametrize("paragraph, pieces, added_quotation_marks", [
+    ('<p rend="align(indent)"><label place="margin">(11)</label> <reg>at</reg> quem ad modum, iudices, venerunt?</p>',
+     (' at quem ad modum, iudices, venerunt?',), ()),
+    ('<p>castellaque vi capta complura <label type="alt_section">(9)</label> incendimus.</p>',
+     ('castellaque vi capta complura  incendimus.',), ()),
+    ('<p rend="align(indent)"><q rend="single"><label type="alt_section">(21)</label> Atqui qualia sunt haec</q></p>',
+     ('“ Atqui qualia sunt haec”',),
+     (AddedQuotationMark(True, 'single', 0, 0, 1), AddedQuotationMark(False, None, 0, 24, 25))),
+], ids=["in the margin", "of another section", "inside a quotation"])
+def test_a_label_of_another_numbering_is_left_out_of_its_paragraph(paragraph, pieces, added_quotation_marks):
+    assert read_edition(_edition(_section('9', paragraph)), _SECTIONS, {}, {}) == (
+        Division('SECT', '9', (_paragraph('9', *pieces, added_quotation_marks=added_quotation_marks),), ()),)
+
+
+@pytest.mark.parametrize("body, error", [
+    (_section('9', '<label type="alt_section">(9)</label><p>incendimus.</p>'),
+     "the edition > section 9 holds <label>, which isn't read in a section."),
+    (_section('9', '<label place="margin">(9)</label><p>incendimus.</p>'),
+     "the edition > section 9 holds <label>, which isn't read in a section."),
+    (_section('2', '<p rend="align(indent)"><milestone unit="alt_letter" n="15"/><label>(15)</label> <reg>quid</reg> '
+                   'agit, obsecro te, Attica nostra?</p>'),
+     "the edition > section 2 > p holds a <label> without a type, which the edition should give one, or the element "
+     "that it stands for."),
+    (_section('fragments', '<label rend="align(center)">Fragmenta</label><p>condemnatus est</p>'),
+     "the edition > section fragments holds a <label> without a type, which the edition should give one, or the "
+     "element that it stands for."),
+    (_section('1', '<p>aut cui sermoni nos intervenimus? <label type="speaker">PH.</label> Quaesierat ex me</p>'),
+     "the edition > section 1 > p holds <label>, which isn't read there."),
+], ids=["a label of another numbering between two parts", "a label in the margin between two parts",
+        "a label without a type in a paragraph", "a label without a type straight in a division",
+        "a label of another type"])
+def test_a_label_that_isn_t_another_numbering_inside_a_block_raises(body, error):
+    with pytest.raises(ValueError, match="^" + re.escape(error) + "$"):
+        read_edition(_edition(body), _SECTIONS, {}, {})
+
+
 def test_acts_of_scenes_hold_speeches_whose_speakers_take_the_reference_of_their_first_line():
     edition = _edition(_act('prologue', _scene('pr', '<milestone unit="card" n="1"/>'
                                                      '<sp><speaker>Mercvrivs</speaker><l n="1">Vt vos</l>'
