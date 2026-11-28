@@ -1782,12 +1782,26 @@ def _division(subtype: str, n: str, parts: str) -> str:
     (_carmina('<head>Liber</head><l n="1">Roma est.</l>'), _CARMEN_WORK._replace(cited_division_subtypes=()),
      [("BOOK", 0, None, 0, 3, "1"), ("TITL", 0, "BOOK", 0, 0, None), ("VERS", 0, "BOOK", 1, 3, "1")],
      [("Liber", "1"), ("Roma", "1"), ("est", "1"), (".", "1")]),
+    (_edition_of(_division("prologue", "pr", '<head>Prologus</head><l n="1">Roma est.</l>')
+                 + _division("satire", "1", '<l n="1">Levis est.</l>')),
+     _CARMEN_WORK._replace(cited_division_subtypes=('prologue', 'satire')),
+     [("PROL", 0, None, 0, 3, "pr"), ("TITL", 0, "PROL", 0, 0, None), ("VERS", 0, "PROL", 1, 3, "1"),
+      ("POEM", 0, None, 4, 6, "1"), ("VERS", 0, "POEM", 4, 6, "1")],
+     [("Prologus", "pr"), ("Roma", "pr.1"), ("est", "pr.1"), (".", "pr.1"), ("Levis", "1.1"), ("est", "1.1"),
+      (".", "1.1")]),
+    (_edition_of(_division("preface", "pr", '<l n="1">Roma est.</l>')
+                 + _division("section", "1", '<l n="1">Levis est.</l>')),
+     _CARMEN_WORK._replace(cited_division_subtypes=('preface', 'section'), types_by_subtype={'section': 'POEM'}),
+     [("PROL", 0, None, 0, 2, "pr"), ("VERS", 0, "PROL", 0, 2, "1"), ("POEM", 0, None, 3, 5, "1"),
+      ("VERS", 0, "POEM", 3, 5, "1")],
+     [("Roma", "pr.1"), ("est", "pr.1"), (".", "pr.1"), ("Levis", "1.1"), ("est", "1.1"), (".", "1.1")]),
 ], ids=["verses straight in a book", "chapters straight in the edition, of paragraphs and of sections",
         "sections straight in the edition", "sections straight in a book", "a poem of a preface and a poem",
         "verses straight in the edition, with printed marks",
         "speeches straight in the edition, with a tagged quotation",
         "sections that the configuration types as poems",
-        "a heading above which no division is cited"])
+        "a heading above which no division is cited", "a prologue and a satire, Persius's shape",
+        "a preface and a section that the configuration types as a poem, Prudentius's shape"])
 def test_a_work_passes_validation_with(monkeypatch, tmp_path, xml, work, subdivisions, references):
     _morpheus(monkeypatch, {})
     _macronizer_echoes(monkeypatch)

@@ -34,6 +34,8 @@ _DIVISION_TYPES_BY_KIND = {'book': 'BOOK', 'poem': 'POEM', 'chapter': 'CHAP', 's
                            'scene': 'SCEN', 'lg': 'LGRP', 'sp': 'SPCH'}
 _DIVISION_KIND_NAMES = {'edition': 'edition', 'book': 'book', 'poem': 'poem', 'chapter': 'chapter',
                         'section': 'section', 'act': 'act', 'scene': 'scene', 'lg': 'line group', 'sp': 'speech'}
+#: Other names for a poem, which every edition means the same way, with the dataset's type for each
+_POEM_TYPES_BY_FOLDED_SUBTYPE = {'satire': 'POEM', 'prologue': 'PROL', 'preface': 'PROL'}
 #: The kinds of division that the edition numbers with their n
 _NUMBERED_DIVISION_KINDS = ('book', 'poem', 'chapter', 'section', 'act', 'scene')
 #: The kinds of division that the work's configuration can give another type by their n, such as a prologue
@@ -331,11 +333,12 @@ def _division_kind_held(children: List[ET.Element], holder: str, where: str,
 
 
 def _textpart_kind(element: ET.Element, holder: str, where: str, types_by_subtype: Dict[str, str]) -> str:
-    """Returns the kind that the division is read as: its subtype's, or the one of the type that the work's
-    configuration gives its subtype, which has to be one that is read"""
+    """Returns the kind that the division is read as: its subtype's, a poem for another name of one, or, for a subtype
+    of a numbered kind, the kind of the type that the work's configuration gives it"""
     subtype = element.get('subtype', '')
     is_typed = subtype in _NUMBERED_DIVISION_KINDS and subtype in types_by_subtype
-    kind = _DIVISION_KINDS_BY_TYPE[types_by_subtype[subtype]] if is_typed else subtype
+    kind = (_DIVISION_KINDS_BY_TYPE[types_by_subtype[subtype]] if is_typed
+            else 'poem' if subtype in _POEM_TYPES_BY_FOLDED_SUBTYPE else subtype)
     kinds = _DIVISION_KINDS_BY_HOLDER[holder]
     if _tag(element) != 'div' or element.get('type') != 'textpart' or kind not in kinds:
         typed = f", which types_by_subtype makes {types_by_subtype[subtype]}" if is_typed else ''
@@ -360,15 +363,16 @@ def _division(element: ET.Element, kind: str, where: str, cited: Tuple[str, ...]
     """Returns the division, read as one of the kind given. The edition cites it, and an error finds it, by its own
     subtype"""
     n = element.get('n')
+    subtype = element.get('subtype', '')
     if kind in _NUMBERED_DIVISION_KINDS:
-        subtype = cast(str, element.get('subtype'))
         if not n:
             raise ValueError(f"{'An' if subtype.startswith('a') else 'A'} {subtype} in {where} has no n.")
         where = f"{where} > {subtype} {n}"
         cited = cited + (n,) if subtype in cited_division_subtypes else cited
     else:
         where = f"{where} > {kind}"
-    typ = (types_by_n.get(n or '') if kind in _DIVISION_KINDS_TYPED_BY_N else None) or _DIVISION_TYPES_BY_KIND[kind]
+    typ = ((types_by_n.get(n or '') if kind in _DIVISION_KINDS_TYPED_BY_N else None)
+           or _POEM_TYPES_BY_FOLDED_SUBTYPE.get(subtype) or _DIVISION_TYPES_BY_KIND[kind])
     parts, notes, notes_to_check_against_the_page = _parts_and_notes(
         _children(element, where), kind, where, cited, cited_division_subtypes, types_by_n, types_by_subtype, chains)
     return Division(typ, n if kind in _NUMBERED_DIVISION_KINDS else None, parts, notes,

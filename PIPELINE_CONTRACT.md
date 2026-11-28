@@ -128,8 +128,9 @@ In `work_content_subdivisions.csv`:
   poems or its own verses, line groups, speeches and paragraphs. One that holds books, poems, chapters, sections, acts
   or scenes holds them all of one kind, and no verse, line group, speech or paragraph of its own.
 * **The roots** are all of one type: books, chapters, sections, acts or poems, or the verses or the speeches of a work
-  that its edition doesn't divide. A prologue or an epilogue counts as the poem or the act that the configuration
-  types by its n: a play's prologue is an act typed `PROL`, as Amphitruo's is.
+  that its edition doesn't divide. A prologue or an epilogue counts as a poem or an act: a play's prologue is an act
+  that the configuration types `PROL` by its n, like Amphitruo's, and an edition's `prologue` or `preface` a poem
+  typed `PROL`, like Persius's or the Psychomachia's.
 * **`cnt`:** a subdivision's position among its siblings of the same type, from 0, whatever the edition numbers it.
 * **`name`:** the text of a verse, a paragraph or a title, and for a division the text of the title that heads it.
   It has one space for each run of whitespace in the edition, and none around it: whitespace in the XML is layout.

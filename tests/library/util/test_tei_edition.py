@@ -331,6 +331,51 @@ def test_a_poem_and_a_section_that_the_configuration_types_as_a_poem_are_one_kin
         Division('POEM', '2', (_verse('1', '2.1', 'Levis est.'),), ()))
 
 
+def test_a_satire_is_a_poem_and_a_prologue_a_prologue_one_kind_of_division_cited_by_its_own_subtype():
+    edition = _edition('<div n="pr" subtype="prologue" type="textpart"><head>Prologus</head>'
+                       '<l n="1">Nec fonte labra prolui caballino</l></div><pb n="p.316"/>'
+                       '<div n="2" subtype="satire" type="textpart">'
+                       '<l n="1">hunc, Macrine, diem numera meliore lapillo,</l></div>')
+
+    assert read_edition(edition, ('prologue', 'satire'), {}, {}) == (
+        Division('PROL', 'pr', (_title('pr', 'Prologus'), _verse('1', 'pr.1', 'Nec fonte labra prolui caballino')), ()),
+        Division('POEM', '2', (_verse('1', '2.1', 'hunc, Macrine, diem numera meliore lapillo,'),), ()))
+
+
+def test_a_preface_is_a_prologue_one_kind_of_division_with_the_sections_that_the_configuration_types_as_poems():
+    edition = _edition('<div type="textpart" subtype="preface" n="pr"><pb n="p.274"/>'
+                       '<l n="1">Senex fidelis prima credendi via</l></div>'
+                       '<div n="1" type="textpart" subtype="section">'
+                       '<l n="1">Christe, graves hominum semper miserate labores,</l></div>')
+
+    assert read_edition(edition, ('preface', 'section'), {}, _SECTIONS_ARE_POEMS) == (
+        Division('PROL', 'pr', (_verse('1', 'pr.1', 'Senex fidelis prima credendi via'),), ()),
+        Division('POEM', '1', (_verse('1', '1.1', 'Christe, graves hominum semper miserate labores,'),), ()))
+
+
+def test_the_configuration_types_a_satire_by_its_n_and_never_by_its_subtype():
+    edition = _edition('<div n="pr" subtype="satire" type="textpart"><l n="1">Nec fonte labra prolui caballino</l>'
+                       '</div><div n="1" subtype="satire" type="textpart"><l n="1">hunc, Macrine, diem</l></div>')
+
+    assert read_edition(edition, ('satire',), {'pr': 'PROL'}, {'satire': 'CHAP'}) == (
+        Division('PROL', 'pr', (_verse('1', 'pr.1', 'Nec fonte labra prolui caballino'),), ()),
+        Division('POEM', '1', (_verse('1', '1.1', 'hunc, Macrine, diem'),), ()))
+
+
+@pytest.mark.parametrize("body, error", [
+    ('<div type="textpart" subtype="preface"><l n="1">Senex fidelis</l></div>', "A preface in the edition has no n."),
+    ('<div n="2" subtype="satire" type="textpart"><l>hunc, Macrine</l></div>',
+     "A line in the edition > satire 2 has no n."),
+    (_chapter('1', '<div n="pr" subtype="prologue" type="textpart"><l n="1">Nec fonte</l></div>'),
+     'the edition > chapter 1 holds <div type="textpart" subtype="prologue">, but only sections are read there.'),
+    (_book('1', '<l n="1">Roma est.</l>') + '<div n="2" subtype="satire" type="textpart"><l n="1">hunc</l></div>',
+     "the edition holds books and satires, but only one kind of division is read in the edition."),
+], ids=["a preface without n", "a verse without n in a satire", "a prologue in a chapter", "a satire beside a book"])
+def test_a_satire_a_prologue_or_a_preface_raises_with_its_own_subtype_in_the_error(body, error):
+    with pytest.raises(ValueError, match="^" + re.escape(error) + "$"):
+        read_edition(_edition(body), ('book', 'prologue', 'satire', 'preface'), {}, {})
+
+
 def test_acts_of_scenes_hold_speeches_whose_speakers_take_the_reference_of_their_first_line():
     edition = _edition(_act('prologue', _scene('pr', '<milestone unit="card" n="1"/>'
                                                      '<sp><speaker>Mercvrivs</speaker><l n="1">Vt vos</l>'

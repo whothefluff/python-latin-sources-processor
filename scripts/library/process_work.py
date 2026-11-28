@@ -1388,7 +1388,7 @@ def check_subdivision_numbers(errors, work_content_subdivisions_df):
 
 def check_subdivisions_without_a_parent_are_of_one_type(errors, work_content_subdivisions_df):
     """The reader takes a subdivision without a parent whatever the others are, so one that lost its parent would reach
-    it as wrong structure. A prologue or an epilogue is a poem or an act that the work's configuration typed by its n"""
+    it as wrong structure. A prologue or an epilogue is a poem or an act with a type of its own"""
     subdivisions = work_content_subdivisions_df
     types = set(subdivisions[subdivisions['parent'].isnull()]['typ'])
     typed_by_their_n = types & {'PROL', 'EPIL'}
