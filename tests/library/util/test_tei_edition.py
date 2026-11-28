@@ -820,6 +820,61 @@ def test_an_empty_note_raises(body, cited, error):
         read_edition(_edition(body), cited, {}, {})
 
 
+@pytest.mark.parametrize("body, cited, error", [
+    (_chapter('2', '<p>dulci tamen oblectabat solacio, ali-\n quando se victurum</p>'), _CHAPTERS,
+     "the edition > chapter 2 > p has a hyphen after a letter in its text, in 'solacio, ali- quando', which can only "
+     "be the edition's mistake."),
+    (_chapter('2', '<p>ut simulanti trans-\n</p>'), _CHAPTERS,
+     "the edition > chapter 2 > p has a hyphen after a letter in its text, in 'simulanti trans-', which can only be "
+     "the edition's mistake."),
+    (_chapter('34', '<p>quos circummunitos superius demonstra-\\ imus, eruptionem</p>'), _CHAPTERS,
+     "the edition > chapter 34 > p has a hyphen after a letter in its text, in 'superius demonstra-\\\\ imus,', which "
+     "can only be the edition's mistake."),
+    (_poem('10', '<l n="6">et hoc negat Tryphonis-aemuli domum</l>'), _POEMS,
+     "the edition > poem 10 > l 6 has a hyphen after a letter in its text, in 'negat Tryphonis-aemuli domum', which "
+     "can only be the edition's mistake."),
+    (_poem('10', '<l n="6">et hoc negat Tryphonis- aemuli</l>'), _POEMS,
+     "the edition > poem 10 > l 6 has a hyphen after a letter in its text, in 'negat Tryphonis- aemuli', which can "
+     "only be the edition's mistake."),
+], ids=["in a paragraph, before a letter of its next line", "at the end of a paragraph",
+        "in a paragraph, before a sign", "in a verse, before a letter", "in a verse, before a space and a letter"])
+def test_a_hyphen_after_a_letter_in_a_paragraph_or_with_a_letter_next_in_a_verse_raises(body, cited, error):
+    with pytest.raises(ValueError, match="^" + re.escape(error) + "$"):
+        read_edition(_edition(body), cited, {}, {})
+
+
+def test_a_hyphen_after_a_space_or_a_sign_in_a_paragraph_is_read():
+    edition = _edition(_chapter('2', '<p>Roma - ut ait -, levis (-) est.</p>'))
+
+    assert read_edition(edition, _CHAPTERS, {}, {}) == (
+        Division('CHAP', '2', (_paragraph('2', 'Roma - ut ait -, levis (-) est.'),), ()),)
+
+
+def test_a_hyphen_at_the_end_of_a_verse_or_before_a_sign_in_it_and_one_in_a_heading_are_read():
+    edition = _edition(_poem('11', '<head>LIBRI I-VI</head><l n="11">horribile aequor, ulti-</l>'
+                                   '<l n="12">mosque Britannos -, et</l>'))
+
+    assert read_edition(edition, _POEMS, {}, {}) == (
+        Division('POEM', '11', (_title('11', 'LIBRI I-VI'), _verse('11', '11.11', 'horribile aequor, ulti-'),
+                                _verse('12', '11.12', 'mosque Britannos -, et')), ()),)
+
+
+@pytest.mark.parametrize("body, cited, error", [
+    (_chapter('97', '<p>Thapsitanis HS |X̅X̅, conventui eorum</p>'), _CHAPTERS,
+     "the edition > chapter 97 > p has a combining mark in its text, in 'HS |X̅X̅, conventui', which isn't "
+     "read yet."),
+    (_poem('1', '<l n="983">quid me <gap reason="lost"/> am me rog&#x0323;ạs?</l>'), _POEMS,
+     "the edition > poem 1 > l 983 has a combining mark in its text, in 'me rog̣ạs?', which isn't read yet."),
+    (_poem('1', '<head>LIBER X̅</head><l n="1">Roma</l>'), _POEMS,
+     "the edition > poem 1 > head has a combining mark in its text, in 'LIBER X̅', which isn't read yet."),
+    (_poem('1', '<sp><speaker>ME̅NAECHMVS</speaker><l n="1">Roma</l></sp>'), _POEMS,
+     "the edition > poem 1 > sp > speaker has a combining mark in its text, in 'ME̅NAECHMVS', which isn't read yet."),
+], ids=["in a paragraph", "in a verse", "in a heading", "in a speaker"])
+def test_a_combining_mark_in_the_text_of_any_block_raises(body, cited, error):
+    with pytest.raises(ValueError, match="^" + re.escape(error) + "$"):
+        read_edition(_edition(body), cited, {}, {})
+
+
 def test_a_digit_in_a_heading_or_in_a_note_is_read():
     edition = _edition(_poem('10', '<head>Sancti Romani Martyris contra Gentiles Dicta.1</head>'
                                    '<l n="1">Romane, Christi fortis<note>v. 12</note> adsertor Dei,</l>'))

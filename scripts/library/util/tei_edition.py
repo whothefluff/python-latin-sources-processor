@@ -1,6 +1,7 @@
 """Reads the text of a TEI edition, as Perseus encodes its poetry, prose and plays, into divisions and blocks of text.
 Raises on any structure that it doesn't read, rather than guessing what the structure means."""
 import re
+import unicodedata
 # noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
 from typing import Dict, Iterator, List, NamedTuple, Sequence, Set, Tuple, Union, cast
@@ -62,6 +63,9 @@ _OPENING_MARK_PLACEHOLDER, _CLOSING_MARK_PLACEHOLDER = '“', '”'
 _LOST_PASSAGE_REASONS_BY_GAP_REASON = {'lost': 'lost', 'omitted': 'omitted', 'ellipsis': 'omitted'}
 _BLOCK_TYPES_NO_EDITION_PRINTS_A_DIGIT_IN = ('VERS', 'PARA')
 _DIGIT_WITH_THE_WORDS_AROUND_IT = re.compile(r'(?:\S+\s+)?\S*\d\S*(?:\s+\S+)?')
+#: A poet can divide a word between two verses, so a verse's hyphen is a printed line's only with a letter after it
+_PRINTED_LINE_S_HYPHEN_BY_BLOCK_TYPE = {'PARA': re.compile(r'(?<=[^\W\d_])-'),
+                                        'VERS': re.compile(r'(?<=[^\W\d_])-(?=\s*[^\W\d_])')}
 _WORD = re.compile(r'\w+')
 _LEMMA_ELLIPSIS = re.compile(r'\.\s*\.')
 
@@ -452,10 +456,19 @@ def _block(element: ET.Element, typ: str, where: str, cited: Tuple[str, ...], ch
     joined = _joined(_inline(deletion if deletion is not None else element, where, _INLINE_TAGS, chains))
     if not any(isinstance(piece, LostPassage) or piece.strip() for piece in joined.pieces):
         raise ValueError(f"{where} has no text.")
-    digit = _DIGIT_WITH_THE_WORDS_AROUND_IT.search(' '.join(piece for piece in joined.pieces if isinstance(piece, str)))
+    texts = tuple(piece for piece in joined.pieces if isinstance(piece, str))
+    digit = _DIGIT_WITH_THE_WORDS_AROUND_IT.search(' '.join(texts))
     if typ in _BLOCK_TYPES_NO_EDITION_PRINTS_A_DIGIT_IN and digit is not None:
         raise ValueError(f"{where} has a digit in its text, in {digit.group()!r}, which can only be the edition's "
                          f"mistake.")
+    hyphen = _first_printed_line_s_hyphen(texts, typ)
+    if hyphen is not None:
+        raise ValueError(f"{where} has a hyphen after a letter in its text, in {_words_around(hyphen)!r}, which can "
+                         f"only be the edition's mistake.")
+    combining_mark = _first_combining_mark(texts)
+    if combining_mark is not None:
+        raise ValueError(f"{where} has a combining mark in its text, in {_words_around(combining_mark)!r}, which "
+                         f"isn't read yet.")
     marks = tuple(EditorialMark(_EDITORIAL_MARKS_BY_TAG[_tag(marking)], piece, start, end)
                   for marking, piece, start, end in joined.marked_ranges if _tag(marking) in _EDITORIAL_MARKS_BY_TAG)
     numerals = tuple(Numeral(piece, start, end)
@@ -469,6 +482,29 @@ def _block(element: ET.Element, typ: str, where: str, cited: Tuple[str, ...], ch
         for text, shape in joined.texts_and_shapes_of_notes_to_check_against_the_page)
     return TextBlock(typ, n, reference, joined.pieces, deletion is not None, joined.notes, marks, numerals, expansions,
                      joined.added_quotation_marks, regularized_spellings, notes_to_check_against_the_page)
+
+
+class _CharacterOfAText(NamedTuple):
+    text: str
+    place: int
+
+
+def _first_printed_line_s_hyphen(texts: Tuple[str, ...], typ: str) -> _CharacterOfAText | None:
+    pattern = _PRINTED_LINE_S_HYPHEN_BY_BLOCK_TYPE.get(typ)
+    return None if pattern is None else next(
+        (_CharacterOfAText(text, hyphen.start()) for text in texts for hyphen in pattern.finditer(text)), None)
+
+
+def _first_combining_mark(texts: Tuple[str, ...]) -> _CharacterOfAText | None:
+    return next((_CharacterOfAText(text, place) for text in texts for place, character in enumerate(text)
+                 if unicodedata.category(character).startswith('M')), None)
+
+
+def _words_around(character: _CharacterOfAText) -> str:
+    """Returns the word that holds the character, with the word before it and the word after it"""
+    before = cast(re.Match[str], re.search(r'(?:\S+\s+)?\S*\Z', character.text[:character.place])).group()
+    after = cast(re.Match[str], re.match(r'\S*(?:\s+\S+)?', character.text[character.place + 1:])).group()
+    return _with_single_spaces_inside_and_none_around(before + character.text[character.place] + after)
 
 
 def _whole_deletion(element: ET.Element) -> ET.Element | None:
