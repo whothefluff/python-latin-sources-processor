@@ -1,55 +1,281 @@
 # README for process_work.py
 
-This module processes the TEI XML source text of a work. What is specific to the work's edition is in the work's own
-script in `scripts/library/item/`, which runs this module with it: the edition's CTS URN, the letters that the edition
-prints, the corrections that its tokens need, its author's abbreviations, and its about and image files. Phaedrus's
-Fables are `process_phaedrus.py`.
+This module processes the TEI XML source text of a work.
+What is specific to the work's edition is in the work's own script in `scripts/library/item/`,
+which runs this module with it:
+the edition's CTS URN, the letters that the edition prints, the corrections that its tokens need,
+its author's abbreviations, and its about and image files.
+Phaedrus's Fables are `process_phaedrus.py`.
 
-The ids are the same on every run, so that a run changes only the rows whose data changed: the work's comes from its
-edition's URN (`urn:cts:latinLit:phi0975.phi001.perseus-lat2`), which must be the edition's `n` when it has one, its
-author's from the URN's textgroup (`urn:cts:latinLit:phi0975`), which the author's other works share, and each
-subdivision's from the work's id and the type and count of each subdivision down to it (`BOOK 0/POEM 3/VERS 12`).
-So a subdivision's id follows its place, not its edition label: a verse added or removed moves the ids of the later
-subdivisions of its type next to it, and of what they hold. Another edition of a work is another work, with ids of its
-own.
+The ids are the same on every run, so that a run changes only the rows whose data changed:
+the work's comes from its edition's URN (`urn:cts:latinLit:phi0975.phi001.perseus-lat2`),
+which must be the edition's `n` when it has one,
+its author's from the URN's textgroup (`urn:cts:latinLit:phi0975`), which the author's other works share,
+and each subdivision's from the work's id and the type and count of each subdivision down to it
+(`BOOK 0/POEM 3/VERS 12`).
+So a subdivision's id follows its place, not its edition label:
+a verse added or removed moves the ids of the later subdivisions of its type next to it, and of what they hold.
+Another edition of a work is another work, with ids of its own.
 
 ## Overview
 
 The script performs the following key functions:
 
-1.  **Parses** the TEI XML file of the work (`util/tei_edition.py`): its divisions, each with divisions of one kind or with text of its own, never both (the edition holds books, poems, chapters, sections or acts, or its own verses and speeches; a book, poems, chapters, sections, or its own verses, line groups and paragraphs; a chapter, sections or paragraphs; a poem, poems or its own verses and paragraphs; an act, scenes; a scene, speeches and its own verses; a section, paragraphs); line groups (`<lg>`, also nested) and speeches (`<sp>`, whose `<speaker>` is their title); verses, titles and paragraphs, each with the text of its quotations (`<q>`, `<quote>`), words set in capitals (`<hi rend="uppercase">`, and `<emph>` with the same `rend`), numerals (`<num>`), and regularized words that have no other spelling beside them (`<reg>` outside a `<choice>`), and without its milestones, its labels of another numbering (a `<label>` whose type starts with `alt_` or whose place is the margin, which prints a milestone's numbering) and its line breaks (a line break between words is a space); additions, deletions, and, outside a `<choice>`, the edition's sic (`<sic>`) and the editor's corrections (`<corr>`), each with a supplementary note over its tokens ("added by the editor", "marked for deletion", "sic", "corrected by the editor"), and blocks marked for deletion as a whole; and lost passages (`<gap reason="lost">`, `"omitted"` and `"ellipsis"`, which is text left out too, so its supplementary entry says omitted) where they are in a block. A lost passage straight in a division, or a verse without an `n` that is only one, ends the verse or the paragraph right before it, or starts the first part after it where no part stands before it and that part is a verse or a paragraph, and raises anywhere else. A digit in the text of a verse or of a paragraph raises: no edition prints one there, so it can only be the edition's mistake. A title can have one. A hyphen right after a letter in a paragraph raises too, and in a verse one with a letter after it, white space aside: the hyphen of a printed line that cuts a word in two, since a poet can divide a word at a verse's end alone. A combining mark raises in any verse, title or paragraph, since no rule reads one yet. A page break (`<pb>`) is left out wherever it is, so that a page that starts inside a word doesn't split it, and so is the edition's title page, which its header gives: each heading and author's name (`<docAuthor>`) before the edition's first part. A milestone, a line break or a page break between the parts of the edition or of a division is left out too, and so is a commentary beside the edition (`<div type="commentary">`), which isn't the work's. A printed volume straight in the edition (`<div subtype="part">`) is nothing of the work's, and its divisions are read as the edition's: the edition cites them straight through it. An abbreviation with its expansion, `<choice><abbr>locutu's</abbr><expan>locutu<ex>s e</ex>s</expan></choice>`, is read as printed, and the edition's expansion is kept to check the work's own (step 6); so is the shape of Amphitruo, Curculio and Menaechmi, with the `<expan>` inside the `<abbr>`, until their editions are fixed. A word with a regularized spelling beside it, `<choice><reg>aer</reg><orig>aër</orig></choice>`, is read as printed too, and gets a supplementary note over its tokens with the other spelling ("regularized as aer"). A division's Latin headings in a row, before its first part, are its one title, with a space between each two. A heading in another language than Latin is a supplementary note over what holds it, and takes no tokens. So is a note, unless it has a lemma (`<lem>`, `<w type="lemma">`) that matches the last words before it, without punctuation or case, with two dots or more, spaced or not (`...`, `. .`), for the words between: then it's a note over those words. A lemma that matches nothing is logged as a warning that names the work, for whoever processes it to fix in the source. An empty note raises, with a target or without one: the edition fills it or leaves it out. Any other label raises too, and the error for one without a type names the edition's fix: a type, or the element that it stands for. A note with more than one lemma raises, and so does one with a lemma outside a verse, title or paragraph. A note that stands outside any verse, title or paragraph, that its `n`, `type` or `place` calls marginal, that holds a verse or a paragraph, or that stands between two letters, which are then read as one word, has to be in the work's `notes_checked_against_the_page`, with its reference and its text, once someone has read it against the printed page: editions have written headings, verses of the text and the page's line numbers as such notes, and code can't tell them from a note, nor a word that runs through a note from a space missing in the edition. A note of several of those shapes is listed once, and the work's error names each. The work fails on one that isn't listed, and on one that is listed and that the edition doesn't have; the same note twice is listed twice. A poem whose `n` the work configures, such as `prologus`, gets that type. In every edition a satire is a poem, and a prologue or a preface a prologue (`PROL`): other names for a poem, cited by their own subtype. A division whose subtype the work configures (`types_by_subtype`) is read as one of the type given, where the edition uses that subtype for another kind of division than the dataset does: Ausonius's Parentalia has each of its poems in a `section`, so with `{'section': 'POEM'}` its sections are poems, which hold verses and are prologues where their `n` says so. Only the subtypes that are read can be configured (book, poem, chapter, section, act, scene). Any other structure raises, rather than being guessed at, and so does typography of any other `rend`, which can change what the text says: an overline multiplies a numeral by a thousand.
-2.  **Segments** the text into individual tokens (words, punctuation, etc.) and normalizes digraphs (`æ` → `ae`, `œ` → `oe`) and takes out the acutes that mark the ictus (`audácior` → `audacior`, kept in `ictusBitMask`) to maintain skeleton identity with macronized forms. A printed word listed in the work's `WorkConfiguration.spellings_by_printed_word` is replaced by the spelling it maps to, in tokens and titles, before Morpheus and the macronizer see it (with `'Mercvrivs': 'Mercurius'` in it, `Mercvrivs` → `Mercurius`). Each quotation mark and apostrophe is a token too, which gets its character once the whole text is segmented (`util/quotation_marks.py`). A quotation that the edition tags (`<q>`) gets marks before the first element of its chain and after the last: an element whose rend has `merge` goes on with the last chain in the chain that holds it. Their pair is the one whose openings the edition prints most, a straight mark counting half and a chain's rend (`single`, `double`) one, or “ ” with no evidence; a quotation inside another, or inside printed “ ”, gets the other pair. Printed marks become typographic, a straight " “ or ” and a straight ' ‘ or ’, and every apostrophe '. Where the characters around a printed straight mark or ’ don't say whether it opens, closes or is an apostrophe (a ’ after a letter can be either), the work's `unsettled_printed_marks` says, and where code can't follow the printed marks before a tagged quotation (a ‘, a straight mark, a ’ after no letter, in its textpart, the innermost book, poem, chapter, section, act or scene that holds it, or the edition when none does: a line group or a speech isn't one), `quotations_inside_printed_marks` says whether the quotation is inside one, by its opening mark; the work fails without an answer and with one that nothing reads. It fails on a ” that closes no “ and on a “ still open where the edition ends, which can only be its mistakes, and on a «, », „ or backtick, which no edition of the corpus prints as a quotation mark. A tie between the two pairs, where a quotation takes the work's pair, isn't read yet. `<quote>` gets no marks: it isn't always a quotation in marks.
-3.  **Classifies Tokens**: Each token is assigned a `tokenType` (1 = word, 2 = abbreviation, 3 = roman numeral, 4 = punctuation, 5 = editorial marker, 6 = other). Known abbreviations (praenomina like `C.`, `M.`, and the common nouns' `tr.` and `pl.`) are re-attached to their trailing period during segmentation so they are treated as single tokens. Manius's is the token `M'.` whichever apostrophe the edition prints (`M’.`), and so it is in its row's name. A token inside a `<num>` is a numeral, as the edition says, whatever its shape; a `<num>` at the start of a word (`<num>x</num>viri`) leaves it a word, printed short (step 6), and one that holds any other part of a token (`HS<num>x</num>`) raises. Work-specific overrides can reclassify individual tokens via the work's `token_overrides` (`WORK_SPECIFIC_TOKEN_OVERRIDES` in Phaedrus's script).
-4.  **Determines Proper Noun State**: For each word, it queries a local Morpheus API to determine if the word is a common noun (0), a proper noun (1), or could be either (2), based on both its dictionary form and its context in the text. Abbreviations are forced to their abbreviation's state, 1 for a name's (`C.`) and 0 for a common noun's (`tr.`, for tribunus); numerals to state 0.
-5.  **Detects Enclitics**: During morphological analysis, the script detects fused enclitics (`-que`, `-ne`, `-ve`, `-ue`, `-dum`) by comparing Morpheus's returned surface forms against the full token. When the full token is absent from the surface forms but a stem + clitic decomposition matches, the enclitic is recorded. Morpheus is queried with strictCase, and a capitalized token gets no analysis when all its forms are lowercase (`Seque`), so the token is looked up in both. An enclitic counts only when neither answer analyzes the whole token: `Iove` is Juppiter, not `io` and `ve`. When one case is split and the other has no analysis, the other case's host is still looked up, since a capitalized host can be a name. When neither case has any analysis, the host is looked up in both. For `-dum`, an additional check restricts detection to stems that are imperatives, interjections, or adverbs. Which endings are split, and why: [`ENCLITICS.md`](../../../ENCLITICS.md).
-6.  **Assigns Expansions**: Abbreviations and numerals can be given a macronized expansion (e.g., `C.` → `Mārcus`, `I` → `ūnum`) via the work's `expansions` (`WORK_SPECIFIC_EXPANSIONS` in Phaedrus's script), keyed by fragment index. These expansions are always macronized because they feed directly into the app's macron-aware normalization columns. A word printed short gets its whole word there too, keeps a word's proper noun state, and gets no enclitic. Plautus and some other poets join es ("you are") to the word before it, and leave letters out: `locutu's` is locutus es. Such a contraction is three tokens, the words locutu (`locūtus`) and s (`es`) and the apostrophe, so that each is looked up and counted as its whole word. The work fails, before the macronizer is asked, when one of the two words lacks its expansion; when the edition expands them (locutus es) and their expansions, joined by a space, don't have its letters without macrons and case (where the edition prints one letter for two, either); when it doesn't (Catullus's `beatu's`), and the first one's expansion doesn't start with the letters that it prints, or the s's isn't es; and when any other word has an expansion. A word that starts with a tagged numeral is printed short too: `<num>c</num>virali` is the word cvirali, and its expansion is its whole word (`centumvirālī`). The work fails when such a word lacks its expansion, and when the expansion doesn't end with the letters after the numeral (virali).
-7.  **Computes Sentence and Word Indices**: A `sentenceIdx` (per work) increments on sentence-terminal punctuation (`.`, `!`, `?`) and at forced boundaries: a title, the first block of a poem, prologue or epilogue, and the first block after a speaker. A `wordIdx` (per sentence) increments only for tokens with `tokenType` ≤ 3, and is `NULL` for punctuation, editorial markers, and other non-word tokens.
-8.  **Generates Source References**: Each token receives a CTS-style `sourceReference` string for display in the reader and concordance results: the TEI `n` of each division above it that the edition cites (the work's `cited_division_subtypes`, which names them by their TEI subtype, whatever type it gets), then its verse's (e.g., `3.7.12` for book 3, poem 7, line 12 in Phaedrus, and `14a.3` for poem 14a, line 3 in Catullus, who cites poems but not books). A speaker has the reference of the first verse or paragraph of its speech. A heading above which no division is cited has that of the first verse or paragraph of its division: Prudentius's Praefatio is cited by line alone, so the heading of its one book is at `1`, with its first verse.
-9.  **Performs Macronization**: It queries a local Macronization API to determine the correct vowel lengths for every word in the text.
+1.  **Parses** the TEI XML file of the work (`util/tei_edition.py`):
+    its divisions, each with divisions of one kind or with text of its own, never both
+    (the edition holds books, poems, chapters, sections or acts, or its own verses and speeches;
+    a book, poems, chapters, sections, or its own verses, line groups and paragraphs;
+    a chapter, sections or paragraphs;
+    a poem, poems or its own verses and paragraphs;
+    an act, scenes;
+    a scene, speeches and its own verses;
+    a section, paragraphs);
+    line groups (`<lg>`, also nested) and speeches (`<sp>`, whose `<speaker>` is their title);
+    verses, titles and paragraphs, each with the text of its quotations (`<q>`, `<quote>`),
+    words set in capitals (`<hi rend="uppercase">`, and `<emph>` with the same `rend`), numerals (`<num>`),
+    and regularized words that have no other spelling beside them (`<reg>` outside a `<choice>`),
+    and without its milestones, its labels of another numbering
+    (a `<label>` whose type starts with `alt_` or whose place is the margin, which prints a milestone's numbering)
+    and its line breaks (a line break between words is a space);
+    additions, deletions,
+    and, outside a `<choice>`, the edition's sic (`<sic>`) and the editor's corrections (`<corr>`),
+    each with a supplementary note over its tokens
+    ("added by the editor", "marked for deletion", "sic", "corrected by the editor"),
+    and blocks marked for deletion as a whole;
+    and lost passages (`<gap reason="lost">`, `"omitted"` and `"ellipsis"`, which is text left out too,
+    so its supplementary entry says omitted) where they are in a block.
+    A lost passage straight in a division, or a verse without an `n` that is only one,
+    ends the verse or the paragraph right before it,
+    or starts the first part after it where no part stands before it and that part is a verse or a paragraph,
+    and raises anywhere else.
+    A digit in the text of a verse or of a paragraph raises:
+    no edition prints one there, so it can only be the edition's mistake.
+    A title can have one.
+    A hyphen right after a letter in a paragraph raises too,
+    and in a verse one with a letter after it, white space aside:
+    the hyphen of a printed line that cuts a word in two, since a poet can divide a word at a verse's end alone.
+    A combining mark raises in any verse, title or paragraph, since no rule reads one yet.
+    A page break (`<pb>`) is left out wherever it is, so that a page that starts inside a word doesn't split it,
+    and so is the edition's title page, which its header gives:
+    each heading and author's name (`<docAuthor>`) before the edition's first part.
+    A milestone, a line break or a page break between the parts of the edition or of a division is left out too,
+    and so is a commentary beside the edition (`<div type="commentary">`), which isn't the work's.
+    A printed volume straight in the edition (`<div subtype="part">`) is nothing of the work's,
+    and its divisions are read as the edition's: the edition cites them straight through it.
+    An abbreviation with its expansion, `<choice><abbr>locutu's</abbr><expan>locutu<ex>s e</ex>s</expan></choice>`,
+    is read as printed, and the edition's expansion is kept to check the work's own (step 6);
+    so is the shape of Amphitruo, Curculio and Menaechmi, with the `<expan>` inside the `<abbr>`,
+    until their editions are fixed.
+    A word with a regularized spelling beside it, `<choice><reg>aer</reg><orig>aër</orig></choice>`,
+    is read as printed too,
+    and gets a supplementary note over its tokens with the other spelling ("regularized as aer").
+    A division's Latin headings in a row, before its first part, are its one title, with a space between each two.
+    A heading in another language than Latin is a supplementary note over what holds it, and takes no tokens.
+    So is a note, unless it has a lemma (`<lem>`, `<w type="lemma">`) that matches the last words before it,
+    without punctuation or case, with two dots or more, spaced or not (`...`, `. .`), for the words between:
+    then it's a note over those words.
+    A lemma that matches nothing is logged as a warning that names the work,
+    for whoever processes it to fix in the source.
+    An empty note raises, with a target or without one: the edition fills it or leaves it out.
+    Any other label raises too,
+    and the error for one without a type names the edition's fix: a type, or the element that it stands for.
+    A note with more than one lemma raises, and so does one with a lemma outside a verse, title or paragraph.
+    A note that stands outside any verse, title or paragraph, that its `n`, `type` or `place` calls marginal,
+    that holds a verse or a paragraph, or that stands between two letters, which are then read as one word,
+    has to be in the work's `notes_checked_against_the_page`, with its reference and its text,
+    once someone has read it against the printed page:
+    editions have written headings, verses of the text and the page's line numbers as such notes,
+    and code can't tell them from a note, nor a word that runs through a note from a space missing in the edition.
+    A note of several of those shapes is listed once, and the work's error names each.
+    The work fails on one that isn't listed, and on one that is listed and that the edition doesn't have;
+    the same note twice is listed twice.
+    A poem whose `n` the work configures, such as `prologus`, gets that type.
+    In every edition a satire is a poem, and a prologue or a preface a prologue (`PROL`):
+    other names for a poem, cited by their own subtype.
+    A division whose subtype the work configures (`types_by_subtype`) is read as one of the type given,
+    where the edition uses that subtype for another kind of division than the dataset does:
+    Ausonius's Parentalia has each of its poems in a `section`,
+    so with `{'section': 'POEM'}` its sections are poems, which hold verses and are prologues where their `n` says so.
+    Only the subtypes that are read can be configured (book, poem, chapter, section, act, scene).
+    Any other structure raises, rather than being guessed at,
+    and so does typography of any other `rend`, which can change what the text says:
+    an overline multiplies a numeral by a thousand.
+2.  **Segments** the text into individual tokens (words, punctuation, etc.)
+    and normalizes digraphs (`æ` → `ae`, `œ` → `oe`)
+    and takes out the acutes that mark the ictus (`audácior` → `audacior`, kept in `ictusBitMask`)
+    to maintain skeleton identity with macronized forms.
+    A printed word listed in the work's `WorkConfiguration.spellings_by_printed_word`
+    is replaced by the spelling it maps to, in tokens and titles, before Morpheus and the macronizer see it
+    (with `'Mercvrivs': 'Mercurius'` in it, `Mercvrivs` → `Mercurius`).
+    Each quotation mark and apostrophe is a token too,
+    which gets its character once the whole text is segmented (`util/quotation_marks.py`).
+    A quotation that the edition tags (`<q>`) gets marks before the first element of its chain and after the last:
+    an element whose rend has `merge` goes on with the last chain in the chain that holds it.
+    Their pair is the one whose openings the edition prints most,
+    a straight mark counting half and a chain's rend (`single`, `double`) one, or “ ” with no evidence;
+    a quotation inside another, or inside printed “ ”, gets the other pair.
+    Printed marks become typographic, a straight " “ or ” and a straight ' ‘ or ’, and every apostrophe '.
+    Where the characters around a printed straight mark or ’ don't say whether it opens, closes or is an apostrophe
+    (a ’ after a letter can be either), the work's `unsettled_printed_marks` says,
+    and where code can't follow the printed marks before a tagged quotation
+    (a ‘, a straight mark, a ’ after no letter, in its textpart,
+    the innermost book, poem, chapter, section, act or scene that holds it, or the edition when none does:
+    a line group or a speech isn't one),
+    `quotations_inside_printed_marks` says whether the quotation is inside one, by its opening mark;
+    the work fails without an answer and with one that nothing reads.
+    It fails on a ” that closes no “ and on a “ still open where the edition ends, which can only be its mistakes,
+    and on a «, », „ or backtick, which no edition of the corpus prints as a quotation mark.
+    A tie between the two pairs, where a quotation takes the work's pair, isn't read yet.
+    `<quote>` gets no marks: it isn't always a quotation in marks.
+3.  **Classifies Tokens**: Each token is assigned a `tokenType`
+    (1 = word, 2 = abbreviation, 3 = roman numeral, 4 = punctuation, 5 = editorial marker, 6 = other).
+    Known abbreviations (praenomina like `C.`, `M.`, and the common nouns' `tr.` and `pl.`)
+    are re-attached to their trailing period during segmentation so they are treated as single tokens.
+    Manius's is the token `M'.` whichever apostrophe the edition prints (`M’.`), and so it is in its row's name.
+    A token inside a `<num>` is a numeral, as the edition says, whatever its shape;
+    a `<num>` at the start of a word (`<num>x</num>viri`) leaves it a word, printed short (step 6),
+    and one that holds any other part of a token (`HS<num>x</num>`) raises.
+    Work-specific overrides can reclassify individual tokens via the work's `token_overrides`
+    (`WORK_SPECIFIC_TOKEN_OVERRIDES` in Phaedrus's script).
+4.  **Determines Proper Noun State**: For each word, it queries a local Morpheus API
+    to determine if the word is a common noun (0), a proper noun (1), or could be either (2),
+    based on both its dictionary form and its context in the text.
+    Abbreviations are forced to their abbreviation's state,
+    1 for a name's (`C.`) and 0 for a common noun's (`tr.`, for tribunus); numerals to state 0.
+5.  **Detects Enclitics**: During morphological analysis, the script detects fused enclitics
+    (`-que`, `-ne`, `-ve`, `-ue`, `-dum`) by comparing Morpheus's returned surface forms against the full token.
+    When the full token is absent from the surface forms but a stem + clitic decomposition matches,
+    the enclitic is recorded.
+    Morpheus is queried with strictCase,
+    and a capitalized token gets no analysis when all its forms are lowercase (`Seque`),
+    so the token is looked up in both.
+    An enclitic counts only when neither answer analyzes the whole token: `Iove` is Juppiter, not `io` and `ve`.
+    When one case is split and the other has no analysis, the other case's host is still looked up,
+    since a capitalized host can be a name.
+    When neither case has any analysis, the host is looked up in both.
+    For `-dum`, an additional check restricts detection to stems that are imperatives, interjections, or adverbs.
+    Which endings are split, and why: [`ENCLITICS.md`](../../../ENCLITICS.md).
+6.  **Assigns Expansions**: Abbreviations and numerals can be given a macronized expansion
+    (e.g., `C.` → `Mārcus`, `I` → `ūnum`)
+    via the work's `expansions` (`WORK_SPECIFIC_EXPANSIONS` in Phaedrus's script), keyed by fragment index.
+    These expansions are always macronized because they feed directly into the app's macron-aware normalization columns.
+    A word printed short gets its whole word there too, keeps a word's proper noun state, and gets no enclitic.
+    Plautus and some other poets join es ("you are") to the word before it, and leave letters out:
+    `locutu's` is locutus es.
+    Such a contraction is three tokens, the words locutu (`locūtus`) and s (`es`) and the apostrophe,
+    so that each is looked up and counted as its whole word.
+    The work fails, before the macronizer is asked, when one of the two words lacks its expansion;
+    when the edition expands them (locutus es) and their expansions, joined by a space,
+    don't have its letters without macrons and case (where the edition prints one letter for two, either);
+    when it doesn't (Catullus's `beatu's`),
+    and the first one's expansion doesn't start with the letters that it prints, or the s's isn't es;
+    and when any other word has an expansion.
+    A word that starts with a tagged numeral is printed short too:
+    `<num>c</num>virali` is the word cvirali, and its expansion is its whole word (`centumvirālī`).
+    The work fails when such a word lacks its expansion,
+    and when the expansion doesn't end with the letters after the numeral (virali).
+7.  **Computes Sentence and Word Indices**: A `sentenceIdx` (per work)
+    increments on sentence-terminal punctuation (`.`, `!`, `?`) and at forced boundaries:
+    a title, the first block of a poem, prologue or epilogue, and the first block after a speaker.
+    A `wordIdx` (per sentence) increments only for tokens with `tokenType` ≤ 3,
+    and is `NULL` for punctuation, editorial markers, and other non-word tokens.
+8.  **Generates Source References**: Each token receives a CTS-style `sourceReference` string
+    for display in the reader and concordance results:
+    the TEI `n` of each division above it that the edition cites
+    (the work's `cited_division_subtypes`, which names them by their TEI subtype, whatever type it gets),
+    then its verse's (e.g., `3.7.12` for book 3, poem 7, line 12 in Phaedrus,
+    and `14a.3` for poem 14a, line 3 in Catullus, who cites poems but not books).
+    A speaker has the reference of the first verse or paragraph of its speech.
+    A heading above which no division is cited has that of the first verse or paragraph of its division:
+    Prudentius's Praefatio is cited by line alone, so the heading of its one book is at `1`, with its first verse.
+9.  **Performs Macronization**: It queries a local Macronization API
+    to determine the correct vowel lengths for every word in the text.
 10. **Handles Ambiguity**: It intelligently separates macronization results into two categories:
-    -   **Unambiguous Macronizations**: Words with stable vowel lengths are stored in a global, reusable CSV. For state-2 words (proper-or-common), both capitalized and lowercase forms are stored only when the macronizer knows both and they agree; when the capitalized form is unknown to the macronizer, only the lowercase form is stored.
-    -   **Work-Specific Macronizations**: Words whose macronization is uncertain (nonzero uncertainty mask), unknown, context-dependent (different macrons depending on proper noun status), or morphologically unanalyzable are stored in a work-specific CSV.
-    -   **Certain Macronizations That Differ**: When the macronizer is certain of a word but macronizes it differently in different places, the word stays out of the global CSV, and every certain occurrence that the reader would look up under it gets its own macronization in the work-specific CSV, with mask 0. So does a certain occurrence that the reader would look up under another token's macronization, such as a capitalized I under a numeral I's.
+    -   **Unambiguous Macronizations**: Words with stable vowel lengths are stored in a global, reusable CSV.
+        For state-2 words (proper-or-common), both capitalized and lowercase forms are stored
+        only when the macronizer knows both and they agree;
+        when the capitalized form is unknown to the macronizer, only the lowercase form is stored.
+    -   **Work-Specific Macronizations**: Words whose macronization is uncertain (nonzero uncertainty mask), unknown,
+        context-dependent (different macrons depending on proper noun status), or morphologically unanalyzable
+        are stored in a work-specific CSV.
+    -   **Certain Macronizations That Differ**: When the macronizer is certain of a word
+        but macronizes it differently in different places, the word stays out of the global CSV,
+        and every certain occurrence that the reader would look up under it
+        gets its own macronization in the work-specific CSV, with mask 0.
+        So does a certain occurrence that the reader would look up under another token's macronization,
+        such as a capitalized I under a numeral I's.
     -   Non-word tokens (punctuation, abbreviations, numerals, etc.) are stored in the unambiguous table as-is.
-    -   **Words Printed Short**: A word with an expansion gets its macronization in the work-specific CSV, certain (mask 0), and not from the macronizer, which reads only the letters that it prints: its expansion's macrons on those letters where they start or end the expansion, a capital aside (locūtu of locūtus, s of es). A word that starts with a tagged numeral has the numeral's letters as printed, and then its other letters with the macrons of the end of its expansion (`cvirālī` of `centumvirālī`). Where they don't, as Amphitruo's old spelling `vaniloquo's` for vāniloquus es, the work's `printed_macronizations` gives it, by fragment index and with the token's letters (`vāniloquo`). The work fails, before the macronizer is asked, when one is missing there, when one is there that the expansion already gives or for a token that isn't a word with an expansion, and when its letters aren't the token's. A word printed short gets its j and v as any word does, from Morpheus's reading of the letters that it prints; where Morpheus has none, the work's `spellings_by_printed_word` gives them, as `{'Iniuriu': 'Injuriu'}` does for Curculio's `Iniuriu's`, injūrius es.
-11. **Spells Consonants as `j` and `v`**: Where the edition prints one letter for two sounds, as Phaedrus's edition prints `i` for both `i` and `j`, each word gets the letter that Morpheus's analyses of the word have, so `iam` becomes `jam`. When Morpheus splits off an enclitic, the analyses of the host decide. Letters that the edition tells apart, `u` and `v` in Phaedrus's, stay as printed. Words are respelled only when the CSVs are written, because the steps before look words up as the source prints them. `works.csv` records the letters that the edition prints (`PIPELINE_CONTRACT.md`, section 5).
-12. **Generates CSVs**: It outputs a comprehensive set of structured data files ready for aggregation and use in the final application.
-13. **Validates Output**: It writes the files to a temporary directory and runs a series of internal checks to ensure the result makes sense, then moves them to the output directory. When any check fails, it raises and leaves the output directory as it was. The checks include:
-    -   Sequential index integrity for contents and supplementary data. Subdivisions are counted among their siblings of the same type, from 0 up, whatever the edition numbers them (Phaedrus 4.24 has no verse 4), and a subdivision has one title at most, numbered 0, as the reader's unique index requires.
-    -   Subdivisions without a parent: all of one type, where a prologue or an epilogue counts as a poem or an act, so that one that lost its parent doesn't reach the reader.
+    -   **Words Printed Short**: A word with an expansion gets its macronization in the work-specific CSV,
+        certain (mask 0), and not from the macronizer, which reads only the letters that it prints:
+        its expansion's macrons on those letters where they start or end the expansion,
+        a capital aside (locūtu of locūtus, s of es).
+        A word that starts with a tagged numeral has the numeral's letters as printed,
+        and then its other letters with the macrons of the end of its expansion (`cvirālī` of `centumvirālī`).
+        Where they don't, as Amphitruo's old spelling `vaniloquo's` for vāniloquus es,
+        the work's `printed_macronizations` gives it, by fragment index and with the token's letters (`vāniloquo`).
+        The work fails, before the macronizer is asked, when one is missing there,
+        when one is there that the expansion already gives or for a token that isn't a word with an expansion,
+        and when its letters aren't the token's.
+        A word printed short gets its j and v as any word does, from Morpheus's reading of the letters that it prints;
+        where Morpheus has none, the work's `spellings_by_printed_word` gives them,
+        as `{'Iniuriu': 'Injuriu'}` does for Curculio's `Iniuriu's`, injūrius es.
+11. **Spells Consonants as `j` and `v`**: Where the edition prints one letter for two sounds,
+    as Phaedrus's edition prints `i` for both `i` and `j`,
+    each word gets the letter that Morpheus's analyses of the word have, so `iam` becomes `jam`.
+    When Morpheus splits off an enclitic, the analyses of the host decide.
+    Letters that the edition tells apart, `u` and `v` in Phaedrus's, stay as printed.
+    Words are respelled only when the CSVs are written,
+    because the steps before look words up as the source prints them.
+    `works.csv` records the letters that the edition prints (`PIPELINE_CONTRACT.md`, section 5).
+12. **Generates CSVs**: It outputs a comprehensive set of structured data files
+    ready for aggregation and use in the final application.
+13. **Validates Output**: It writes the files to a temporary directory
+    and runs a series of internal checks to ensure the result makes sense, then moves them to the output directory.
+    When any check fails, it raises and leaves the output directory as it was.
+    The checks include:
+    -   Sequential index integrity for contents and supplementary data.
+        Subdivisions are counted among their siblings of the same type, from 0 up,
+        whatever the edition numbers them (Phaedrus 4.24 has no verse 4),
+        and a subdivision has one title at most, numbered 0, as the reader's unique index requires.
+    -   Subdivisions without a parent: all of one type, where a prologue or an epilogue counts as a poem or an act,
+        so that one that lost its parent doesn't reach the reader.
     -   Edition labels: books, poems, prologues, epilogues and verses have one, and other subdivisions none.
     -   Subdivision parent-child range containment.
-    -   The edition's text against the CSVs, by the checks' own reading and not the walker's. The verses, paragraphs, Latin titles and speakers of the body outside notes are compared with their rows, one to one and in order, and the error names the first that differs. The checks join a division's Latin headings in a row into one title by their own code. A verse, a paragraph or a title is named after its text, without notes, expansions, regularized spellings and labels of another numbering, with one space for each run of whitespace or line break between words and none around it, and with `[...]` where a passage is lost, so one that is only a lost passage is named `[...]`. A title is compared with the name of the division that it heads, which keeps the edition's spelling. Its own row's name is spelled like its tokens, and is compared with them: split as text is split into tokens, it's their words, in order. A verse's or a paragraph's name, split the same way with each `[...]` as one token, has as many tokens as its row. Every `<gap>` there is a lost passage, with its verse or paragraph and its gap entry, and the checks place one straight in a division by their own code. The checks add the quotation marks and write the printed ones by their own code, from the configuration's same answers, so a mark lost, added, moved or of the wrong pair fails them.
-    -   Proper noun states: its abbreviation's for every abbreviation, 0 for every numeral, none for punctuation, editorial marks and other tokens. Words without one, which Morpheus has no analysis for, are logged for review.
-    -   Macronization coverage (every word token has its own macronization, or an unambiguous one under the key that the reader looks it up by, which depends on its proper noun state).
+    -   The edition's text against the CSVs, by the checks' own reading and not the walker's.
+        The verses, paragraphs, Latin titles and speakers of the body outside notes
+        are compared with their rows, one to one and in order, and the error names the first that differs.
+        The checks join a division's Latin headings in a row into one title by their own code.
+        A verse, a paragraph or a title is named after its text,
+        without notes, expansions, regularized spellings and labels of another numbering,
+        with one space for each run of whitespace or line break between words and none around it,
+        and with `[...]` where a passage is lost, so one that is only a lost passage is named `[...]`.
+        A title is compared with the name of the division that it heads, which keeps the edition's spelling.
+        Its own row's name is spelled like its tokens, and is compared with them:
+        split as text is split into tokens, it's their words, in order.
+        A verse's or a paragraph's name, split the same way with each `[...]` as one token,
+        has as many tokens as its row.
+        Every `<gap>` there is a lost passage, with its verse or paragraph and its gap entry,
+        and the checks place one straight in a division by their own code.
+        The checks add the quotation marks and write the printed ones by their own code,
+        from the configuration's same answers, so a mark lost, added, moved or of the wrong pair fails them.
+    -   Proper noun states: its abbreviation's for every abbreviation, 0 for every numeral,
+        none for punctuation, editorial marks and other tokens.
+        Words without one, which Morpheus has no analysis for, are logged for review.
+    -   Macronization coverage (every word token has its own macronization,
+        or an unambiguous one under the key that the reader looks it up by, which depends on its proper noun state).
     -   Expansion completeness (every abbreviation/numeral token has a supplied expansion).
     -   Sentence and word index correctness (sequential per scope, `wordIdx` null iff `tokenType` ≥ 4).
-    -   Letters checked against Morpheus. Every word must have Morpheus's letter where the edition prints one letter for two. The check also logs, for review, the words that Morpheus spells with both letters of a pair that the edition tells apart, and the words that keep the edition's letters because no analysis has the same letters.
+    -   Letters checked against Morpheus.
+        Every word must have Morpheus's letter where the edition prints one letter for two.
+        The check also logs, for review,
+        the words that Morpheus spells with both letters of a pair that the edition tells apart,
+        and the words that keep the edition's letters because no analysis has the same letters.
 
     It may require small manual adjustments.
 ## Prerequisites
 
-This script requires two local APIs to be running on your machine. Please refer to their respective repositories for setup and installation instructions.
+This script requires two local APIs to be running on your machine.
+Please refer to their respective repositories for setup and installation instructions.
 
 1.  **Morpheus API (Morphological Analysis)**
     -   Provides dictionary lookup and morphological analysis.
@@ -59,18 +285,18 @@ This script requires two local APIs to be running on your machine. Please refer 
     -   Provides macronization (vowel length) analysis.
     -   **Repository**: [whothefluff/latin-macronizer](https://github.com/whothefluff/latin-macronizer)
 
-The script expects the Morpheus API at port 1500 and the Macronizer API at port 8001, on `localhost` or on the host
-named in `SERVICES_HOST`.
+The script expects the Morpheus API at port 1500 and the Macronizer API at port 8001,
+on `localhost` or on the host named in `SERVICES_HOST`.
 
 ## Input
 
--   **Source XML**: the work's, such as `data/library/item/phaedrus/phi0975.phi001.perseus-lat2_modified.xml` for
-    Phaedrus
+-   **Source XML**: the work's,
+    such as `data/library/item/phaedrus/phi0975.phi001.perseus-lat2_modified.xml` for Phaedrus
 
 ## Output
 
-The work's script generates the following files in its directory of `output/library/item/`, such as
-`output/library/item/phaedrus/`:
+The work's script generates the following files in its directory of `output/library/item/`,
+such as `output/library/item/phaedrus/`:
 
 | File | Description |
 |------|-------------|
