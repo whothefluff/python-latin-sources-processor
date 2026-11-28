@@ -376,6 +376,43 @@ def test_a_satire_a_prologue_or_a_preface_raises_with_its_own_subtype_in_the_err
         read_edition(_edition(body), ('book', 'prologue', 'satire', 'preface'), {}, {})
 
 
+def _printed_volume(n: str, content: str) -> str:
+    return f'<div type="textpart" subtype="part" n="{n}">{content}</div>'
+
+
+def test_the_books_of_a_printed_volume_are_the_edition_s_cited_straight_through_it():
+    edition = _edition(_printed_volume('1', _book('1', '<head>liber I</head><pb n="1"/>' + _chapter(
+                           'pr', _section('1', '<p>facturusne operae pretium sim,</p>'))))
+                       + _printed_volume('2', '<pb n="1"/>' + _book('21', '<head>liber XXI</head>' + _chapter(
+                           '1', _section('1', '<p>in parte operis mei licet mihi praefari,</p>')))))
+
+    assert read_edition(edition, _BOOKS_CHAPTERS_AND_SECTIONS, {}, {}) == (
+        Division('BOOK', '1', (_title('1', 'liber I'), Division('CHAP', 'pr', (Division('SECT', '1', (
+            _paragraph('1.pr.1', 'facturusne operae pretium sim,'),), ()),), ())), ()),
+        Division('BOOK', '21', (_title('21', 'liber XXI'), Division('CHAP', '1', (Division('SECT', '1', (
+            _paragraph('21.1.1', 'in parte operis mei licet mihi praefari,'),), ()),), ())), ()))
+
+
+@pytest.mark.parametrize("body, error", [
+    (_printed_volume('1', '<div type="textpart" subtype="index"><head>Index notarum.</head>'
+                          '<p>V = Veronensis saec. V.</p></div>' + _book('1', '<p>facturusne</p>')),
+     'the edition holds <div type="textpart" subtype="index">, but only books, poems, chapters, sections and acts are '
+     'read there.'),
+    (_printed_volume('1', 'Titus Livius' + _book('1', '<p>facturusne</p>')),
+     "the edition > part 1 has text outside its parts, which isn't read."),
+    (_book('1', _printed_volume('1', _chapter('1', '<p>facturusne</p>'))),
+     'the edition > book 1 holds <div type="textpart" subtype="part">, but only poems, chapters and sections are '
+     'read there.'),
+    (_printed_volume('1', _printed_volume('2', _book('1', '<p>facturusne</p>'))),
+     'the edition holds <div type="textpart" subtype="part">, but only books, poems, chapters, sections and acts are '
+     'read there.'),
+], ids=["an index in a printed volume", "a printed volume's own text", "a printed volume inside a book",
+        "a printed volume inside a printed volume"])
+def test_a_printed_volume_s_index_or_text_or_one_inside_a_division_raises(body, error):
+    with pytest.raises(ValueError, match="^" + re.escape(error) + "$"):
+        read_edition(_edition(body), _BOOKS_CHAPTERS_AND_SECTIONS, {}, {})
+
+
 def test_acts_of_scenes_hold_speeches_whose_speakers_take_the_reference_of_their_first_line():
     edition = _edition(_act('prologue', _scene('pr', '<milestone unit="card" n="1"/>'
                                                      '<sp><speaker>Mercvrivs</speaker><l n="1">Vt vos</l>'

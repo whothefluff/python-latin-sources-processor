@@ -1795,13 +1795,24 @@ def _division(subtype: str, n: str, parts: str) -> str:
      [("PROL", 0, None, 0, 2, "pr"), ("VERS", 0, "PROL", 0, 2, "1"), ("POEM", 0, None, 3, 5, "1"),
       ("VERS", 0, "POEM", 3, 5, "1")],
      [("Roma", "pr.1"), ("est", "pr.1"), (".", "pr.1"), ("Levis", "1.1"), ("est", "1.1"), (".", "1.1")]),
+    (_edition_of(_division("part", "1", _division("book", "1", '<head>Liber</head><pb n="1"/>'
+                                                              + _division("chapter", "1", '<p>Roma est.</p>')))
+                 + _division("part", "2", '<pb n="1"/>' + _division("book", "2", _division("chapter", "1",
+                                                                                         '<p>Levis est.</p>')))),
+     _CARMEN_WORK._replace(cited_division_subtypes=('book', 'chapter')),
+     [("BOOK", 0, None, 0, 3, "1"), ("TITL", 0, "BOOK", 0, 0, None), ("CHAP", 0, "BOOK", 1, 3, "1"),
+      ("PARA", 0, "CHAP", 1, 3, None), ("BOOK", 1, None, 4, 6, "2"), ("CHAP", 0, "BOOK", 4, 6, "1"),
+      ("PARA", 0, "CHAP", 4, 6, None)],
+     [("Liber", "1"), ("Roma", "1.1"), ("est", "1.1"), (".", "1.1"), ("Levis", "2.1"), ("est", "2.1"),
+      (".", "2.1")]),
 ], ids=["verses straight in a book", "chapters straight in the edition, of paragraphs and of sections",
         "sections straight in the edition", "sections straight in a book", "a poem of a preface and a poem",
         "verses straight in the edition, with printed marks",
         "speeches straight in the edition, with a tagged quotation",
         "sections that the configuration types as poems",
         "a heading above which no division is cited", "a prologue and a satire, Persius's shape",
-        "a preface and a section that the configuration types as a poem, Prudentius's shape"])
+        "a preface and a section that the configuration types as a poem, Prudentius's shape",
+        "books in printed volumes, Livy's shape"])
 def test_a_work_passes_validation_with(monkeypatch, tmp_path, xml, work, subdivisions, references):
     _morpheus(monkeypatch, {})
     _macronizer_echoes(monkeypatch)

@@ -36,6 +36,8 @@ _DIVISION_KIND_NAMES = {'edition': 'edition', 'book': 'book', 'poem': 'poem', 'c
                         'section': 'section', 'act': 'act', 'scene': 'scene', 'lg': 'line group', 'sp': 'speech'}
 #: Other names for a poem, which every edition means the same way, with the dataset's type for each
 _POEM_TYPES_BY_FOLDED_SUBTYPE = {'satire': 'POEM', 'prologue': 'PROL', 'preface': 'PROL'}
+#: A printed volume, which is nothing of the work's: the edition cites the books inside it straight through it
+_PRINTED_VOLUME_SUBTYPE = 'part'
 #: The kinds of division that the edition numbers with their n
 _NUMBERED_DIVISION_KINDS = ('book', 'poem', 'chapter', 'section', 'act', 'scene')
 #: The kinds of division that the work's configuration can give another type by their n, such as a prologue
@@ -269,13 +271,25 @@ def read_edition(root: ET.Element, cited_division_subtypes: Tuple[str, ...], typ
     editions = [child for child in _children(body, 'the body') if _tag(child) != 'pb']
     if len(editions) != 1 or _tag(editions[0]) != 'div' or editions[0].get('type') != 'edition':
         raise ValueError('The body must hold one <div type="edition"> and nothing else.')
-    children = _children(editions[0], 'the edition')
+    children = _without_printed_volumes(_children(editions[0], 'the edition'))
     first = next((child for child in children if _tag(child) not in _LEFT_OUT_BETWEEN_PARTS_TAGS), None)
     if first is not None and _tag(first) == 'head':
         children.remove(first)  # the work's title, which its header gives
     parts, _, _ = _parts_and_notes(children, 'edition', 'the edition', (), cited_division_subtypes, types_by_n,
                                 types_by_subtype, _quotation_chains(body))
     return parts
+
+
+def _without_printed_volumes(children: List[ET.Element]) -> List[ET.Element]:
+    """Returns the edition's children with the children of each printed volume in its place"""
+    return [part for child in children
+            for part in (_children(child, f"the edition > {_PRINTED_VOLUME_SUBTYPE} {child.get('n')}")
+                         if _is_a_printed_volume(child) else (child,))]
+
+
+def _is_a_printed_volume(element: ET.Element) -> bool:
+    return (_tag(element) == 'div' and element.get('type') == 'textpart'
+            and element.get('subtype') == _PRINTED_VOLUME_SUBTYPE)
 
 
 def _quotation_chains(body: ET.Element) -> _QuotationChains:
