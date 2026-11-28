@@ -2,7 +2,6 @@
 Raises on any structure that it doesn't read, rather than guessing what the structure means."""
 import re
 import unicodedata
-# noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
 from typing import Dict, Iterable, Iterator, List, NamedTuple, Sequence, Set, Tuple, Union, cast
 

@@ -9,7 +9,6 @@ import os
 import re
 import tempfile
 import uuid
-# noinspection PyPep8Naming
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
