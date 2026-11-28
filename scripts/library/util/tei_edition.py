@@ -5,6 +5,7 @@ import unicodedata
 import xml.etree.ElementTree as ET
 from typing import Dict, Iterable, Iterator, List, NamedTuple, Sequence, Set, Tuple, Union, cast
 
+# noinspection HttpUrlsUsage
 TEI_NAMESPACE = 'http://www.tei-c.org/ns/1.0'
 _TEI = f'{{{TEI_NAMESPACE}}}'
 _XML_LANG = '{http://www.w3.org/XML/1998/namespace}lang'
@@ -178,6 +179,7 @@ class TextBlock(NamedTuple):
         return _name_of(self.pieces)
 
     def place_in_name_of_the_mark_at(self, piece: int, place_in_piece: int) -> int:
+        # noinspection PyUnnecessaryCast
         name_that_ends_with_the_mark = _name_of(
             (*self.pieces[:piece], cast(str, self.pieces[piece])[:place_in_piece + 1]))
         return len(name_that_ends_with_the_mark) - 1
@@ -714,10 +716,10 @@ def _joined(inline_pieces: _InlinePieces) -> _JoinedText:
                 start = ranges_by_element_id_and_piece.get((id(element), index),
                                                            (element, end - len(inline_piece.text), end))[1]
                 ranges_by_element_id_and_piece[(id(element), index)] = (element, start, end)
-            if inline_piece.holds_the_place_of is not None:
+            quotation_mark_to_add = inline_piece.holds_the_place_of
+            if quotation_mark_to_add is not None:
                 added_quotation_marks.append(AddedQuotationMark(
-                    inline_piece.holds_the_place_of.opens, inline_piece.holds_the_place_of.pair_by_rend, index,
-                    end - 1, end))
+                    quotation_mark_to_add.opens, quotation_mark_to_add.pair_by_rend, index, end - 1, end))
     marked_ranges = tuple(_MarkedRange(element, index, start, end)
                           for (_, index), (element, start, end) in ranges_by_element_id_and_piece.items())
     return _JoinedText(tuple(joined), marked_ranges, tuple(notes), tuple(added_quotation_marks),
@@ -744,8 +746,9 @@ def _lemma(note: ET.Element, where: str) -> str | None:
 def _note(note: _InlineNote, text_before: str, piece_index: int) -> Note:
     """Returns the note, with where its lemma matches text_before, when it does. text_before is the block's text before
     the note since its last lost passage, so a lemma that matches only words before that matches nothing"""
-    match_range = _range_of_last_words_matching(note.lemma, text_before) if note.lemma is not None else None
-    return Note(note.text, note.lemma, LemmaMatch(piece_index, *match_range) if match_range is not None else None)
+    lemma = note.lemma
+    match_range = _range_of_last_words_matching(lemma, text_before) if lemma is not None else None
+    return Note(note.text, lemma, LemmaMatch(piece_index, *match_range) if match_range is not None else None)
 
 
 def _range_of_last_words_matching(lemma: str, text: str) -> Tuple[int, int] | None:
